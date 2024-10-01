@@ -4,7 +4,6 @@ import requests
 
 
 class RequestsHandler:
-
     proxies = []
 
     def __init__(self, Session: requests.Session = None, use_proxies=False) -> None:
@@ -52,8 +51,7 @@ class RequestsHandler:
             self.Session.headers["x-csrf-token"] = response.headers["x-csrf-token"]
             # return response.headers['x-csrf-token']
         else:
-            print(f'Invalidated cookie returned in generate_csrf; {
-                  response.headers}')
+            print(f'Invalidated cookie returned in generate_csrf; {response.headers}')
             return False
 
     def requestAPI(self, URL, method="get", payload=None) -> requests.Response:
@@ -119,7 +117,7 @@ class RequestsHandler:
             # return None
 
     @classmethod
-    def load_proxies(cls, file_path='proxies.txt'):
+    def load_proxies(cls, file_path:str='proxies.txt'):
         """
         Loads all proxies for class
         """
@@ -132,5 +130,5 @@ class RequestsHandler:
             return None
 
     @classmethod
-    def refresh_proxies(cls, file_path='proxies.txt'):
+    def refresh_proxies(cls, file_path:str='proxies.txt'):
         cls.load_proxies(file_path)
