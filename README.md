@@ -7,12 +7,15 @@ A roblox trading bot that heavily depends on rolimons and its APIs
 3. Pop the list/dict and make the best possible trade using config
 
 # Key features
-Customization: every little aspect of the events should be able to be changed
+Multiple Cookie Management: Add multiple cookies to trade on and alert when premium expires.
 
-Algorithm for value requests: scan value requests to see predicted values
+Customization: every little aspect of the events should be able to be changed.
 
-Trade ad poster: post trade ads in discord and in rolimons website
+Algorithm for value requests: scan value requests to see predicted values.
 
-Outbound & Inbound checker: Cancel bad sent trades in the future, and accept good trades inbound
+Trade ad poster: post trade ads in discord and in rolimons website.
+
+Outbound & Inbound checker: Cancel bad sent trades in the future, and accept good trades inbound.
+
 
 
