@@ -1,4 +1,4 @@
-import handle.handle_requests
+from handler import *
 import requests
 import datetime
 import rolimons_api
@@ -16,7 +16,6 @@ class RobloxAPI():
 
     def __init__(self, cookie:dict=None, Proxies=None) -> None:
         self.request_handler = handle_requests.RequestsHandler(cookie=cookie)
-        
         # no cookie
         self.parse_handler = handle_requests.RequestsHandler(Proxies) 
 
