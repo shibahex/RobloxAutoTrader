@@ -1,4 +1,4 @@
-# TradebotRBX
+# DOGGO TRADEBOTv2
 A roblox trading bot that heavily depends on rolimons and its APIs
 
 # Outlined Events
@@ -8,7 +8,11 @@ A roblox trading bot that heavily depends on rolimons and its APIs
 
 # Key features
 Customization: every little aspect of the events should be able to be changed
+
 Algorithm for value requests: scan value requests to see predicted values
+
 Trade ad poster: post trade ads in discord and in rolimons website
+
 Outbound & Inbound checker: Cancel bad sent trades in the future, and accept good trades inbound
+
 
