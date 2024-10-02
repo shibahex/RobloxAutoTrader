@@ -111,7 +111,7 @@ class RequestsHandler:
                 print("API failed to respond..")
                 return Response
             else:
-                print("Unknown Error Code", Response.staus_code, Response.text)
+                print("Unknown Error Code", Response.status_code, Response.text)
                 return Response
 
             # return None
