@@ -64,7 +64,7 @@ class RolimonAPI():
 
         return owners
 
-    def scan_owners(self, item_id: str or int):
+    def return_scan_owners(self, item_id: str or int):
         """
             returns a list of owners, will return None if errored
         """
@@ -91,4 +91,11 @@ class RolimonAPI():
 
 
             self.item_data[item] = Item(*item_details[item])
+    
+    def return_trade_ads(self):
+        #https://api.rolimons.com/tradeads/v1/getrecentads
+        pass
+    def post_trade_ad(self):
+        pass
+
 
