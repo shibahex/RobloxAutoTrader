@@ -1,4 +1,4 @@
-import handle_requests
+import handle.handle_requests
 import requests
 import datetime
 import rolimons_api

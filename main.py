@@ -1,4 +1,4 @@
-import handle_config
+import handle.handle_config
 def scan_users():
     """
         The process of scanning users should go like:
