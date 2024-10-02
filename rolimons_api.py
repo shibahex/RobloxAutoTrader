@@ -42,21 +42,28 @@ class Item:
 class RolimonAPI():
     def __init__(self, cookie:dict=None):
         self.item_data = {}
-        self.rolimon_account = handle_requests.RequestsHandler(use_proxies=False, cookie=cookie)
-        self.rolimon_parser = handle_requests.RequestsHandler()
-        self.config = handle_config.Config('config.ini')
-        print(config.scan_items)
-        print(config.filter_users)
+        self.rolimon_account = RequestsHandler(use_proxies=False, cookie=cookie)
+        self.rolimon_parser = RequestsHandler()
+        self.config = ConfigHandler('config.ini')
+        print(self.config.scan_items)
+        print(self.config.filter_users)
         
     def return_item_to_scan(self):
-        print(self.config.scan_items['Minimum_Value_of_Item'])
+        minimum_value = self.config.scan_items['Minimum_Value_of_Item']
+        minimum_rap = self.config.scan_items['Minimum_Rap_of_Item']
+        minimum_owners = self.config.scan_items['Minimum_Owners_of_Item']
+        minimum_demand = self.config.scan_items['Minimum_Demand_of_Item']
+        minimum_trend = self.config.scan_items['Minimum_Trend_of_Item']
+        scan_rares = self.config.scan_items['Scan_Rares']
+
         if self.item_data == {}:
             self.update_data()
-        for item in self.item_data:
-            Value = self.item_data[item].value
-            Rap = self.item_data[item].rap
-            Demand = self.item_data[item].demand
-            Trend = self.item_data[item].trend
+        for item in self.item_data.items():
+            print(item)
+            #Value = self.item_data[item].value
+            #Rap = self.item_data[item].rap
+            #Demand = self.item_data[item].demand
+            #Trend = self.item_data[item].trend
             
             #scan_type = 
 

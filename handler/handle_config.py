@@ -1,6 +1,6 @@
 import configparser
 
-class Config:
+class ConfigHandler:
     def __init__(self, filename):
         self.config = configparser.ConfigParser()
         self.config.read(filename)
