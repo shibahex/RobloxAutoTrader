@@ -6,6 +6,9 @@ class Discord():
     def scan_value_requests(self):
         pass
 
+    def scan_value_albums(self):
+        pass
+
     def post_trade_advertisement(self):
         pass
 
