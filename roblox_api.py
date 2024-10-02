@@ -15,5 +15,13 @@ class RobloxAPI():
     """
 
     def __init__(self, cookie:dict=None, Proxies=None) -> None:
-        self.request_handler = handle_requests.RequestsHandler(use_proxies=False, cookie=cookie)
+        self.request_handler = handle_requests.RequestsHandler(cookie=cookie)
+        
+        # no cookie
+        self.parse_handler = handle_requests.RequestsHandler(Proxies) 
+
+    def return_inventory(self, user_id):
+        userinventory = self.request_handler.get(f"https://inventory.roblox.com/v1/users/{userid}/assets/collectibles")
+
+        pass
 
