@@ -6,7 +6,7 @@ import requests
 class RequestsHandler:
     proxies = []
 
-    def __init__(self, Session: requests.Session = requests.Session, use_proxies=False, cookie=None) -> None:
+    def __init__(self, Session: requests.Session = requests.Session(), use_proxies=False, cookie:dict=None) -> None:
         self.use_proxies = use_proxies
         if self.use_proxies and not RequestsHandler.proxies:
             RequestsHandler.load_proxies()
@@ -14,6 +14,8 @@ class RequestsHandler:
         self.proxy_timeout = {}
         self.timeout_duration = 60
         self.Session = Session
+        if cookie:
+            self.Session.cookies.update(cookie)
         self.headers = {
             'Content-Type': 'application/json',
             'Accept': 'application/json, text/plain, */*',
@@ -72,20 +74,20 @@ class RequestsHandler:
                 print("No available proxies, waiting...")
                 time.sleep(self.timeout_duration)
                 continue
-
-            Req = requests
-            if self.Session is not None:
-                Req = self.Session
             try:
                 if method == "get":
-                    Response = Req.get(
+                    print(URL)
+                    Response = self.Session.get(
                         URL, headers=self.headers, proxies=proxy_dict, timeout=30)
                 elif method == "post":
-                    Response = Req.post(
+                    Response = self.Session.post(
                         URL, headers=self.headers, json=payload, proxies=proxy_dict, timeout=30)
-            except:  # except requests.exceptions.ProxyError:
-                print(f"Proxy  Error {proxy_dict['http']}.. blacklisting")
-                self.rate_limit(proxy_dict['http'])
+            except Exception as  e:  # except requests.exceptions.ProxyError:
+                if self.use_proxies:
+                    print(f"Proxy  Error {proxy_dict['http']}.. blacklisting")
+                    self.rate_limit(proxy_dict['http'])
+                else: 
+                    print("Got Error getting/posting API", e)
                 continue
 
             """
