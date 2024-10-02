@@ -41,9 +41,10 @@ class Item:
                 f"thumbnail_url={self.thumbnail_url_lg}")
 
 class RolimonAPI():
-    def __init__(self, cookie=None):
-        self.Session = requests.Session()
+    def __init__(self, cookie:dict=None):
         self.item_data = {}
+        self.rolimon_account = handle_requests.RequestsHandler(use_proxies=False, cookie=cookie)
+        
 
     def return_formatted_owners(self, item_id: str or int):
         """
@@ -64,16 +65,6 @@ class RolimonAPI():
 
         return owners
 
-    def return_scan_owners(self, item_id: str or int):
-        """
-            returns a list of owners, will return None if errored
-        """
-        owners = self.return_formatted_owners(item_id)
-        if owners:
-            return owners
-        else:
-            print("Failed to retrieve data from Rolimons or no owners found.")
-            return None
 
     def update_data(self):
         """

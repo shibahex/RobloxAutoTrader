@@ -14,16 +14,6 @@ class RobloxAPI():
         Pass in Cookie if you want it to be an account
     """
 
-    def __init__(self, cookie=None, Proxies=None) -> None:
-        self.Session = requests.Session()
+    def __init__(self, cookie:dict=None, Proxies=None) -> None:
+        self.request_handler = handle_requests.RequestsHandler(use_proxies=False, cookie=cookie)
 
-        if cookie:
-            self.Session[".ROBLOSECURITY"] = cookie
-
-            self.Account = handle_requests.RequestsHandler(
-                self.Session, Proxies
-            )
-        else:
-            self.Account = handle_requests.RequestsHandler(
-                None, Proxies
-            )

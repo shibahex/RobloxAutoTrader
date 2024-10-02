@@ -6,7 +6,7 @@ import requests
 class RequestsHandler:
     proxies = []
 
-    def __init__(self, Session: requests.Session = None, use_proxies=False) -> None:
+    def __init__(self, Session: requests.Session = requests.Session, use_proxies=False, cookie=None) -> None:
         self.use_proxies = use_proxies
         if self.use_proxies and not RequestsHandler.proxies:
             RequestsHandler.load_proxies()
