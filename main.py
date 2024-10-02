@@ -1,3 +1,4 @@
+import handle_config
 def scan_users():
     """
         The process of scanning users should go like:
@@ -9,3 +10,7 @@ def scan_users():
     while True:
         pass
 
+if __name__ == "__main__":
+    config = handle_config.Config('config.ini')
+    print(config.scan_items)
+    print(config.filter_users)

@@ -44,6 +44,7 @@ class RolimonAPI():
     def __init__(self, cookie:dict=None):
         self.item_data = {}
         self.rolimon_account = handle_requests.RequestsHandler(use_proxies=False, cookie=cookie)
+        self.rolimon_parser = handle_requests.RequestsHandler()
         
 
     def return_formatted_owners(self, item_id: str or int):
@@ -51,7 +52,7 @@ class RolimonAPI():
             Returns the rolimons.com/item/item_ID bc copies in formated by owners and datetime scanned
         """
         # TODO: Make your own rolimons API
-        page_text = handle_requests.RequestsHandler().requestAPI(f"https://www.rolimons.com/item/{item_id}")
+        page_text = self.rolimon_parser.requestAPI(f"https://www.rolimons.com/item/{item_id}")
         if page_text.status_code != 200:
             print("rolimons items API error:", page_text.status_code)
             return None
@@ -71,7 +72,7 @@ class RolimonAPI():
             scrapes rolimons.com/catalog item_details because the API doesn't show shit like owners 
         """
 
-        page = handle_requests.RequestsHandler().requestAPI("https://www.rolimons.com/catalog")
+        page = self.rolimon_parser.requestAPI("https://www.rolimons.com/catalog")
 
         item_details = json.loads(page.text.split("var item_details = ")[1].split(";")[0])
 
@@ -79,14 +80,22 @@ class RolimonAPI():
             item_info = item_details[item]
             # add in the itemID 
             item_info.insert(0, item)
-
-
             self.item_data[item] = Item(*item_details[item])
     
     def return_trade_ads(self):
-        #https://api.rolimons.com/tradeads/v1/getrecentads
-        pass
+        
+        get_ads_response =  self.rolimon_parser.requestAPI("https://api.rolimons.com/tradeads/v1/getrecentads")
+        response = get_ads_response.json()
+        if response['success'] == False:
+            return False
+
+        return response['trade_ads']
+            # 6 downgrade
+            # 1 demand
+            # 5 upgrade 
+            # 10 adds 
     def post_trade_ad(self):
         pass
 
 
+RolimonAPI().return_trade_ads()
