@@ -1,7 +1,6 @@
-import handle.handle_requests
 import requests
 import json
-
+from handler import *
 class Item:
     def __init__(self, item_id, item_name, asset_type_id, original_price, created, 
                  first_timestamp, best_price, favorited, num_sellers, rap, 
@@ -45,7 +44,21 @@ class RolimonAPI():
         self.item_data = {}
         self.rolimon_account = handle_requests.RequestsHandler(use_proxies=False, cookie=cookie)
         self.rolimon_parser = handle_requests.RequestsHandler()
+        self.config = handle_config.Config('config.ini')
+        print(config.scan_items)
+        print(config.filter_users)
         
+    def return_item_to_scan(self):
+        print(self.config.scan_items['Minimum_Value_of_Item'])
+        if self.item_data == {}:
+            self.update_data()
+        for item in self.item_data:
+            Value = self.item_data[item].value
+            Rap = self.item_data[item].rap
+            Demand = self.item_data[item].demand
+            Trend = self.item_data[item].trend
+            
+            #scan_type = 
 
     def return_formatted_owners(self, item_id: str or int):
         """
@@ -98,4 +111,4 @@ class RolimonAPI():
         pass
 
 
-RolimonAPI().return_trade_ads()
+RolimonAPI().return_item_to_scan()
