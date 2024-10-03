@@ -1,8 +1,7 @@
 # DOGGO TRADEBOTv2
 A roblox trading bot that heavily depends on rolimons and its APIs
 
-# INSTRUCTIONS
-Edit your config
+# DEPENDENCIES
 Download both chrome and chromedriver from your platform and put the unziped file into handlers folder
 https://googlechromelabs.github.io/chrome-for-testing/#stable
 
