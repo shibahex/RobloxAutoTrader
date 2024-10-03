@@ -13,6 +13,8 @@ class ConfigHandler:
         self.projected_detection = self.load_projected_detection()
         self.mass_sender = self.load_mass_sender()
 
+        # Check if config is filled out 
+        self.validate_config()
     def load_scan_items(self):
         return {
             'Minimum_Value_of_Item': self.get_int('Scan Items', 'Minimum Value of Item'),
@@ -119,4 +121,11 @@ class ConfigHandler:
             print(f"Error retrieving list of integers for [{section}] {option}: {e}")
             return []
 
+
+    def validate_config(self):
+        # Check if any required values are None and raise an error
+        for section in [self.scan_items, self.filter_users, self.prediction_algorithm, self.trading, self.projected_detection, self.mass_sender]:
+            for key, value in section.items():
+                if value is None:
+                    raise ValueError(f"Configuration error: '{key}' is missing or invalid.")
 
