@@ -137,7 +137,10 @@ class RolimonAPI():
 
         return owners
 
-
+    #TODO: use selenium to get inventory (forced to because Owner since is tracked in the rolimon backend and isnt an API)
+    def get_inventory(self):
+        pass
+    
     def update_data(self):
         """
             scrapes rolimons.com/catalog item_details because the API doesn't show shit like owners 
