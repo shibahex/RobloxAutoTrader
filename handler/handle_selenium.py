@@ -137,11 +137,11 @@ class Chrome:
 
                         except NoSuchElementException:
                             print("Owner since time element not found for one of the items.")
+                            self.browser.get(target_url)
+                            time.sleep(3)
+
                         except ValueError as e:
                             print(f"Failed getting rolimons inventory: {e}")
-
-                    return  # Exit the function after successfully getting dates
-
                 except WebDriverException as e:
                     if '404' in str(e):
                         print("Received 404 error, changing proxy...")
@@ -156,4 +156,5 @@ class Chrome:
 
                 time.sleep(1)  # Small delay before the next attempt
 
+            return False
 
