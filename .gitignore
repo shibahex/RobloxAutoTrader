@@ -1,1 +1,4 @@
-.gitignore
+__pycache__/
+venv/
+.git/
+
