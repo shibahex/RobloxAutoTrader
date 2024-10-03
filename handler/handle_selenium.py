@@ -131,9 +131,9 @@ class Chrome:
                             item_button = element.find_element(By.CSS_SELECTOR, item_button_cssSelector)
                             item_href = item_button.get_attribute('href')
 
-                            print(owner_since_element.text, item_href.split("/")[-1], uaid_href.split("/")[-1])
                             timestamp = self.parse_time_ago_to_epoch(owner_since_element.text)
-                            print(timestamp)
+
+                            return timestamp, item_href.split("/")[-1], uaid_href.split("/")[-1]
 
                         except NoSuchElementException:
                             print("Owner since time element not found for one of the items.")
