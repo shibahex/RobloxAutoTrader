@@ -6,8 +6,8 @@ class Item:
                  first_timestamp, best_price, favorited, num_sellers, rap, 
                  owners, bc_owners, copies, deleted_copies, bc_copies, 
                  hoarded_copies, acronym, 
-                 valuation_method, value, demand, trend, projected, 
-                 hyped, rare, thumbnail_url_lg):
+                 value, demand, trend, projected, 
+                 hyped, rare, total_value, thumbnail_url_lg):
         self.item_id = item_id
         self.item_name = item_name
         self.asset_type_id = asset_type_id
@@ -25,20 +25,48 @@ class Item:
         self.bc_copies = bc_copies
         self.hoarded_copies = hoarded_copies
         self.acronym = acronym
-        self.valuation_method = valuation_method
+        #self.valuation_method = valuation_method
         self.value = value
         self.demand = demand
         self.trend = trend
         self.projected = projected
         self.hyped = hyped
         self.rare = rare
+        self.total_value = total_value
         self.thumbnail_url_lg = thumbnail_url_lg
 
     def __repr__(self):
-        return (f"item_id={self.item_id}, item_name={self.item_name}, "
-                f"best_price={self.best_price}, favorited={self.favorited}, "
-                f"thumbnail_url={self.thumbnail_url_lg}")
+        return self.to_dict()
 
+    def to_dict(self):
+        return {
+            'item_id': self.item_id,
+            'item_name': self.item_name,
+            'asset_type_id': self.asset_type_id,
+            'original_price': self.original_price,
+            'created': self.created,
+            'first_timestamp': self.first_timestamp,
+            'best_price': self.best_price,
+            'favorited': self.favorited,
+            'num_sellers': self.num_sellers,
+            'rap': self.rap,
+            'owners': self.owners,
+            'bc_owners': self.bc_owners,
+            'copies': self.copies,
+            'deleted_copies': self.deleted_copies,
+            'bc_copies': self.bc_copies,
+            'hoarded_copies': self.hoarded_copies,
+            'acronym': self.acronym,
+            #'valuation_method': self.valuation_method,
+            'value': self.value,
+            'demand': self.demand,
+            'trend': self.trend,
+            'projected': self.projected,
+            'hyped': self.hyped,
+            'rare': self.rare,
+            'total_value': self.total_value,
+            'thumbnail_url_lg': self.thumbnail_url_lg
+        }
 class RolimonAPI():
     def __init__(self, cookie:dict=None):
         self.item_data = {}
@@ -58,14 +86,21 @@ class RolimonAPI():
 
         if self.item_data == {}:
             self.update_data()
-        for item in self.item_data.items():
-            print(item)
-            #Value = self.item_data[item].value
-            #Rap = self.item_data[item].rap
-            #Demand = self.item_data[item].demand
-            #Trend = self.item_data[item].trend
-            
-            #scan_type = 
+        for i in self.item_data.values():
+            print(i['value'])
+        filtered_items = [
+            item for item in self.item_data.values() 
+            if (
+                (item['original_price'] is None or item['original_price'] >= minimum_value) and
+                (item['rap'] is None or item['rap'] >= minimum_rap) and
+                (item['owners'] is None or item['owners'] >= minimum_owners) and
+                (item['demand'] is None or item['demand'] >= minimum_demand) and
+                (item['trend'] is None or item['trend'] >= minimum_trend) and
+                (scan_rares or item.get('rare') is not None) 
+            )
+        ]
+        
+        print(filtered_items)
 
     def return_formatted_owners(self, item_id: str or int):
         """
@@ -100,7 +135,7 @@ class RolimonAPI():
             item_info = item_details[item]
             # add in the itemID 
             item_info.insert(0, item)
-            self.item_data[item] = Item(*item_details[item])
+            self.item_data[item] = Item(*item_details[item]).to_dict()
     
     def return_trade_ads(self):
         
