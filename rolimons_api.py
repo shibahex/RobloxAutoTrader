@@ -1,5 +1,6 @@
 import requests
 import json
+import random
 from handler import *
 class Item:
     def __init__(self, item_id, item_name, asset_type_id, original_price, created, 
@@ -73,6 +74,9 @@ class RolimonAPI():
         self.rolimon_account = RequestsHandler(use_proxies=False, cookie=cookie)
         self.rolimon_parser = RequestsHandler()
         self.config = ConfigHandler('config.cfg')
+
+        # ItemID: Timestamp
+        self.scanned_items_for_owners = {}
         print(self.config.scan_items)
         print(self.config.filter_users)
         
@@ -82,25 +86,37 @@ class RolimonAPI():
         minimum_owners = self.config.scan_items['Minimum_Owners_of_Item']
         minimum_demand = self.config.scan_items['Minimum_Demand_of_Item']
         minimum_trend = self.config.scan_items['Minimum_Trend_of_Item']
+        scan_type = self.config.scan_items['Scan_Type']
         scan_rares = self.config.scan_items['Scan_Rares']
 
         if self.item_data == {}:
             self.update_data()
-        for i in self.item_data.values():
-            print(i['value'])
+        #for item in self.item_data.values():
+         #   print(item['item_name'], item['trend'])
         filtered_items = [
             item for item in self.item_data.values() 
             if (
-                (item['original_price'] is None or item['original_price'] >= minimum_value) and
+                (scan_type.lower() == "rap" and not item['value']) or
+                (scan_type.lower() == "value" and item['value']) or 
+                (scan_type.lower() == "both" and
+                 (
+                 (scan_rares and item['rare']) or
+                 (not scan_rares and not item['rare'])
+                 )
+                 )
+            ) and (
+                (item['value'] is None or item['value'] >= minimum_value) and
                 (item['rap'] is None or item['rap'] >= minimum_rap) and
                 (item['owners'] is None or item['owners'] >= minimum_owners) and
                 (item['demand'] is None or item['demand'] >= minimum_demand) and
-                (item['trend'] is None or item['trend'] >= minimum_trend) and
-                (scan_rares or item.get('rare') is not None) 
+                (item['trend'] is None or item['trend'] >= minimum_trend)
             )
         ]
+        print("[DOGGO] Picking random item from list size:", len(filtered_items))
         
-        print(filtered_items)
+        #TODO: add into table with timestamp and if we get the same item check if the time has been 30 minutes and if it has remove and return it 
+        return random.choice(filtered_items['item_id'])
+        #print(filtered_items)
 
     def return_formatted_owners(self, item_id: str or int):
         """
