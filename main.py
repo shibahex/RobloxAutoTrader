@@ -11,6 +11,6 @@ def scan_users():
         pass
 
 if __name__ == "__main__":
-    config = handle_config.Config('config.ini')
+    config = handle_config.Config('config.cfg')
     print(config.scan_items)
     print(config.filter_users)

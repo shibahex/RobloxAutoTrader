@@ -72,7 +72,7 @@ class RolimonAPI():
         self.item_data = {}
         self.rolimon_account = RequestsHandler(use_proxies=False, cookie=cookie)
         self.rolimon_parser = RequestsHandler()
-        self.config = ConfigHandler('config.ini')
+        self.config = ConfigHandler('config.cfg')
         print(self.config.scan_items)
         print(self.config.filter_users)
         

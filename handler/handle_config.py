@@ -1,10 +1,11 @@
 import configparser
 
 class ConfigHandler:
-    def __init__(self, filename):
+    def __init__(self, filename="config.cfg"):
         self.config = configparser.ConfigParser()
         self.config.read(filename)
         
+        print(self.config)
         # Load configuration values into attributes
         self.scan_items = self.load_scan_items()
         self.filter_users = self.load_filter_users()
@@ -12,7 +13,7 @@ class ConfigHandler:
         self.trading = self.load_trading()
         self.projected_detection = self.load_projected_detection()
         self.mass_sender = self.load_mass_sender()
-
+        print(self.scan_items)
         # Check if config is filled out 
         self.validate_config()
     def load_scan_items(self):
@@ -124,8 +125,9 @@ class ConfigHandler:
 
     def validate_config(self):
         # Check if any required values are None and raise an error
-        for section in [self.scan_items, self.filter_users, self.prediction_algorithm, self.trading, self.projected_detection, self.mass_sender]:
+        for section in [self.scan_items, self.filter_users, self.prediction_algorithm, self.trading, self.projected_detection]:
             for key, value in section.items():
+                print(key, value)
                 if value is None:
                     raise ValueError(f"Configuration error: '{key}' is missing or invalid.")
 
