@@ -96,7 +96,7 @@ class Chrome:
 
         return int(target_time.timestamp())
 
-    def get_dates(self):
+    def get_dates(self, user_id):
         """
         Checks the timer on the website and returns relevant data.
         """
@@ -106,7 +106,7 @@ class Chrome:
         uaid_button_cssSelector = ".btn.btn-light-blue.border-primary.btn-sm.btn-very-sharp"
         item_button_cssSelector = ".d-flex.justify-content-between a"
 
-        target_url = "https://www.rolimons.com/player/2744514142"  
+        target_url = f"https://www.rolimons.com/player/{user_id}"  
         
         while True:
             if self.browser.current_url != target_url:
