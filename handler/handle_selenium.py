@@ -22,11 +22,11 @@ class Chrome:
         # Get browser depending on OS 
         chrome_driver_path = None
         if os.name == 'posix':
-            chrome_driver_path = 'chrome_drivers/chromedriver-linux64/chromedriver'
-            chrome_binary_path = 'chrome_drivers/chrome-linux64/chrome'
+            chrome_driver_path = 'chromedriver-linux64/chromedriver'
+            chrome_binary_path = 'chrome-linux64/chrome'
         elif os.name == 'nt':
-            chrome_driver_path = 'chrome_drivers/chromedriver-win64/chromedriver.exe'
-            chrome_binary_path = 'chrome_drivers/chrome-win64/chrome.exe'
+            chrome_driver_path = 'chromedriver-win64/chromedriver.exe'
+            chrome_binary_path = 'chrome-win64/chrome.exe'
         else:
             raise OSError("Unsupported OS")
 
