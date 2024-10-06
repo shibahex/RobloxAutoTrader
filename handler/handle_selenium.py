@@ -8,6 +8,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.by import By
+from selenium.common.exceptions import NoSuchElementException
 
 class Chrome:
     """
@@ -31,8 +32,8 @@ class Chrome:
             raise OSError("Unsupported OS")
 
         self.chrome_options = Options()
-        if not debugMode:
-            self.chrome_options.add_argument('--headless')  # NO GUI
+        #if not debugMode:
+        #    self.chrome_options.add_argument('--headless')  # NO GUI
         
         # Helps avoid some issues in certain environments
         self.chrome_options.add_argument('--no-sandbox')  
@@ -96,7 +97,46 @@ class Chrome:
 
         return int(target_time.timestamp())
 
-    def get_dates(self, user_id):
+    def load_rolimons_page(self, target_url):
+        if self.browser.current_url != target_url:
+            self.browser.get(target_url)
+            # Wait until the inventory container is present
+            try:
+                WebDriverWait(self.browser, 30).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, owner_since_cssSelector))
+
+                )
+                last_height = self.browser.execute_script("return document.body.scrollHeight")
+                while True:
+                    self.browser.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+
+                    # Wait to load page
+                    time.sleep(.5)
+
+                    # Calculate new scroll height and compare with last scroll height
+                    new_height = self.browser.execute_script("return document.body.scrollHeight")
+                    if new_height == last_height:
+                        break
+                        last_height = new_height
+
+            except Exception as e:
+                print("Timed out rolimons", e)
+                return False       
+
+
+    def find_owner_since_elements(self, element):
+        """
+            if someone has multiple of the same items the owner element gets nested in a button
+        """
+        try:
+            owner_since_element = element.find_element(By.CSS_SELECTOR, owner_since_cssSelector)
+            return owner_since_element
+        except NoSuchElementException:
+
+            return False
+
+
+    def get_profile_data(self, user_id):
         """
         Checks the timer on the website and returns relevant data.
         """
@@ -106,18 +146,16 @@ class Chrome:
         uaid_button_cssSelector = ".btn.btn-light-blue.border-primary.btn-sm.btn-very-sharp"
         item_button_cssSelector = ".d-flex.justify-content-between a"
 
-        target_url = f"https://www.rolimons.com/player/{user_id}"  
+        target_url =  f"https://www.rolimons.com/player/{user_id}"
         
         while True:
-            if self.browser.current_url != target_url:
-                self.browser.get(target_url)
-                # Wait until the inventory container is present
-                WebDriverWait(self.browser, 10).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, inventory_cssSelector))
-                )
-
+            self.load_rolimons_page(target_url)
             # Retry mechanism
-            max_retries = 3
+            max_retries = 10
+            """
+                {ItemID: (AssetID, Date)}
+            """
+            inventory_dict = {}
             for attempt in range(max_retries):
                 try:
                     inventory_element = self.browser.find_element(By.CSS_SELECTOR, inventory_cssSelector)
@@ -126,30 +164,31 @@ class Chrome:
                     for element in item_elements:
                         try:
                             owner_since_element = element.find_element(By.CSS_SELECTOR, owner_since_cssSelector)
+
                             uaid_button = element.find_element(By.CSS_SELECTOR, uaid_button_cssSelector)
-                            uaid_href = uaid_button.get_attribute('href')
+                            uaid_href = uaid_button.get_attribute('href').split("/")[-1]
+
                             item_button = element.find_element(By.CSS_SELECTOR, item_button_cssSelector)
-                            item_href = item_button.get_attribute('href')
+                            item_href = item_button.get_attribute('href').split("/")[-1]
 
                             timestamp = self.parse_time_ago_to_epoch(owner_since_element.text)
+                            inventory_dict[item_href] = (uaid_href, timestamp)
+                            print(item_href, uaid_href, timestamp, "hey")
+                            #return timestamp, item_href.split("/")[-1], uaid_href.split("/")[-1]
 
-                            return timestamp, item_href.split("/")[-1], uaid_href.split("/")[-1]
-
-                        except NoSuchElementException:
-                            print("Owner since time element not found for one of the items.")
-                            self.browser.get(target_url)
-                            time.sleep(3)
 
                         except ValueError as e:
                             print(f"Failed getting rolimons inventory: {e}")
-                except WebDriverException as e:
+
+                    return inventory_dict
+                except Exception as e:
                     if '404' in str(e):
                         print("Received 404 error, changing proxy...")
                         self.change_proxy()
                         break  # Break to reattempt with the new proxy
                     elif '429' in str(e):
-                        print("Received 429 error, waiting for 60 seconds...")
-                        time.sleep(60)  # Wait before retrying
+                        print("Received 429 error, waiting for 125 seconds...")
+                        time.sleep(125)  # Wait before retrying
                     else:
                         print(f"An unexpected error occurred: {e}")
                         break  # Exit on other errors
