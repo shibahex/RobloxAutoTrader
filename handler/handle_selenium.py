@@ -32,8 +32,8 @@ class Chrome:
             raise OSError("Unsupported OS")
 
         self.chrome_options = Options()
-        #if not debugMode:
-        #    self.chrome_options.add_argument('--headless')  # NO GUI
+        if not debugMode:
+            self.chrome_options.add_argument('--headless')  # NO GUI
         
         # Helps avoid some issues in certain environments
         self.chrome_options.add_argument('--no-sandbox')  
@@ -97,103 +97,83 @@ class Chrome:
 
         return int(target_time.timestamp())
 
+    def scroll_to_bottom(self):
+        last_height = self.browser.execute_script("return document.body.scrollHeight")
+        while True:
+            self.browser.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+
+            # Wait to load page
+            time.sleep(.5)
+
+            # Calculate new scroll height and compare with last scroll height
+            new_height = self.browser.execute_script("return document.body.scrollHeight")
+            if new_height == last_height:
+                break
+                last_height = new_height
+
     def load_rolimons_page(self, target_url):
         if self.browser.current_url != target_url:
-            self.browser.get(target_url)
-            # Wait until the inventory container is present
-            try:
-                WebDriverWait(self.browser, 30).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, owner_since_cssSelector))
+            max_attemps = 10
+            for attemp in range(max_attemps):
+                self.browser.get(target_url)
 
-                )
-                last_height = self.browser.execute_script("return document.body.scrollHeight")
-                while True:
-                    self.browser.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                try:
+                    WebDriverWait(self.browser, 30).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "#inventorylimiteds"))
+                    )
+                    self.scroll_to_bottom()
+                    return True
 
-                    # Wait to load page
-                    time.sleep(.5)
+                except Exception as e:
+                    print("Timed out rolimons", e)
+                    self.change_proxy()
 
-                    # Calculate new scroll height and compare with last scroll height
-                    new_height = self.browser.execute_script("return document.body.scrollHeight")
-                    if new_height == last_height:
-                        break
-                        last_height = new_height
-
-            except Exception as e:
-                print("Timed out rolimons", e)
-                return False       
-
-
-    def find_owner_since_elements(self, element):
-        """
-            if someone has multiple of the same items the owner element gets nested in a button
-        """
-        try:
-            owner_since_element = element.find_element(By.CSS_SELECTOR, owner_since_cssSelector)
-            return owner_since_element
-        except NoSuchElementException:
-
-            return False
+                print("Cant load rolimons..")
+                return False
 
 
     def get_profile_data(self, user_id):
         """
         Checks the timer on the website and returns relevant data.
         """
-        inventory_cssSelector = "#mix_container"
-        items_cssSelector = '[data-ref="item"]'
-        owner_since_cssSelector = ".inv_owner_since_time.text-success.text-truncate"
-        uaid_button_cssSelector = ".btn.btn-light-blue.border-primary.btn-sm.btn-very-sharp"
-        item_button_cssSelector = ".d-flex.justify-content-between a"
-
         target_url =  f"https://www.rolimons.com/player/{user_id}"
-        
-        while True:
-            self.load_rolimons_page(target_url)
-            # Retry mechanism
-            max_retries = 10
-            """
-                {ItemID: (AssetID, Date)}
-            """
-            inventory_dict = {}
-            for attempt in range(max_retries):
-                try:
-                    inventory_element = self.browser.find_element(By.CSS_SELECTOR, inventory_cssSelector)
-                    item_elements = inventory_element.find_elements(By.CSS_SELECTOR, items_cssSelector)
-
-                    for element in item_elements:
-                        try:
-                            owner_since_element = element.find_element(By.CSS_SELECTOR, owner_since_cssSelector)
-
-                            uaid_button = element.find_element(By.CSS_SELECTOR, uaid_button_cssSelector)
-                            uaid_href = uaid_button.get_attribute('href').split("/")[-1]
-
-                            item_button = element.find_element(By.CSS_SELECTOR, item_button_cssSelector)
-                            item_href = item_button.get_attribute('href').split("/")[-1]
-
-                            timestamp = self.parse_time_ago_to_epoch(owner_since_element.text)
-                            inventory_dict[item_href] = (uaid_href, timestamp)
-                            print(item_href, uaid_href, timestamp, "hey")
-                            #return timestamp, item_href.split("/")[-1], uaid_href.split("/")[-1]
-
-
-                        except ValueError as e:
-                            print(f"Failed getting rolimons inventory: {e}")
-
-                    return inventory_dict
-                except Exception as e:
-                    if '404' in str(e):
-                        print("Received 404 error, changing proxy...")
-                        self.change_proxy()
-                        break  # Break to reattempt with the new proxy
-                    elif '429' in str(e):
-                        print("Received 429 error, waiting for 125 seconds...")
-                        time.sleep(125)  # Wait before retrying
-                    else:
-                        print(f"An unexpected error occurred: {e}")
-                        break  # Exit on other errors
-
-                time.sleep(1)  # Small delay before the next attempt
-
+        inventory_dict = {}
+        load_page = self.load_rolimons_page(target_url)
+        if load_page == False:
             return False
+        every_href = self.browser.find_elements(By.XPATH, "//a[@href]")
+        # NOTE: THIS ONLY WORKS BECAUSE IT SPAMS ITEM_ID THEN UAID
+
+        item_id = None
+        uaid = None
+        date = None
+        for element in every_href:
+            href = element.get_attribute("href")
+            text = element.text
+
+            """
+                {AssetID: (UAID, Date)}
+            """
+
+
+            if "item/" in href:
+                item_id = href.split('/')[-1]
+
+            if  "www.rolimons.com/uaid/" in href:
+                uaid = href.split('/')[-1]
+
+            if "Owner Since" in text: 
+                date = text.split("\n")[-1]
+
+            if item_id != None and uaid != None and date != None:
+                timestamp = self.parse_time_ago_to_epoch(date)
+                inventory_dict[uaid] = {"item_id": item_id, "timestamp": timestamp}
+                item_id = None
+                uaid = None
+                date = None
+
+        if inventory_dict == {}:
+            return False
+
+        return inventory_dict
 
