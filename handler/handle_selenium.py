@@ -153,7 +153,7 @@ class Chrome:
         if load_page == False:
             print("Failed to load page")
             return False
-        time.sleep(1)
+        time.sleep(.3)
         #every_href = self.browser.find_elements(By.XPATH, "//a[@href]")
         # NOTE: THIS ONLY WORKS BECAUSE IT SPAMS ITEM_ID THEN UAID
         elements = self.browser.find_elements(By.CSS_SELECTOR, "#mix_container *")  # Select all child elements
@@ -162,13 +162,22 @@ class Chrome:
             if element.tag_name == 'a':
                 href = element.get_attribute("href")
                 text = element.text
+                #print(href)
+                if "rolimons.com/uaid" in href:
+                    print(href, "uaid")
 
+
+            # CHECK IF ITEM IS ON HOLD 
             if element.get_attribute("class") == "hold_item_tag_icon hold_tag_icon":
                 quantity_element = element.find_elements(By.CSS_SELECTOR, ".item-hold-quantity")
                 print("Item on hold")
 
-            if element.get_attribute("class") == "item-hold-quantity copies_on_hold":
-                print(element.text, "owners")
+            # SVG is the hold labels for duplicates
+            if element.tag_name == 'svg':
+                parent_link = element.find_element(By.XPATH, '..')  # '..' selects the parent element
+                href = parent_link.get_attribute("href")
+                print(href, "on hold too")
+      
 
         """
         {AssetID: (UAID, Date)}
