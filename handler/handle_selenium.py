@@ -32,8 +32,8 @@ class Chrome:
             raise OSError("Unsupported OS")
 
         self.chrome_options = Options()
-        if not debugMode:
-            self.chrome_options.add_argument('--headless')  # NO GUI
+        #if not debugMode:
+            #self.chrome_options.add_argument('--headless')  # NO GUI
         
         # Helps avoid some issues in certain environments
         self.chrome_options.add_argument('--no-sandbox')  
@@ -74,17 +74,28 @@ class Chrome:
             print(f"Switched to proxy: {self.get_current_proxy()}")
             self.initialize_browser()  # Reinitialize the browser with the new proxy
 
+
+
     def parse_time_ago_to_epoch(self, time_str):
-        pattern = r'(\d+)\s*(day|days|month|months|year|years)\s*ago'
-        match = re.match(pattern, time_str)
+        now = datetime.now()
+        # Clean the input string by removing extra spaces
+        time_str = time_str.replace('\n', ' ').strip()
+
+        if "Awaiting" in time_str:
+            return int(now.timestamp())
+
+        try:
+            # Adjusted regex pattern to match any leading text followed by the time description
+            pattern = r'.*(\d+)\s*(day|days|month|months|year|years)\s*ago'
+            match = re.match(pattern, time_str)
+        except Exception as e:
+            print(time_str, "error:", e)
         
         if not match:
-            raise ValueError("Invalid time format")
+            raise ValueError("Invalid time format", time_str)
 
         value = int(match.group(1))
         unit = match.group(2)
-
-        now = datetime.now()
 
         if unit.startswith('day'):
             target_time = now - timedelta(days=value)
@@ -109,7 +120,7 @@ class Chrome:
             new_height = self.browser.execute_script("return document.body.scrollHeight")
             if new_height == last_height:
                 break
-                last_height = new_height
+            last_height = new_height
 
     def load_rolimons_page(self, target_url):
         if self.browser.current_url != target_url:
@@ -140,40 +151,62 @@ class Chrome:
         inventory_dict = {}
         load_page = self.load_rolimons_page(target_url)
         if load_page == False:
+            print("Failed to load page")
             return False
-        every_href = self.browser.find_elements(By.XPATH, "//a[@href]")
+        time.sleep(1)
+        #every_href = self.browser.find_elements(By.XPATH, "//a[@href]")
         # NOTE: THIS ONLY WORKS BECAUSE IT SPAMS ITEM_ID THEN UAID
+        elements = self.browser.find_elements(By.CSS_SELECTOR, "#mix_container *")  # Select all child elements
+        for element in elements:
+            # Check if the element is a link
+            if element.tag_name == 'a':
+                href = element.get_attribute("href")
+                text = element.text
 
+            if element.get_attribute("class") == "hold_item_tag_icon hold_tag_icon":
+                quantity_element = element.find_elements(By.CSS_SELECTOR, ".item-hold-quantity")
+                print("Item on hold")
+
+            if element.get_attribute("class") == "item-hold-quantity copies_on_hold":
+                print(element.text, "owners")
+
+        """
+        {AssetID: (UAID, Date)}
+        """
+        """
         item_id = None
         uaid = None
         date = None
         for element in every_href:
+            #print("hey")
             href = element.get_attribute("href")
             text = element.text
 
-            """
-                {AssetID: (UAID, Date)}
-            """
 
-
+            # Get class name and ID
+            
             if "item/" in href:
                 item_id = href.split('/')[-1]
 
             if  "www.rolimons.com/uaid/" in href:
+                print("uaid")
                 uaid = href.split('/')[-1]
 
             if "Owner Since" in text: 
-                date = text.split("\n")[-1]
+                date = self.parse_time_ago_to_epoch(str(text))
+
+            #if "On Hold" in text:
+             #   print("HOLD")
 
             if item_id != None and uaid != None and date != None:
-                timestamp = self.parse_time_ago_to_epoch(date)
-                inventory_dict[uaid] = {"item_id": item_id, "timestamp": timestamp}
+                inventory_dict[uaid] = {"item_id": item_id, "timestamp": date}
                 item_id = None
                 uaid = None
                 date = None
 
-        if inventory_dict == {}:
-            return False
-
-        return inventory_dict
+        #if inventory_dict == {}:
+         #   return False
+        #print(inventory_dict, "hey")
+        """
+        #return inventory_dict
 
