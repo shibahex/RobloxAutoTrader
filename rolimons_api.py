@@ -73,14 +73,16 @@ class RolimonAPI():
         self.item_data = {}
         self.rolimon_account = RequestsHandler(use_proxies=False, cookie=cookie)
         self.rolimon_parser = RequestsHandler()
-        self.config = ConfigHandler('config.cfg')
 
+        self.config = ConfigHandler('config.cfg')
+        
+        self.update_data()
         # ItemID: Timestamp
         self.scanned_items_for_owners = {}
         print(self.config.scan_items)
         print(self.config.filter_users)
         
-    def return_item_to_scan(self):
+    def return_item_to_scan(self) -> str:
         minimum_value = self.config.scan_items['Minimum_Value_of_Item']
         minimum_rap = self.config.scan_items['Minimum_Rap_of_Item']
         minimum_owners = self.config.scan_items['Minimum_Owners_of_Item']
@@ -118,7 +120,7 @@ class RolimonAPI():
         return random.choice(filtered_items['item_id'])
         #print(filtered_items)
 
-    def return_formatted_owners(self, item_id: str or int):
+    def return_formatted_owners(self, item_id: str or int) -> list:
         """
             Returns the rolimons.com/item/item_ID bc copies in formated by owners and datetime scanned
         """
@@ -138,23 +140,32 @@ class RolimonAPI():
         return owners
 
     #TODO: use selenium to get inventory (forced to because Owner since is tracked in the rolimon backend and isnt an API)
-    def get_inventory(self):
-        pass
+    def get_inventory(self, user_id, applyNFT=False) -> dict:
     
-    def update_data(self):
+        get_profile = Chrome().get_profile_data(user_id, applyNFT)
+        if get_profile != False:
+            return get_profile
+        else:
+            return False
+
+
+    
+    def update_data(self) -> None:
         """
             scrapes rolimons.com/catalog item_details because the API doesn't show shit like owners 
         """
 
         page = self.rolimon_parser.requestAPI("https://www.rolimons.com/catalog")
-
-        item_details = json.loads(page.text.split("var item_details = ")[1].split(";")[0])
-
-        for item in item_details:
-            item_info = item_details[item]
-            # add in the itemID 
-            item_info.insert(0, item)
-            self.item_data[item] = Item(*item_details[item]).to_dict()
+        if page.status_code == 200:
+            item_details = json.loads(page.text.split("var item_details = ")[1].split(";")[0])
+            for item in item_details:
+                item_info = item_details[item]
+                # add in the itemID 
+                item_info.insert(0, item)
+                self.item_data[item] = Item(*item_details[item]).to_dict()
+        else:
+            print("Couldnt get rolimon data")
+            return False
     
     def return_trade_ads(self):
         
@@ -172,4 +183,4 @@ class RolimonAPI():
         pass
 
 
-RolimonAPI().return_item_to_scan()
+print(RolimonAPI().get_inventory(508243885))
