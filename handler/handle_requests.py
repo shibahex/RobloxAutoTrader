@@ -75,11 +75,11 @@ class RequestsHandler:
                 time.sleep(self.timeout_duration)
                 continue
             try:
-                if method == "get":
+                if method.lower() == "get":
                     print(URL)
                     Response = self.Session.get(
                         URL, headers=self.headers, proxies=proxy_dict, timeout=30)
-                elif method == "post":
+                elif method.lower() == "post":
                     Response = self.Session.post(
                         URL, headers=self.headers, json=payload, proxies=proxy_dict, timeout=30)
             except Exception as  e:  # except requests.exceptions.ProxyError:
