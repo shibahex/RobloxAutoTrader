@@ -1,4 +1,4 @@
-import handle.handle_config
+from handler import *
 def scan_users():
     """
         The process of scanning users should go like:
@@ -11,6 +11,6 @@ def scan_users():
         pass
 
 if __name__ == "__main__":
-    config = handle_config.Config('config.cfg')
+    config = ConfigHandler('config.cfg')
     print(config.scan_items)
     print(config.filter_users)
