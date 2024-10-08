@@ -5,7 +5,6 @@ class ConfigHandler:
         self.config = configparser.ConfigParser()
         self.config.read(filename)
         
-        print(self.config)
         # Load configuration values into attributes
         self.scan_items = self.load_scan_items()
         self.filter_users = self.load_filter_users()
@@ -13,7 +12,6 @@ class ConfigHandler:
         self.trading = self.load_trading()
         self.projected_detection = self.load_projected_detection()
         self.mass_sender = self.load_mass_sender()
-        print(self.scan_items)
         # Check if config is filled out 
         self.validate_config()
     def load_scan_items(self):
