@@ -1,6 +1,7 @@
 import os
 import re
 import time
+from handler import *
 from datetime import datetime, timedelta
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -20,6 +21,7 @@ class Chrome:
         self.current_proxy_index = 0  # Index to track current proxy
         self.proxy_cooldown = {}  # Dictionary to track cooldown status of proxies
 
+        self.config = ConfigHandler('config.cfg')
         # Get browser depending on OS 
         chrome_driver_path = None
         if os.name == 'posix':
@@ -32,8 +34,8 @@ class Chrome:
             raise OSError("Unsupported OS")
 
         self.chrome_options = Options()
-        #if not debugMode:
-            #self.chrome_options.add_argument('--headless')  # NO GUI
+        if not debugMode:
+            self.chrome_options.add_argument('--headless')  # NO GUI
         
         # Helps avoid some issues in certain environments
         self.chrome_options.add_argument('--no-sandbox')  
@@ -42,6 +44,9 @@ class Chrome:
         
         self.initialize_browser(chrome_driver_path)
 
+    """
+        Base Selenium Functions to setup the browser, load the page and use proxies
+    """
     def initialize_browser(self, chrome_driver_path):
         """Initializes the Chrome browser with the current proxy."""
         proxy = self.get_current_proxy()
@@ -74,8 +79,6 @@ class Chrome:
             print(f"Switched to proxy: {self.get_current_proxy()}")
             self.initialize_browser()  # Reinitialize the browser with the new proxy
 
-
-
     def parse_time_ago_to_epoch(self, time_str):
         now = datetime.now()
         # Clean the input string by removing extra spaces
@@ -85,12 +88,13 @@ class Chrome:
             return int(now.timestamp())
 
         try:
-            # Adjusted regex pattern to match any leading text followed by the time description
-            pattern = r'.*(\d+)\s*(day|days|month|months|year|years)\s*ago'
-            match = re.match(pattern, time_str)
+            # Adjusted regex pattern to match leading text followed by time description (including hours)
+            pattern = r'.*(\d+)\s*(day|days|month|months|year|years|hour|hours)\s*ago'
+            match = re.search(pattern, time_str)
         except Exception as e:
             print(time_str, "error:", e)
-        
+            raise
+
         if not match:
             raise ValueError("Invalid time format", time_str)
 
@@ -103,10 +107,13 @@ class Chrome:
             target_time = now - timedelta(days=value * 30)  # Approximation
         elif unit.startswith('year'):
             target_time = now - timedelta(days=value * 365)  # Approximation
+        elif unit.startswith('hour'):
+            target_time = now - timedelta(hours=value)
         else:
             raise ValueError("Unsupported time unit")
 
         return int(target_time.timestamp())
+
 
     def scroll_to_bottom(self):
         last_height = self.browser.execute_script("return document.body.scrollHeight")
@@ -121,6 +128,12 @@ class Chrome:
             if new_height == last_height:
                 break
             last_height = new_height
+
+    """
+        Functions to scrape the rolimons player website
+    """
+    def filter_inventory():
+       pass 
 
     def load_rolimons_page(self, target_url):
         if self.browser.current_url != target_url:
@@ -142,8 +155,18 @@ class Chrome:
                 print("Cant load rolimons..")
                 return False
 
+    def filter_inventory(self, inventory_dict, applyNFT=False):
+        filtered_keys = []
+        for uaid, info in inventory_dict.items():
+            # Check if the item is on hold or if it's in the NFR list
+            if info['on_hold'] == True or info['item_id'] in self.config.load_trading()['NFR'] and applyNFT == False:
+                filtered_keys.append(uaid)
+            if info['item_id'] in self.config.load_trading()['NFT'] and applyNFT == True:
+                filtered_keys.append(uaid)
 
-    def get_profile_data(self, user_id):
+        return filtered_keys
+
+    def get_profile_data(self, user_id, filter_NFT=False):
         """
         Checks the timer on the website and returns relevant data.
         """
@@ -153,69 +176,63 @@ class Chrome:
         if load_page == False:
             print("Failed to load page")
             return False
-        time.sleep(.3)
-        #every_href = self.browser.find_elements(By.XPATH, "//a[@href]")
-        # NOTE: THIS ONLY WORKS BECAUSE IT SPAMS ITEM_ID THEN UAID
-        elements = self.browser.find_elements(By.CSS_SELECTOR, "#mix_container *")  # Select all child elements
+        time.sleep(.1)
+
+        # Get all the children on the item html
+        elements = self.browser.find_elements(By.CSS_SELECTOR, "#mix_container *") 
+
+        item_id = None
+        uaid = None
+        is_on_hold = False
+        date = None
+        held_uaids = []
+
+        last_item_id = None
+        last_uaid = None
+
         for element in elements:
+
             # Check if the element is a link
             if element.tag_name == 'a':
                 href = element.get_attribute("href")
-                text = element.text
-                #print(href)
-                if "rolimons.com/uaid" in href:
-                    print(href, "uaid")
+                text = element.text.strip()
+                if "www.rolimons.com/item/" in href:
+                    item_id = href.split('/')[-1]
 
+                if  "www.rolimons.com/uaid/" in href:
+                    uaid = href.split('/')[-1]
+                    #print(uaid)
 
-            # CHECK IF ITEM IS ON HOLD 
+                if "Owner Since" in text: 
+                    date = self.parse_time_ago_to_epoch(str(text))
+
             if element.get_attribute("class") == "hold_item_tag_icon hold_tag_icon":
-                quantity_element = element.find_elements(By.CSS_SELECTOR, ".item-hold-quantity")
-                print("Item on hold")
+                is_on_hold = True
 
-            # SVG is the hold labels for duplicates
+            # Dont flag as trade locked because the UAID of the item is nested in multiple copies
+            if element.get_attribute("class") == "item-hold-quantity copies_on_hold":
+                is_on_hold = False
+
+            # Append multiple trade locked UAIDs that is nested into the same item
             if element.tag_name == 'svg':
                 parent_link = element.find_element(By.XPATH, '..')  # '..' selects the parent element
-                href = parent_link.get_attribute("href")
-                print(href, "on hold too")
-      
+                on_hold_uaid = parent_link.get_attribute("href").split('/')[-1]
+                held_uaids.append(on_hold_uaid)
 
-        """
-        {AssetID: (UAID, Date)}
-        """
-        """
-        item_id = None
-        uaid = None
-        date = None
-        for element in every_href:
-            #print("hey")
-            href = element.get_attribute("href")
-            text = element.text
-
-
-            # Get class name and ID
-            
-            if "item/" in href:
-                item_id = href.split('/')[-1]
-
-            if  "www.rolimons.com/uaid/" in href:
-                print("uaid")
-                uaid = href.split('/')[-1]
-
-            if "Owner Since" in text: 
-                date = self.parse_time_ago_to_epoch(str(text))
-
-            #if "On Hold" in text:
-             #   print("HOLD")
-
-            if item_id != None and uaid != None and date != None:
-                inventory_dict[uaid] = {"item_id": item_id, "timestamp": date}
-                item_id = None
+            if uaid != last_uaid and date:
+                inventory_dict[uaid] = {"item_id": item_id, "on_hold": is_on_hold, "timestamp": date}
+                #print(item_id, uaid, date, is_on_hold, held_uaids)
+                is_on_hold = False
                 uaid = None
-                date = None
 
-        #if inventory_dict == {}:
-         #   return False
-        #print(inventory_dict, "hey")
-        """
-        #return inventory_dict
+        for uaid in held_uaids:
+            inventory_dict[uaid]['on_hold'] = True
 
+        filtered_keys = self.filter_inventory(inventory_dict, filter_NFT)
+        for uaid in filtered_keys:
+            del inventory_dict[uaid]
+        return inventory_dict
+
+
+  
+    
