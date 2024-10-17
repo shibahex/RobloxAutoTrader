@@ -41,7 +41,20 @@ class RobloxAPI():
         return self.rolimon_parser.get_inventory(userid, apply_NFT)
 
 
+    # NOTE: Payload:
+    # {"offers":[{"userId":4486142832,"userAssetIds":[672469540],"robux":null},{"userId":1283171278,"userAssetIds":[1310053014],"robux":null}]}
     def send_trade(self, trader_id, trade_send, trade_recieve):
+        """
+            Send Trader ID Then the list of items (list of assetids)
+        """
+        trade_payload = {"offers":[
+            {"userId":trader_id,"userAssetIds":[trade_recieve],
+            "robux":null},
+            {"userId":self.account_id,"userAssetIds":[trade_send],
+            "robux":null}]}
+
+        #trade_response = self.TradeSendSession.post("https://trades.roblox.com/v1/trades/send", proxies=self.SendProxy, json=data, headers=self.headers, timeout=60)
+
         pass
 
     def check_can_trade(self, userid):
