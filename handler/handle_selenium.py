@@ -144,15 +144,21 @@ class Chrome:
                 try:
                     # Make sure the inventory fully loaded
                     def element_count_stable(driver):
-                        # Get initial count of elements
+                        max_retries = 30
                         previous_count = len(driver.find_elements(By.CSS_SELECTOR, "#mix_container *"))
 
-                        time.sleep(.1)  # Wait for a second before checking again
-                        current_count = len(driver.find_elements(By.CSS_SELECTOR, "#mix_container *"))
+                        for _ in range(max_retries):
+                            time.sleep(0.1) 
+                            current_count = len(driver.find_elements(By.CSS_SELECTOR, "#mix_container *"))
 
-                        # Check if the count is stable (i.e., no increase)
-                        print(previous_count, current_count)
-                        return current_count == previous_count
+
+                            if current_count != previous_count:
+                                previous_count = current_count
+                            else:
+                                # If stable for max_retries, return True
+                                return True
+                                
+                        return False  # Return False if count did not stabilize
 
                     # Use WebDriverWait with the custom function
                     WebDriverWait(self.browser, 30).until(element_count_stable)
