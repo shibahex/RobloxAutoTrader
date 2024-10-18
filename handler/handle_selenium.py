@@ -121,7 +121,7 @@ class Chrome:
             self.browser.execute_script("window.scrollTo(0, document.body.scrollHeight);")
 
             # Wait to load page
-            time.sleep(.5)
+            #time.sleep(.5)
 
             # Calculate new scroll height and compare with last scroll height
             new_height = self.browser.execute_script("return document.body.scrollHeight")
@@ -142,9 +142,21 @@ class Chrome:
                 self.browser.get(target_url)
 
                 try:
-                    WebDriverWait(self.browser, 30).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, "#inventorylimiteds"))
-                    )
+                    # Make sure the inventory fully loaded
+                    def element_count_stable(driver):
+                        # Get initial count of elements
+                        previous_count = len(driver.find_elements(By.CSS_SELECTOR, "#mix_container *"))
+
+                        time.sleep(.1)  # Wait for a second before checking again
+                        current_count = len(driver.find_elements(By.CSS_SELECTOR, "#mix_container *"))
+
+                        # Check if the count is stable (i.e., no increase)
+                        print(previous_count, current_count)
+                        return current_count == previous_count
+
+                    # Use WebDriverWait with the custom function
+                    WebDriverWait(self.browser, 30).until(element_count_stable)
+
                     self.scroll_to_bottom()
                     return True
 
@@ -176,7 +188,6 @@ class Chrome:
         if load_page == False:
             print("Failed to load page")
             return False
-        time.sleep(.1)
 
         # Get all the children on the item html
         elements = self.browser.find_elements(By.CSS_SELECTOR, "#mix_container *") 
@@ -231,6 +242,7 @@ class Chrome:
         filtered_keys = self.filter_inventory(inventory_dict, filter_NFT)
         for uaid in filtered_keys:
             del inventory_dict[uaid]
+        print('returning ', inventory_dict)
         return inventory_dict
 
 
