@@ -125,7 +125,7 @@ class ConfigHandler:
         # Check if any required values are None and raise an error
         for section in [self.scan_items, self.filter_users, self.prediction_algorithm, self.trading, self.projected_detection]:
             for key, value in section.items():
-                print(key, value)
+                #print(key, value)
                 if value is None:
                     raise ValueError(f"Configuration error: '{key}' is missing or invalid.")
 
