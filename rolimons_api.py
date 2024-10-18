@@ -79,8 +79,8 @@ class RolimonAPI():
         self.update_data()
         # ItemID: Timestamp
         self.scanned_items_for_owners = {}
-        print(self.config.scan_items)
-        print(self.config.filter_users)
+        #print(self.config.scan_items)
+        #print(self.config.filter_users)
         
     def return_item_to_scan(self) -> str:
         minimum_value = self.config.scan_items['Minimum_Value_of_Item']
@@ -144,6 +144,7 @@ class RolimonAPI():
     
         get_profile = Chrome().get_profile_data(user_id, applyNFT)
         if get_profile != False:
+            print(get_profile)
             return get_profile
         else:
             return False
@@ -183,4 +184,4 @@ class RolimonAPI():
         pass
 
 
-print(RolimonAPI().get_inventory(508243885))
+#print(RolimonAPI().get_inventory(508243885))
