@@ -76,7 +76,7 @@ class RequestsHandler:
                 continue
             try:
                 if method.lower() == "get":
-                    print(URL)
+                    #print(URL)
                     Response = self.Session.get(
                         URL, headers=self.headers, proxies=proxy_dict, timeout=30)
                 elif method.lower() == "post":
@@ -113,7 +113,7 @@ class RequestsHandler:
                 print("API failed to respond..")
                 return Response
             else:
-                print("Unknown Error Code", Response.status_code, Response.text)
+                print("Unknown Error Code on", URL, Response.status_code, Response.text)
                 return Response
 
             # return None
