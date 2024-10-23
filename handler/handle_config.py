@@ -31,7 +31,8 @@ class ConfigHandler:
             'Last_Online': self.get_int('Filter Users', 'Last Online'),
             'Last_Traded': self.get_int('Filter Users', 'Last Traded'),
             'Minimum_Total_Value': self.get_int('Filter Users', 'Minimum Total Value'),
-            'Minimum_Total_Items': self.get_int('Filter Users', 'Minimum Total Items')
+            'Minimum_Total_Items': self.get_int('Filter Users', 'Minimum Total Items'),
+            'Check_Rolimon_Verified': self.get_boolean('Filter Users', 'Has Rolimon Verfified Badge')
         }
 
     def load_prediction_algorithm(self):
