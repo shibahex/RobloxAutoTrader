@@ -1,10 +1,16 @@
 import json
 import threading
+import os
 
 class JsonHandler:
     def __init__(self, filename):
         self.filename = filename
         self.lock = threading.Lock()
+        if self.filename == "cookies.json" and not os.path.exists(self.filename):
+            initial_data = {
+                "roblox_accounts": []
+            }
+            self.write_data(initial_data)
 
     def read_data(self) -> dict:
         """Reads data from the JSON file."""
