@@ -83,6 +83,7 @@ class AccountManager:
             print(e)
             self.cli.print_error("Not using account..")
             return None
+        # TODO: PUT THIS IN cookies.json
         print(cookie, ticket)
 
 
