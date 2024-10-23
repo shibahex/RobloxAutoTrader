@@ -69,7 +69,20 @@ class Item:
             'thumbnail_url_lg': self.thumbnail_url_lg
         }
 class RolimonAPI():
+    # make it so its only one instance
+    _instance = None
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super(RolimonAPI, cls).__new__(cls)
+            cls._instance.__initialized = False
+        return cls._instance
+
+    def __init__(self, cookie: dict = None):
+        if self.__initialized:
+            return
     def __init__(self, cookie:dict=None):
+        self.__initialized = True  # Avoid reinitialization
         self.item_data = {}
         self.rolimon_account = RequestsHandler(use_proxies=False, cookie=cookie)
         self.rolimon_parser = RequestsHandler()
@@ -79,7 +92,6 @@ class RolimonAPI():
         self.update_data()
         # ItemID: Timestamp
         self.scanned_items_for_owners = {}
-        #print(self.config.scan_items)
         #print(self.config.filter_users)
         
     def return_item_to_scan(self) -> str:
@@ -142,10 +154,23 @@ class RolimonAPI():
     #TODO: use selenium to get inventory (forced to because Owner since is tracked in the rolimon backend and isnt an API)
     def get_inventory(self, user_id, applyNFT=False) -> dict:
     
-        get_profile = Chrome().get_profile_data(user_id, applyNFT)
-        if get_profile != False:
-            print(get_profile)
-            return get_profile
+        get_profile_inventory = Chrome().get_profile_data(user_id, applyNFT)
+        filtered_inventory = {}
+        if get_profile_inventory:
+            for item in get_profile_inventory:
+                asset_id = get_profile_inventory[item]['item_id']
+                # total value reutns the RAP if theres no value
+                value = self.item_data[asset_id]['total_value']
+                rap = self.item_data[asset_id]['rap']
+                filtered_inventory[item] = {
+                    'item_id': asset_id,
+                    'value': value,
+                    'rap': rap,
+                    'owner_since': get_profile_inventory[item]['owner_since']
+                }
+
+            # apply more usefull info about the item
+            return filtered_inventory
         else:
             return False
 
@@ -181,6 +206,17 @@ class RolimonAPI():
             # 5 upgrade 
             # 10 adds 
     def post_trade_ad(self):
+        pass
+    # Check config to see if we need to filter this user
+    def activity_algorithm(self, userid):
+        pass
+
+    def validate_user(self, userid):
+        # Last Online 
+        # Last Traded
+        # Min total value and items
+        # Rolimon verified badge
+        # Have an algorithm to check how much a person trades (take into fact their graph and how many of their items is owned since)
         pass
 
 
