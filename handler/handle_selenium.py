@@ -142,26 +142,35 @@ class Chrome:
                 self.browser.get(target_url)
 
                 try:
-                    # Make sure the inventory fully loaded
+                    """
                     def element_count_stable(driver):
-                        max_retries = 30
                         previous_count = len(driver.find_elements(By.CSS_SELECTOR, "#mix_container *"))
+                        same_count = 0
+                        while True:
 
-                        for _ in range(max_retries):
-                            time.sleep(0.1) 
+                            if same_count > 5:
+                                return True
+
                             current_count = len(driver.find_elements(By.CSS_SELECTOR, "#mix_container *"))
 
-
+                            print(previous_count, current_count)
                             if current_count != previous_count:
                                 previous_count = current_count
                             else:
-                                # If stable for max_retries, return True
-                                return True
-                                
-                        return False  # Return False if count did not stabilize
+                                same_count += 1
+                            
+                        
+                            time.sleep(.35)
+                            
+
+                        # If after all retries the count remained stable, return True
+                        return True
+                    """
 
                     # Use WebDriverWait with the custom function
-                    WebDriverWait(self.browser, 30).until(element_count_stable)
+                    WebDriverWait(self.browser, 30).until(
+                        lambda driver: len(driver.find_elements(By.CSS_SELECTOR, "#mix_container *")) > 4
+                    )
 
                     self.scroll_to_bottom()
                     return True
@@ -237,7 +246,7 @@ class Chrome:
                 held_uaids.append(on_hold_uaid)
 
             if uaid != last_uaid and date:
-                inventory_dict[uaid] = {"item_id": item_id, "on_hold": is_on_hold, "timestamp": date}
+                inventory_dict[uaid] = {"item_id": item_id, "on_hold": is_on_hold, "owner_since": date}
                 #print(item_id, uaid, date, is_on_hold, held_uaids)
                 is_on_hold = False
                 uaid = None
@@ -248,7 +257,9 @@ class Chrome:
         filtered_keys = self.filter_inventory(inventory_dict, filter_NFT)
         for uaid in filtered_keys:
             del inventory_dict[uaid]
-        print('returning ', inventory_dict)
+        #print('returning ', inventory_dict)
+
+        # TODO: GET GRAPH AND LAST ONLINE AND BADGES
         return inventory_dict
 
 
