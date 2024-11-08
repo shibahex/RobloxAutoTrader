@@ -37,21 +37,20 @@ class FirefoxLogin:
                 modal = WebDriverWait(self.browser, 360).until(
                     EC.visibility_of_element_located((By.CSS_SELECTOR, "div.modal.fade.modal-modern.in"))
                 )
-                print("Two-step verification modal detected.")
 
-                # Now wait for the input field to be visible
                 code_input = WebDriverWait(modal, 360).until(
                     EC.visibility_of_element_located((By.CSS_SELECTOR, "#two-step-verification-code-input"))
                 )
                 print("Two-step verification input detected.")
+                time.sleep(.1)
 
                 # Generate the TOTP code
                 totp = pyotp.TOTP(totp_secret)
                 auth_code = totp.now()  # Get the current code
-                print(f"Generated Auth Code: {auth_code}")
 
                 # Input the auth code into the verification field
                 code_input.send_keys(auth_code)
+                print(f"Generated Auth Code: {auth_code}")
 
                 # Click the Verify button
                 verify_button = modal.find_element(By.CSS_SELECTOR, "button.btn-cta-md[aria-label='Verify']")
@@ -86,37 +85,53 @@ class FirefoxLogin:
                 break
             
             # Short sleep to prevent busy-waiting
-            time.sleep(1)
+            time.sleep(.35)
 
         # Capture network logs after login
         for request in self.browser.requests:
             if request.response:
                 # Capture specific login requests
                 if 'auth.roblox.com/v2/login' in request.url and request.response.status_code == 200:
-                    print(f"Login API URL: {request.url}")
-                    print(f"Method: {request.method}")
-                    print(f"Response Status: {request.response.status_code}")
+                    #print(f"Login API URL: {request.url}")
+                    #print(f"Method: {request.method}")
+                    #print(f"Response Status: {request.response.status_code}")
 
                     try:
                         response_body = request.response.body.decode('utf-8')
-                        print(f"Login API Response: {response_body}")
+                     #   print(f"Login API Response: {response_body}")
 
                         # Extract the ticket from the response
                         response_data = json.loads(response_body)
                         ticket = response_data.get("twoStepVerificationData", {}).get("ticket", "")
                         if ticket:
-                            roblosecurity_cookie = self.browser.get_cookie('.ROBLOSECURITY')
-                            return roblosecurity_cookie, ticket
+                            roblosecurity_cookie = self.fetch_cookie()
+
+                            if roblosecurity_cookie:
+                                return roblosecurity_cookie, ticket
+                            else:
+                                raise ValueError("Failed to login to account.")
                         else:
                             raise ValueError("No ticket found in the response.")
 
                     except (UnicodeDecodeError, json.JSONDecodeError):
                         print("Error processing the login API response.")
                     
-                    print("-" * 60)
-                # Adding a small delay to avoid excessive looping
-        time.sleep(.3)
-        self.stop()
+                    #print("-" * 60)
+
+    def fetch_cookie(self):
+        timeout = 20
+        attempts = 0
+        roblosecurity_cookie = None
+
+        while attempts < timeout:
+            roblosecurity_cookie = self.browser.get_cookie('.ROBLOSECURITY')
+            
+            if roblosecurity_cookie:
+                return roblosecurity_cookie['value']
+            
+            time.sleep(.3)
+            attempts += 1
+        return None
 
     def stop(self):
         """Shut down the browser."""
