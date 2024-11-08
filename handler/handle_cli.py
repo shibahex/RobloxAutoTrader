@@ -19,7 +19,7 @@ class Terminal:
     @staticmethod
     def print_error(message):
         print('[' + red + "ERROR" + reset + '] ' + message)
-        time.sleep(1.5)
+        time.sleep(2)
 
     @staticmethod
     def print_success(message):
