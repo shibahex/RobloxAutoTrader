@@ -14,6 +14,101 @@ class ConfigHandler:
         self.mass_sender = self.load_mass_sender()
         # Check if config is filled out 
         self.validate_config()
+    def convert_gain(self, gain):
+        """
+        Convert gain to a float or int.
+        Treat gains < 1 and > -1 as percentages.
+        """
+        try:
+            gain = float(gain) if '.' in str(gain) else int(gain)
+            return gain, abs(gain) < 1  # True if between -1 and 1 (percentage)
+        except ValueError:
+            raise ValueError(f"Invalid gain value: {gain}")
+
+    def calculate_gain(self, gain, base_value, is_percentage):
+        """
+        Calculate the gain.
+        Convert to percentage if required.
+        """
+        return (gain / base_value) * 100 if is_percentage else gain
+
+    def check_gain(self, their_value, self_value, min_gain=None, max_gain=None):
+        """
+        Check if gain is within the specified range.
+        """
+        gain = their_value - self_value
+        min_gain, is_min_percentage = self.convert_gain(min_gain) if min_gain is not None else (None, False)
+        max_gain, is_max_percentage = self.convert_gain(max_gain) if max_gain is not None else (None, False)
+
+        # Only calculate gain as a percentage if min or max is marked as percentage
+        gain = self.calculate_gain(gain, their_value, is_min_percentage or is_max_percentage)
+
+        if min_gain is not None:
+            min_gain = min_gain * 100 if is_min_percentage else min_gain
+        if max_gain is not None:
+            max_gain = max_gain * 100 if is_max_percentage else max_gain
+
+        # Debug output after calculations
+ #       print(f"Calculated Gain: {gain}, Min Gain: {min_gain}, Max Gain: {max_gain}")
+
+        if min_gain is not None and max_gain is not None:
+            return min_gain <= gain <= max_gain
+        elif min_gain is not None:
+            return gain >= min_gain
+        elif max_gain is not None:
+            return gain <= max_gain
+        return True
+
+    def check_rap_gain(self, their_rap, self_rap):
+        """
+        Check if the RAP gain meets the criteria.
+        """
+        return self.check_gain(their_rap, self_rap, self.min_rap_gain, self.max_rap_gain)
+
+    def check_value_gain(self, their_value, self_value):
+        """
+        Check if the value gain meets the criteria.
+        """
+        return self.check_gain(their_value, self_value, self.min_value_gain, self.max_value_gain)
+
+    def check_rap_gain(self, their_rap, self_rap):
+        """
+        Check if the RAP gain meets the criteria.
+        """
+        return self.check_gain(their_rap, self_rap, self.min_rap_gain, self.max_rap_gain)
+
+    def check_value_gain(self, their_value, self_value):
+        """
+        Check if the value gain meets the criteria.
+        """
+        return self.check_gain(their_value, self_value, self.min_value_gain, self.max_value_gain)
+
+
+
+    def check_rap_gain(self, their_rap, self_rap):
+        """
+        Check if the RAP gain meets the criteria.
+        """
+        return self.check_gain(their_rap, self_rap, self.min_rap_gain, self.max_rap_gain)
+
+    def check_value_gain(self, their_value, self_value):
+        """
+        Check if the value gain meets the criteria.
+        """
+        return self.check_gain(their_value, self_value, self.min_value_gain, self.max_value_gain)
+
+    def process_trade(self, close_percentage, their_rap, self_rap, their_value, self_value):
+        """
+        Process the trade based on specified criteria.
+        """
+        if close_percentage < self.min_score_percentage or close_percentage > self.max_score_percentage:
+            return False
+        if not self.check_rap_gain(their_rap, self_rap):
+            return False
+        if not self.check_value_gain(their_value, self_value):
+            return False
+        return True
+
     def load_scan_items(self):
         return {
             'Minimum_Value_of_Item': self.get_int('Scan Items', 'Minimum Value of Item'),
@@ -72,9 +167,10 @@ class ConfigHandler:
     def load_projected_detection(self):
         return {
             'Detect_Rolimons_Projecteds': self.get_boolean('Projected Detection', 'Detect Rolimons Projecteds'),
-            'MaxProjectedDifference': self.get_float('Projected Detection', 'MaxProjectedDifference'),
-            'MinProjectedDifference': self.get_float('Projected Detection', 'MinProjectedDifference'),
-            'MinPriceDifference': self.get_float('Projected Detection', 'MinPriceDifference')
+            'MaximumGraphDifference': self.get_float('Projected Detection', 'Maximum Graph Difference'),
+            'MinimumGraphDifference': self.get_float('Projected Detection', 'Minimum Graph Difference'),
+            'MinPriceDifference': self.get_float('Projected Detection', 'MinPriceDifference'),
+            'AmountofSalestoScan': self.get_int('Projected Detection', 'Amount of sales to scan')
         }
 
     def load_mass_sender(self):
