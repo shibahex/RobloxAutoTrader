@@ -1,16 +1,25 @@
 import os
 import re
 import time
-from handler import *
 from datetime import datetime, timedelta
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
+
+from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.by import By
-from selenium.common.exceptions import NoSuchElementException
+from webdriver_manager.firefox import GeckoDriverManager
+import roblox_api
+from handler.handle_config import ConfigHandler
+from selenium.common.exceptions import NoSuchElementException, ElementClickInterceptedException, ElementNotInteractableException
 
+
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service as ChromiumService
+from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.core.os_manager import ChromeType
+
+# TODO: maybe use https://api.rolimons.com/players/v1/playerassets/1283171278 API and use playerPrivacyEnabled instead of can trade
 class Chrome:
     """
     Handles all Selenium settings and has methods to fetch data.
@@ -21,40 +30,36 @@ class Chrome:
         self.current_proxy_index = 0  # Index to track current proxy
         self.proxy_cooldown = {}  # Dictionary to track cooldown status of proxies
 
+        self.roblox_parse = roblox_api.RobloxAPI()
         self.config = ConfigHandler('config.cfg')
-        # Get browser depending on OS 
-        chrome_driver_path = None
-        if os.name == 'posix':
-            chrome_driver_path = 'chromedriver-linux64/chromedriver'
-            chrome_binary_path = 'chrome-linux64/chrome'
-        elif os.name == 'nt':
-            chrome_driver_path = 'chromedriver-win64/chromedriver.exe'
-            chrome_binary_path = 'chrome-win64/chrome.exe'
-        else:
-            raise OSError("Unsupported OS")
+        
 
-        self.chrome_options = Options()
-        if not debugMode:
-            self.chrome_options.add_argument('--headless')  # NO GUI
+        # Setup Chrome options
+        self.chrome_options = ChromeOptions()
+        user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         
-        # Helps avoid some issues in certain environments
-        self.chrome_options.add_argument('--no-sandbox')  
-        self.chrome_options.add_argument('--disable-dev-shm-usage') 
-        self.chrome_options.binary_location = chrome_binary_path
-        
-        self.initialize_browser(chrome_driver_path)
+        self.chrome_options.add_argument('--headless')
+        self.chrome_options.add_argument(f'user-agent={user_agent}')
+        self.chrome_options.add_argument('--incognito')  # Incognito mode
+
+        self.initialize_browser()
+
 
     """
         Base Selenium Functions to setup the browser, load the page and use proxies
     """
-    def initialize_browser(self, chrome_driver_path):
-        """Initializes the Chrome browser with the current proxy."""
+    def initialize_browser(self):
+        """Initializes the Firefox browser with the current proxy if available."""
         proxy = self.get_current_proxy()
         if proxy:
-            self.chrome_options.add_argument(f'--proxy-server={proxy}')
+            self.chrome_options.add_argument(f'--proxy-server=http://{proxy}')
 
-        service = Service(chrome_driver_path)
-        self.browser = webdriver.Chrome(service=service, options=self.chrome_options)
+        self.browser = webdriver.Chrome(service=ChromiumService(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install()), options=self.chrome_options)
+        # Launch the Firefox driver
+        #self.browser = webdriver.Firefox(
+        #    service=FirefoxService(GeckoDriverManager().install()),
+        #    options=self.firefox_options
+        #)
 
     def get_current_proxy(self):
         """Returns the current proxy, if not in cooldown."""
@@ -81,6 +86,10 @@ class Chrome:
 
     def parse_time_ago_to_epoch(self, time_str):
         now = datetime.now()
+        
+        if time_str.lower() == "just now":
+            return int(now.timestamp())
+        
         # Clean the input string by removing extra spaces
         time_str = time_str.replace('\n', ' ').strip()
 
@@ -88,8 +97,8 @@ class Chrome:
             return int(now.timestamp())
 
         try:
-            # Adjusted regex pattern to match leading text followed by time description (including hours)
-            pattern = r'.*(\d+)\s*(day|days|month|months|year|years|hour|hours)\s*ago'
+            # Adjusted regex pattern to match leading text followed by time description (including minutes)
+            pattern = r'.*(\d+)\s*(day|days|month|months|year|years|hour|hours|minute|minutes)\s*ago'
             match = re.search(pattern, time_str)
         except Exception as e:
             print(time_str, "error:", e)
@@ -109,6 +118,8 @@ class Chrome:
             target_time = now - timedelta(days=value * 365)  # Approximation
         elif unit.startswith('hour'):
             target_time = now - timedelta(hours=value)
+        elif unit.startswith('minute'):
+            target_time = now - timedelta(minutes=value)
         else:
             raise ValueError("Unsupported time unit")
 
@@ -132,8 +143,6 @@ class Chrome:
     """
         Functions to scrape the rolimons player website
     """
-    def filter_inventory():
-       pass 
 
     def load_rolimons_page(self, target_url):
         if self.browser.current_url != target_url:
@@ -142,31 +151,6 @@ class Chrome:
                 self.browser.get(target_url)
 
                 try:
-                    """
-                    def element_count_stable(driver):
-                        previous_count = len(driver.find_elements(By.CSS_SELECTOR, "#mix_container *"))
-                        same_count = 0
-                        while True:
-
-                            if same_count > 5:
-                                return True
-
-                            current_count = len(driver.find_elements(By.CSS_SELECTOR, "#mix_container *"))
-
-                            print(previous_count, current_count)
-                            if current_count != previous_count:
-                                previous_count = current_count
-                            else:
-                                same_count += 1
-                            
-                        
-                            time.sleep(.35)
-                            
-
-                        # If after all retries the count remained stable, return True
-                        return True
-                    """
-
                     # Use WebDriverWait with the custom function
                     WebDriverWait(self.browser, 30).until(
                         lambda driver: len(driver.find_elements(By.CSS_SELECTOR, "#mix_container *")) > 4
@@ -183,85 +167,146 @@ class Chrome:
                 return False
 
     def filter_inventory(self, inventory_dict, applyNFT=False):
+        """
+        Filters the inventory based on the configuration settings.
+
+        Parameters:
+        - inventory_dict (dict): The inventory data to filter.
+        - applyNFT (bool): Whether to apply the NFT filter.
+
+        Returns:
+        - filtered_keys (list): A list of keys filtered out from the inventory.
+        """
         filtered_keys = []
+        trading_config = self.config.load_trading()
+        not_for_recieve = trading_config['NFR']
+        not_for_trade = trading_config['NFT']
+
         for uaid, info in inventory_dict.items():
+            item_id = info['item_id']
+            
+
+            #TODO: allow trade projecteds
+            #if self.roblox_parse.is_projected(item_id) == True:
+            #    filtered_keys.append(uaid)
+
             # Check if the item is on hold or if it's in the NFR list
-            if info['on_hold'] == True or info['item_id'] in self.config.load_trading()['NFR'] and applyNFT == False:
-                filtered_keys.append(uaid)
-            if info['item_id'] in self.config.load_trading()['NFT'] and applyNFT == True:
-                filtered_keys.append(uaid)
+            if applyNFT:
+                if item_id in not_for_recieve or item_id in not_for_trade:
+                    filtered_keys.append(uaid)
 
         return filtered_keys
 
     def get_profile_data(self, user_id, filter_NFT=False):
-        """
-        Checks the timer on the website and returns relevant data.
-        """
-        target_url =  f"https://www.rolimons.com/player/{user_id}"
-        inventory_dict = {}
+        # TODO: make it readable
+        target_url = f"https://www.rolimons.com/player/{user_id}"
         load_page = self.load_rolimons_page(target_url)
-        if load_page == False:
+        
+        if not load_page:
             print("Failed to load page")
             return False
 
-        # Get all the children on the item html
-        elements = self.browser.find_elements(By.CSS_SELECTOR, "#mix_container *") 
+        def find_element(item, search_element, method=By.CSS_SELECTOR, timeout=.5):
+            try:
+                # Wait for the specific element inside each `item` container
+                return WebDriverWait(item, timeout).until(
+                    EC.presence_of_element_located((method, search_element))
+                )
+                # Now you can interact with inner_element here
+            except:
+                return False
 
-        item_id = None
-        uaid = None
-        is_on_hold = False
-        date = None
-        held_uaids = []
+        def find_elements(item, element):
+            try:
+                return item.find_elements(By.CSS_SELECTOR, element)
+            except:
+                return False
 
-        last_item_id = None
-        last_uaid = None
+        def scroll_and_click(element):
+            try:
+                self.browser.execute_script("arguments[0].scrollIntoView();", element)
+                element.click()
+            except ElementClickInterceptedException:
+                print("Element is obscured; attempting to close overlay.")
+                self.close_modal(browser)
+                element.click()
 
-        for element in elements:
+        def scrape_nested_items(nested_element, item_id):
+            scraped_data = {}
 
-            # Check if the element is a link
-            if element.tag_name == 'a':
-                href = element.get_attribute("href")
-                text = element.text.strip()
-                if "www.rolimons.com/item/" in href:
-                    item_id = href.split('/')[-1]
+            for element in nested_element:
+                is_on_hold = find_element(element, ".//*[name()='svg' and @aria-hidden='true']", method=By.XPATH)
+                if is_on_hold:
+                    print("on hold")
+                    continue
 
-                if  "www.rolimons.com/uaid/" in href:
-                    uaid = href.split('/')[-1]
-                    #print(uaid)
+                uaid = element.get_attribute("href").split("/uaid/")[-1]
+                date = element.get_attribute("data-original-title")
+                print(item_id, uaid, date)
+                scraped_data[uaid] = {"item_id": item_id, "owner_since": self.parse_time_ago_to_epoch(date)}
 
-                if "Owner Since" in text: 
-                    date = self.parse_time_ago_to_epoch(str(text))
+            return scraped_data
 
-            if element.get_attribute("class") == "hold_item_tag_icon hold_tag_icon":
-                is_on_hold = True
+        # Using CSS Selectors to get the desired elements
+        item_containers = self.browser.find_elements(By.CSS_SELECTOR, "#mix_container .pb-2.mb-3.mix_item.shadow_md_35.shift_up_md")
+        
+        # nested items (duplicate items)
+        reveal_css = ".btn.btn-bricky-green.border-primary.btn-sm.btn-very-sharp"
+        nested_items = ".btn.btn-light-blue.border-primary.btn-sm.btn-very-sharp.uaid_list_button"
 
-            # Dont flag as trade locked because the UAID of the item is nested in multiple copies
-            if element.get_attribute("class") == "item-hold-quantity copies_on_hold":
-                is_on_hold = False
+        # single items
+        hold_tag = ".hold_item_tag_icon.hold_tag_icon"
+        date_tag = ".inv_owner_since_time.text-success.text-truncate"
 
-            # Append multiple trade locked UAIDs that is nested into the same item
-            if element.tag_name == 'svg':
-                parent_link = element.find_element(By.XPATH, '..')  # '..' selects the parent element
-                on_hold_uaid = parent_link.get_attribute("href").split('/')[-1]
-                held_uaids.append(on_hold_uaid)
 
-            if uaid != last_uaid and date:
-                inventory_dict[uaid] = {"item_id": item_id, "on_hold": is_on_hold, "owner_since": date}
-                #print(item_id, uaid, date, is_on_hold, held_uaids)
-                is_on_hold = False
-                uaid = None
+        scanned_inventory = {}
+        for item in item_containers:
+            multiple_items = find_element(item, reveal_css)
+            item_href = find_element(item, "a[href*='/item/']")
+            item_id = item_href.get_attribute("href").split("/item/")[-1]
 
-        for uaid in held_uaids:
-            inventory_dict[uaid]['on_hold'] = True
+            if multiple_items: 
+                scroll_and_click(multiple_items)
+                nested_info = find_elements(item, nested_items)
+                if nested_info:
+                    scraped = scrape_nested_items(nested_info, item_id)
+                    scanned_inventory.update(scraped)
+                self.close_modal(item)
+            else:
+                is_on_hold = find_element(item, hold_tag)
+                if is_on_hold:
+                    continue
 
-        filtered_keys = self.filter_inventory(inventory_dict, filter_NFT)
+
+
+                uaid_href = find_element(item, "a[href*='/uaid/']")
+                uaid = uaid_href.get_attribute("href").split("/uaid/")[-1]
+
+                date = find_element(item, ".inv_owner_since_time.text-success.text-truncate")
+
+                scanned_inventory[uaid] = {"item_id": item_id, "owner_since": self.parse_time_ago_to_epoch(date.text)}
+
+        filtered_keys = self.filter_inventory(scanned_inventory, filter_NFT)
+
         for uaid in filtered_keys:
-            del inventory_dict[uaid]
-        #print('returning ', inventory_dict)
+            del scanned_inventory[uaid]
+        print(scanned_inventory)
+        self.browser.close()
+        return scanned_inventory
 
-        # TODO: GET GRAPH AND LAST ONLINE AND BADGES
-        return inventory_dict
 
 
-  
-    
+    def close_modal(self, item):
+        try:
+            time.sleep(.3) # .25
+            close_button = item.find_element(By.CSS_SELECTOR, ".modal-header .close")
+            close_button.click()  # Click the close button
+            time.sleep(.3)  # Wait for the modal to close
+
+            # Wait for the modal to disappear
+            #WebDriverWait(self.browser, 10).until(EC.invisibility_of_element(close_button))
+        except NoSuchElementException:
+            print("Close button not found.")
+        except Exception as e:
+            print(f"An error occurred while trying to close the modal: {e}")
+
