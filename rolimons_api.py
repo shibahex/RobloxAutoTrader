@@ -2,6 +2,7 @@ import requests
 import json
 import random
 from handler import *
+import roblox_api
 class Item:
     def __init__(self, item_id, item_name, asset_type_id, original_price, created, 
                  first_timestamp, best_price, favorited, num_sellers, rap, 
@@ -78,14 +79,14 @@ class RolimonAPI():
             cls._instance.__initialized = False
         return cls._instance
 
-    def __init__(self, cookie: dict = None):
+    def __init__(self, cookie:dict=None):
         if self.__initialized:
             return
-    def __init__(self, cookie:dict=None):
         self.__initialized = True  # Avoid reinitialization
         self.item_data = {}
         self.rolimon_account = RequestsHandler(use_proxies=False, cookie=cookie)
         self.rolimon_parser = RequestsHandler()
+        self.projected_json = JsonHandler('projected_checker.json')
 
         self.config = ConfigHandler('config.cfg')
         
@@ -129,15 +130,31 @@ class RolimonAPI():
         print("[DOGGO] Picking random item from list size:", len(filtered_items))
         
         #TODO: add into table with timestamp and if we get the same item check if the time has been 30 minutes and if it has remove and return it 
-        return random.choice(filtered_items['item_id'])
+        return random.choice(filtered_items)
         #print(filtered_items)
 
     def return_formatted_owners(self, item_id: str or int) -> list:
         """
             Returns the rolimons.com/item/item_ID bc copies in formated by owners and datetime scanned
         """
+        # Define the headers to mimic a real browser request
+        header = {
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',  # Can be adjusted based on your preferred language
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Referer': 'https://www.google.com/',  # Mimicking a referer header
+            'Cache-Control': 'max-age=0'
+        }
+
+        # Optionally, set cookies if the site requires them (can capture cookies using browser dev tools)
+        cookies = {
+            'some_cookie_name': 'cookie_value',  # Add your captured cookies here
+        }
         # TODO: Make your own rolimons API
-        page_text = self.rolimon_parser.requestAPI(f"https://www.rolimons.com/item/{item_id}")
+        page_text = requests.get(f"https://www.rolimons.com/item/{item_id}", headers=header)
         if page_text.status_code != 200:
             print("rolimons items API error:", page_text.status_code)
             return None
@@ -149,19 +166,50 @@ class RolimonAPI():
         owners = owners[::-1]
         owners.remove("1")
 
+
         return owners
 
     #TODO: use selenium to get inventory (forced to because Owner since is tracked in the rolimon backend and isnt an API)
     def get_inventory(self, user_id, applyNFT=False) -> dict:
-    
         get_profile_inventory = Chrome().get_profile_data(user_id, applyNFT)
+
+        print("Got inventory from selenium")
         filtered_inventory = {}
+
         if get_profile_inventory:
             for item in get_profile_inventory:
                 asset_id = get_profile_inventory[item]['item_id']
                 # total value reutns the RAP if theres no value
+                
                 value = self.item_data[asset_id]['total_value']
                 rap = self.item_data[asset_id]['rap']
+                if rap == value:
+                    # Check if the asset_id is in the projected JSON file
+                    projected_data = self.projected_json.read_data()
+                    existing_item = False
+                    for projected_item in projected_data:
+                        if int(asset_id) == int(projected_item):
+                            existing_item = True
+
+                    
+                    if existing_item:
+                        is_projected = projected_data[asset_id]['is_projected']
+                        if is_projected:
+                            continue
+                        else:
+                            print(f"Asset ID {asset_id} is marked as not projected. Skipping.")
+                    else:
+                        # If asset_id does not exist in the JSON, check projection status
+                        is_projected = roblox_api.RobloxAPI().is_projected(asset_id)
+                        if is_projected:
+                            self.projected_json.update_projected_status(asset_id, is_projected)
+                            continue
+                        else:
+                            print(f"Asset ID {asset_id} is not projected.")
+                            self.projected_json.update_projected_status(asset_id, is_projected)
+
+
+
                 filtered_inventory[item] = {
                     'item_id': asset_id,
                     'value': value,
@@ -212,6 +260,7 @@ class RolimonAPI():
         pass
 
     def validate_user(self, userid):
+        # If can trade
         # Last Online 
         # Last Traded
         # Min total value and items
@@ -220,4 +269,3 @@ class RolimonAPI():
         pass
 
 
-#print(RolimonAPI().get_inventory(508243885))
