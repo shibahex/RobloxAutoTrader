@@ -15,6 +15,9 @@ from handler.handle_json import JsonHandler
     5. remove outbounds if timestamp is like 5 days
     6. Auth system
     7. add price to projected.json and scan it again if the price difference is huge
+    8. Use https://inventory.roblox.com/v2/assets/128208025/owners?sortOrder=Asc&limit=100 to get active users instead of rolimons
+            (and dont use rolimons to get inventory use roblox inventory API)
+        so get random item ID then use the owner API to get one random player that owned within like a week and see if you can trade with them
     
 """
 class Doggo:
@@ -67,14 +70,11 @@ class Doggo:
             for account in accounts['roblox_accounts']:
                 all_cached_traders.extend([str(trade["trader_id"]) for trade in account["trades"]])
 
-            print(all_cached_traders)
 
             for owner in owners:
                 # Uncomment the following line if user validation is needed
                 # if self.rolimons.validate_user(owner):
-                print(str(owner), all_cached_traders)
                 if str(owner) in all_cached_traders:
-                    print(owner, all_cached_traders, "grrr")
                     continue
 
                 if roblox_account.check_can_trade(owner) == True:
@@ -84,13 +84,14 @@ class Doggo:
 
     def start_trader(self):
         roblox_accounts = self.load_roblox_accounts()
-
         threading.Thread(target=self.queue_traders, daemon=True, args=(roblox_accounts[0],)).start()  # Daemon thread for user queue
         time.sleep(1)
 
         # Infinite loop to continuously process trades
         while True:
             for account in roblox_accounts:
+                account.outbound_checker()
+                #time.sleep(600)
                 account_inventory = account.account_inventory
                 if not self.user_queue:  # Check if user_queue is empty
                     print("No users to trade with. Waiting...")
@@ -103,7 +104,8 @@ class Doggo:
                 for trader, trader_inventory in current_user_queue.items():
                     # generate and send trade
                     if account_inventory and trader_inventory:
-                        generated_trade = self.trader.generate_trade(account_inventory, trader_inventory)
+                        generated_trade = self.trader.generate_trade_with_timeout(account_inventory, trader_inventory)
+                        #generated_trade = self.trader.generate_trade(account_inventory, trader_inventory)
                         if not generated_trade:
                             continue
                         self_side, their_side = generated_trade

@@ -10,6 +10,8 @@ import base64
 import rolimons_api
 from handler.handle_json import JsonHandler
 from handler.handle_2fa import AuthHandler
+from trade_algorithm import TradeMaker
+
 class RobloxAPI():
     """
         Pass in Cookie if you want it to be an account
@@ -21,6 +23,7 @@ class RobloxAPI():
         self.config = ConfigHandler('config.cfg')
 
         self.rolimon = rolimons_api.RolimonAPI()
+
 
         if cookie != None:
             self.cookies = cookie
@@ -155,7 +158,46 @@ class RobloxAPI():
         pass
 
     def outbound_checker(self):
-        pass
+        outbounds = self.json.get_outbounds(cookie=self.cookies['.ROBLOSECURITY'])
+        if outbounds:
+            for trade in outbounds:
+                trade_id = trade['trade_id']
+
+                account_items = trade['self_items']
+                account_rap = 0
+                account_value = 0
+
+                for item in account_items:
+                    account_rap += self.rolimon.item_data[item]['rap']
+                    account_value += self.rolimon.item_data[item]['total_value']
+
+
+                trader_items = trade['their_items']
+                trader_rap = 0
+                trader_value = 0
+                for item in trader_items:
+                    trader_rap += self.rolimon.item_data[item]['rap']
+                    trader_value += self.rolimon.item_data[item]['total_value']
+                
+                timestamp = trade['timestamp']
+                timestamp_date = datetime.datetime.fromtimestamp(timestamp)
+                
+                current_date = datetime.datetime.now()
+                valid_trade = TradeMaker().validate_trade(account_rap, account_value, trader_rap, trader_value)
+
+                if not TradeMaker().validate_trade(account_rap, account_value, trader_rap, trader_value) or current_date - timestamp_date >= datetime.timedelta(days=5):
+                    # Cancel
+                    #https://trades.roblox.com/v1/trades/3534001725946517/decline
+                    url = f"https://trades.roblox.com/v1/trades/{trade_id}/decline"
+
+                    cancel_request = self.request_handler.requestAPI(url, method="post")
+          #          print(cancel_request.status_code, "outbound")
+                    if cancel_request.status_code == 200 or cancel_request.status_code == 400:
+                        self.json.remove_trade(cookie=self.cookies['.ROBLOSECURITY'], trade_id=trade_id)
+         #               print("Cleared losing outbound...")
+                    else:
+                        print(cancel_request.text)
+
     def check_can_trade(self, userid):
         # TODO: Handle this pls tmr next priority
         validation_headers = None
