@@ -87,6 +87,36 @@ class JsonHandler:
         else:
             self.cli.print_error("Invalid index. No cookie deleted.")
 
+    def get_outbounds(self, cookie) -> dict:
+        data = self.read_data()
+        account_found = False
+        for account in data['roblox_accounts']:
+            if account.get('cookie') == cookie:
+                if 'trades' not in account:
+                    break
+
+                return account["trades"]
+        return False
+
+
+    def remove_trade(self, cookie, trade_id):
+        data = self.read_data()
+
+        for account in data['roblox_accounts']:
+            if account.get('cookie') == cookie:
+                if 'trades' not in account:
+                    break
+                trades = account['trades']
+                for trade in trades:
+                    if trade['trade_id'] == trade_id:
+                        trades.remove(trade)
+                        self.write_data(data)
+                        break
+
+                    
+                    
+
+
     
     def list_cookies(self) -> None:
         def ordinal(num):
