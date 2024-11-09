@@ -1,12 +1,12 @@
 from handler.handle_config import ConfigHandler
-from rolimons_api import RolimonAPI
 from itertools import combinations, product
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
+
 
 import time
 class TradeMaker():
     def __init__(self):
         self.config = ConfigHandler('config.cfg')
-        self.rolimons = RolimonAPI()
 
         self.min_rap_gain = self.config.trading['Minimum_RAP_Gain']
         self.max_rap_gain = self.config.trading['Maximum_RAP_Gain']
@@ -20,9 +20,6 @@ class TradeMaker():
 
         self.min_items_their = self.config.trading['MinimumItemsTheirSide']
         self.max_items_their = self.config.trading['MaximumItemsTheirSide']
-
-
-
 
     def generate_trade(self, self_inventory, their_inventory):
         self_keys = list(self_inventory.keys())
@@ -45,12 +42,37 @@ class TradeMaker():
 
                 # Ensure no overlapping item IDs
                 if self_side_item_ids.isdisjoint(their_side_item_ids):
-                    if self.validate_trade(self_side, their_side, self_inventory, their_inventory):
+                    self_value = 0
+                    self_rap = 0
+                    for key in self_side:
+                        item = self_inventory[key]
+                        self_value += item['value']
+                        self_rap += item['rap']
+
+                    their_value = 0
+                    their_rap = 0
+                    for key in their_side:
+                        item = their_inventory[key]
+                        their_value += item['value']
+                        their_rap += item['rap']
+
+                    if self.validate_trade(self_rap, self_value, their_rap, their_value):
                         valid_trades.append((self_side, their_side))
                         if len(valid_trades) > 1:
                             return valid_trades[0]
 
         return valid_trades[0] if valid_trades else None
+
+    def generate_trade_with_timeout(self, self_inventory, their_inventory, timeout=120):
+        # Run generate_trade in a separate thread with a timeout
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(self.generate_trade, self_inventory, their_inventory)
+            try:
+                # Wait for the result with the specified timeout
+                return future.result(timeout=timeout)
+            except TimeoutError:
+                print("generate_trade timed out")
+                return None  # Return None if the function times out
 
 
     def check_rap_gain(self, their_rap, self_rap):
@@ -59,23 +81,8 @@ class TradeMaker():
     def check_value_gain(self, their_value, self_value):
         return self.config.check_gain(their_value, self_value, self.min_value_gain, self.max_value_gain)
 
-
-    def validate_trade(self, self_side, their_side, self_inventory, their_inventory):
+    def validate_trade(self, self_rap, self_value, their_rap, their_value):
         # Precompute the total value and RAP for both sides in a single loop
-        self_value = 0
-        self_rap = 0
-        for key in self_side:
-            item = self_inventory[key]
-            self_value += item['value']
-            self_rap += item['rap']
-
-        their_value = 0
-        their_rap = 0
-        for key in their_side:
-            item = their_inventory[key]
-            their_value += item['value']
-            their_rap += item['rap']
-
         # Calculate value gain and close percentage
         value_gain = their_value - self_value
         if self_rap + their_rap == 0:
