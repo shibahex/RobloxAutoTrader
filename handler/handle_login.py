@@ -135,6 +135,6 @@ class FirefoxLogin:
 
     def stop(self):
         """Shut down the browser."""
-        self.browser.quit()
+        self.browser.close()
 
 
