@@ -228,8 +228,7 @@ class Chrome:
                 element.click()
             except ElementClickInterceptedException:
                 print("Element is obscured; attempting to close overlay.")
-                self.close_modal(browser)
-                element.click()
+                return False
 
         def scrape_nested_items(nested_element, item_id):
             scraped_data = {}
@@ -266,7 +265,10 @@ class Chrome:
             item_id = item_href.get_attribute("href").split("/item/")[-1]
 
             if multiple_items: 
-                scroll_and_click(multiple_items)
+                click = scroll_and_click(multiple_items)
+                if click == False:
+                    self.close_modal(item)
+                    scroll_and_click(multiple_items)
                 nested_info = find_elements(item, nested_items)
                 if nested_info:
                     scraped = scrape_nested_items(nested_info, item_id)
@@ -284,6 +286,9 @@ class Chrome:
 
                 date = find_element(item, ".inv_owner_since_time.text-success.text-truncate")
 
+                if date == '':
+                    print("empty date", uaid, item_id, user_id)
+                    date = "99 days ago"
                 scanned_inventory[uaid] = {"item_id": item_id, "owner_since": self.parse_time_ago_to_epoch(date.text)}
 
         filtered_keys = self.filter_inventory(scanned_inventory, filter_NFT)
