@@ -35,7 +35,7 @@ class RobloxAPI():
 
 
             self.account_id, self.username = self.fetch_userid_and_name()
-            self.account_inventory = self.fetch_inventory(self.account_id, apply_NFT=True)
+            self.account_inventory = self.fetch_inventory(self.account_id)
             if self.account_id == False:
                 print("Failed to get userid for cookie", cookie)
                 raise ValueError("Invalid account or cookie.")
@@ -52,7 +52,7 @@ class RobloxAPI():
         """
             Gets inventory of current .ROBLOSECURITY used on class
         """
-        self.account_inventory = self.fetch_inventory(self.account_id, apply_NFT=True)
+        self.account_inventory = self.fetch_inventory(self.account_id)
         if self.account_inventory == False:
             raise ValueError("Account has no tradeable items")
 
@@ -83,7 +83,7 @@ class RobloxAPI():
     def fetch_inventory(self, userid):
         #TODO: use roblox API
         cursor = ""
-        inventory = []
+        inventory = {}
         while cursor != None:
             inventory_API = f"https://inventory.roblox.com/v1/users/{userid}/assets/collectibles?cursor={cursor}"
             response = self.request_handler.requestAPI(inventory_API)
@@ -96,11 +96,11 @@ class RobloxAPI():
                     continue
                 # TODO: APPLY NFT
                 # TODO: IF USERID = SELF.USERID THEN DONT APPLY NFT
-                uaid = item['userAssetId']
-                itemId = item['assetId']
-                inventory[uaid] = itemId
+                uaid = str(item['userAssetId'])
+                itemId = str(item['assetId'])
+                inventory[uaid] = {"item_id": itemId}
 
-            return inventory
+            return self.rolimon.add_data_to_inventory(inventory)
 
 
 
@@ -357,7 +357,7 @@ class RobloxAPI():
         owners = []
         next_page_cursor = ""
 
-        while len(owners) < 5 or next_page_cursor == None:
+        while len(owners) < 5 and next_page_cursor != None:
             inventory_api = f"https://inventory.roblox.com/v2/assets/{item_id}/owners?sortOrder=Asc&cursor={next_page_cursor}&limit=100"
             
             response = self.request_handler.requestAPI(inventory_api)
@@ -390,7 +390,7 @@ class RobloxAPI():
 
 
 
-        
+        print("return") 
         return owners
     
 #while True:

@@ -78,7 +78,7 @@ class Doggo:
                     continue
 
                 if roblox_account.check_can_trade(owner) == True:
-                    inventory = self.rolimons.get_inventory(owner)
+                    inventory = roblox_account.fetch_inventory(owner)
                     self.user_queue[owner] = inventory  
                 time.sleep(.1)  # Delay between iterations
 

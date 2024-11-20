@@ -30,6 +30,7 @@ class TradeMaker():
         their_combinations = self.generate_combinations(their_keys, self.min_items_their, self.max_items_their)
 
         # Create sets of item IDs for quick lookup
+        print(self_inventory, self_keys)
         self_item_ids = {self_inventory[key]['item_id'] for key in self_keys}
         valid_trades = []
 
