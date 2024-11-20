@@ -80,9 +80,31 @@ class RobloxAPI():
         else:
             raise ValueError("Couldnt login with cookie", self.cookies)
 
-    def fetch_inventory(self, userid, apply_NFT=False):
+    def fetch_inventory(self, userid):
         #TODO: use roblox API
-        return self.rolimon.get_inventory(userid, apply_NFT)
+        cursor = ""
+        inventory = []
+        while cursor != None:
+            inventory_API = f"https://inventory.roblox.com/v1/users/{userid}/assets/collectibles?cursor={cursor}"
+            response = self.request_handler.requestAPI(inventory_API)
+            if response.status_code != 200:
+                print("inventory API error", inventory_API, response.status_code, response.text)
+                return False
+            
+            for item in response.json()['data']:
+                if item['isOnHold'] == True:
+                    continue
+                # TODO: APPLY NFT
+                # TODO: IF USERID = SELF.USERID THEN DONT APPLY NFT
+                uaid = item['userAssetId']
+                itemId = item['assetId']
+                inventory[uaid] = itemId
+
+            return inventory
+
+
+
+        #return self.rolimon.get_inventory(userid, apply_NFT)
 
     # NOTE: Payload:
     # {"offers":[{"userId":4486142832,"userAssetIds":[672469540],"robux":null},{"userId":1283171278,"userAssetIds":[1310053014],"robux":null}]}
@@ -193,12 +215,12 @@ class RobloxAPI():
                     trader_value += self.rolimon.item_data[item]['total_value']
                 
                 timestamp = trade['timestamp']
-                timestamp_date = datetime.datetime.fromtimestamp(timestamp)
+                timestamp_date = datetime.fromtimestamp(timestamp)
                 
-                current_date = datetime.datetime.now()
+                current_date = datetime.now()
                 valid_trade = TradeMaker().validate_trade(account_rap, account_value, trader_rap, trader_value)
 
-                if not TradeMaker().validate_trade(account_rap, account_value, trader_rap, trader_value) or current_date - timestamp_date >= datetime.timedelta(days=5):
+                if not TradeMaker().validate_trade(account_rap, account_value, trader_rap, trader_value) or current_date - timestamp_date >= timedelta(days=5):
                     # Cancel
                     #https://trades.roblox.com/v1/trades/3534001725946517/decline
                     url = f"https://trades.roblox.com/v1/trades/{trade_id}/decline"
@@ -302,8 +324,8 @@ class RobloxAPI():
             date_diffs = []
             for i in range(1, len(dates)):
                 # Parse the previous and current date string to datetime objects
-                prev_date = datetime.datetime.strptime(dates[i - 1], "%Y-%m-%dT%H:%M:%SZ")
-                curr_date = datetime.datetime.strptime(dates[i], "%Y-%m-%dT%H:%M:%SZ")
+                prev_date = datetime.strptime(dates[i - 1], "%Y-%m-%dT%H:%M:%SZ")
+                curr_date = datetime.strptime(dates[i], "%Y-%m-%dT%H:%M:%SZ")
                 # Calculate the difference in days between the two dates
                 diff = abs((curr_date - prev_date).days)
                 date_diffs.append(diff)
@@ -335,14 +357,18 @@ class RobloxAPI():
         owners = []
         next_page_cursor = ""
 
-        while len(owners) < 5:
+        while len(owners) < 5 or next_page_cursor == None:
             inventory_api = f"https://inventory.roblox.com/v2/assets/{item_id}/owners?sortOrder=Asc&cursor={next_page_cursor}&limit=100"
             
             response = self.request_handler.requestAPI(inventory_api)
 
+            if response.status_code != 200:
+                print("Got API response", response.text, "on", response.url, "Trying again")
+                continue
+
+            next_page_cursor = response.json()['nextPageCursor']
             for asset in response.json()['data']:
                 if asset['owner'] == None:
-                    print("null owner")
                     continue
                 owner_since = asset['updated']
 
@@ -359,14 +385,11 @@ class RobloxAPI():
                 time_diff = today - given_date_naive
 
                 if time_diff < timedelta(days=7):
-                    print("appended owner")
-                    owners.append(asset['owner'])
+                    print("appended owner", asset['owner'])
+                    owners.append(asset['owner']['id'])
 
 
 
-            if response.status_code != 200:
-                print("Got API response", response.text, "on", response.url, "Trying again")
-                continue
         
         return owners
     
