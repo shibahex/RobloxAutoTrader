@@ -1,6 +1,6 @@
 from handler import *
 import requests
-import datetime
+from datetime import datetime, timedelta
 import time
 import os
 import pyotp
@@ -49,11 +49,17 @@ class RobloxAPI():
     
     # refresh current inventory
     def refresh_self_inventory(self):
+        """
+            Gets inventory of current .ROBLOSECURITY used on class
+        """
         self.account_inventory = self.fetch_inventory(self.account_id, apply_NFT=True)
         if self.account_inventory == False:
             raise ValueError("Account has no tradeable items")
 
     def refresh_csrf(self):
+        """
+            returns CSRF token to validate next request
+        """
         token_post = self.request_handler.requestAPI('https://catalog.roblox.com/v1/catalog/items/details', method="post")
 
         if 'x-csrf-token' in token_post.headers:
@@ -65,6 +71,9 @@ class RobloxAPI():
         pass
 
     def fetch_userid_and_name(self):
+        """
+            Gets info on the current account to self class
+        """
         auth_response = self.request_handler.requestAPI("https://users.roblox.com/v1/users/authenticated")
         if auth_response.status_code == 200: 
             return auth_response.json()['id'], auth_response.json()['name']
@@ -72,6 +81,7 @@ class RobloxAPI():
             raise ValueError("Couldnt login with cookie", self.cookies)
 
     def fetch_inventory(self, userid, apply_NFT=False):
+        #TODO: use roblox API
         return self.rolimon.get_inventory(userid, apply_NFT)
 
     # NOTE: Payload:
@@ -158,6 +168,9 @@ class RobloxAPI():
         pass
 
     def outbound_checker(self):
+        """
+            Scans Json for trades then cancel trades that dont fit into the config
+        """
         outbounds = self.json.get_outbounds(cookie=self.cookies['.ROBLOSECURITY'])
         if outbounds:
             for trade in outbounds:
@@ -199,6 +212,9 @@ class RobloxAPI():
                         print(cancel_request.text)
 
     def check_can_trade(self, userid):
+        """
+            Checks if /trade endpoint is valid for userid
+        """
         # TODO: Handle this pls tmr next priority
         validation_headers = None
         can_trade = self.request_handler.requestAPI(f"https://www.roblox.com/users/{userid}/trade", additional_headers=validation_headers)
@@ -278,6 +294,9 @@ class RobloxAPI():
         return False
 
     def analyze_volume_data(self, volume_data_points):
+        """
+            Scans volume date and sees how active an item is selling and if theres large gaps of 7 days between sales it returns False
+        """
         # Function to calculate date differences in days
         def calculate_date_diff(dates):
             date_diffs = []
@@ -308,6 +327,49 @@ class RobloxAPI():
             print("Large gaps between dates (in days):", large_gaps)
             return False
 
+    def get_active_traders(self, item_id):
+        """
+            Scan atleast 3 pages of owners and append new owners
+            If less than 5 owners isn't found it will contintue to the next pages
+        """
+        owners = []
+        next_page_cursor = ""
+
+        while len(owners) < 5:
+            inventory_api = f"https://inventory.roblox.com/v2/assets/{item_id}/owners?sortOrder=Asc&cursor={next_page_cursor}&limit=100"
+            
+            response = self.request_handler.requestAPI(inventory_api)
+
+            for asset in response.json()['data']:
+                if asset['owner'] == None:
+                    print("null owner")
+                    continue
+                owner_since = asset['updated']
+
+                # Assuming owner_since is a string like "2024-11-15T12:00:00Z"
+                given_date = datetime.fromisoformat(owner_since.replace("Z", "+00:00"))
+
+                # Remove timezone from given_date to make it naive
+                given_date_naive = given_date.replace(tzinfo=None)
+
+                # Get today's date and time (naive by default)
+                today = datetime.now()
+
+                # Calculate the difference between today and the given date
+                time_diff = today - given_date_naive
+
+                if time_diff < timedelta(days=7):
+                    print("appended owner")
+                    owners.append(asset['owner'])
+
+
+
+            if response.status_code != 200:
+                print("Got API response", response.text, "on", response.url, "Trying again")
+                continue
+        
+        return owners
+    
 #while True:
 #    hat = input("enter id > ")
 #    if RobloxAPI().is_projected(hat) == True:

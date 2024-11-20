@@ -63,7 +63,7 @@ class Doggo:
                 time.sleep(20)
                 continue
             random_item = self.rolimons.return_item_to_scan()['item_id']
-            owners = self.rolimons.return_formatted_owners(random_item)
+            owners = roblox_account.get_active_traders(random_item)
 
             accounts = self.json.read_data()
             all_cached_traders = []
