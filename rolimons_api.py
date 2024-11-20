@@ -170,57 +170,57 @@ class RolimonAPI():
         return owners
 
     #TODO: use selenium to get inventory (forced to because Owner since is tracked in the rolimon backend and isnt an API)
-    def get_inventory(self, user_id, applyNFT=False) -> dict:
-        get_profile_inventory = Chrome().get_profile_data(user_id, applyNFT)
+    def add_data_to_inventory(self, inventory) -> dict:
+        """
+            Returns inventory with rolimon data appended into it
+            also scans for projecteds
+            
+            basically post processing of the inventory after getting it from roblox API
+        """
 
-        print("Got inventory from selenium")
         filtered_inventory = {}
 
-        if get_profile_inventory:
-            for item in get_profile_inventory:
-                asset_id = get_profile_inventory[item]['item_id']
-                # total value reutns the RAP if theres no value
+        for item in inventory:
+            asset_id = inventory[item]['item_id']
+            # total value reutns the RAP if theres no value
+            
+            value = self.item_data[asset_id]['total_value']
+            rap = self.item_data[asset_id]['rap']
+            if rap == value:
+                # Check if the asset_id is in the projected JSON file
+                projected_data = self.projected_json.read_data()
+                existing_item = False
+                for projected_item in projected_data:
+                    if int(asset_id) == int(projected_item):
+                        existing_item = True
+
                 
-                value = self.item_data[asset_id]['total_value']
-                rap = self.item_data[asset_id]['rap']
-                if rap == value:
-                    # Check if the asset_id is in the projected JSON file
-                    projected_data = self.projected_json.read_data()
-                    existing_item = False
-                    for projected_item in projected_data:
-                        if int(asset_id) == int(projected_item):
-                            existing_item = True
-
-                    
-                    if existing_item:
-                        is_projected = projected_data[asset_id]['is_projected']
-                        if is_projected:
-                            continue
-                        else:
-                            print(f"Asset ID {asset_id} is marked as not projected. Skipping.")
+                if existing_item:
+                    is_projected = projected_data[asset_id]['is_projected']
+                    if is_projected:
+                        continue
                     else:
-                        # If asset_id does not exist in the JSON, check projection status
-                        is_projected = roblox_api.RobloxAPI().is_projected(asset_id)
-                        if is_projected:
-                            self.projected_json.update_projected_status(asset_id, is_projected)
-                            continue
-                        else:
-                            print(f"Asset ID {asset_id} is not projected.")
-                            self.projected_json.update_projected_status(asset_id, is_projected)
+                        print(f"Asset ID {asset_id} is marked as not projected. Skipping.")
+                else:
+                    # If asset_id does not exist in the JSON, check projection status
+                    is_projected = roblox_api.RobloxAPI().is_projected(asset_id)
+                    if is_projected:
+                        self.projected_json.update_projected_status(asset_id, is_projected)
+                        continue
+                    else:
+                        print(f"Asset ID {asset_id} is not projected.")
+                        self.projected_json.update_projected_status(asset_id, is_projected)
 
 
 
-                filtered_inventory[item] = {
-                    'item_id': asset_id,
-                    'value': value,
-                    'rap': rap,
-                    'owner_since': get_profile_inventory[item]['owner_since']
-                }
+            filtered_inventory[item] = {
+                'item_id': asset_id,
+                'value': value,
+                'rap': rap,
+            }
 
-            # apply more usefull info about the item
-            return filtered_inventory
-        else:
-            return False
+        # apply more usefull info about the item
+        return filtered_inventory
 
 
     
@@ -242,7 +242,9 @@ class RolimonAPI():
             return False
     
     def return_trade_ads(self):
-        
+        """
+            Returns rolimons recent trade ads
+        """
         get_ads_response =  self.rolimon_parser.requestAPI("https://api.rolimons.com/tradeads/v1/getrecentads")
         response = get_ads_response.json()
         if response['success'] == False:
