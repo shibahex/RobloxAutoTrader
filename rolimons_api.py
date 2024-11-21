@@ -3,6 +3,7 @@ import json
 import random
 from handler import *
 import roblox_api
+from datetime import datetime, timedelta
 class Item:
     def __init__(self, item_id, item_name, asset_type_id, original_price, created, 
                  first_timestamp, best_price, favorited, num_sellers, rap, 
@@ -180,6 +181,58 @@ class RolimonAPI():
 
         filtered_inventory = {}
 
+        def is_projected(asset_id):
+            """
+                Checks if item is already cached as projected then checks if its projected.
+                if its not in cache we check if its projected then save it
+                
+                TODO: If the price changed alot then rescan it
+            """
+            def is_recently_scanned(projected_data, asset_id):
+                timestamp = projected_data[str(asset_id)]['timestamp']
+                timestamp_datetime = datetime.utcfromtimestamp(timestamp)
+                current_datetime = datetime.utcnow()
+
+                # Calculate the difference between the current time and the timestamp
+                time_difference = current_datetime - timestamp_datetime
+
+                # Get the number of days in the time difference
+                days_ago = time_difference.days
+
+                # Check if it's been more than 3 days
+                if days_ago > 3:
+                    return False
+
+                return True
+
+            def check_projected(asset_id):
+                is_projected = roblox_api.RobloxAPI().is_projected(asset_id)
+                if is_projected:
+                    self.projected_json.update_projected_status(asset_id, is_projected)
+                    return True
+                else:
+                    print(f"Asset ID {asset_id} is not projected.")
+                    self.projected_json.update_projected_status(asset_id, is_projected)
+                    return False
+
+            projected_data = self.projected_json.read_data()
+            projected_ids = projected_data.keys()
+
+            if str(asset_id) in projected_ids:
+                if not is_recently_scanned(projected_data, asset_id):
+                    return check_projected(asset_id)
+
+
+                if projected_data[str(asset_id)]['is_projected'] == True:
+                    return True
+                else:
+                    return False
+            
+            else:
+                return check_projected(asset_id)
+
+
+
         for item in inventory:
             asset_id = inventory[item]['item_id']
             # total value reutns the RAP if theres no value
@@ -187,30 +240,8 @@ class RolimonAPI():
             value = self.item_data[asset_id]['total_value']
             rap = self.item_data[asset_id]['rap']
             if rap == value:
-                # Check if the asset_id is in the projected JSON file
-                projected_data = self.projected_json.read_data()
-                existing_item = False
-                for projected_item in projected_data:
-                    if int(asset_id) == int(projected_item):
-                        existing_item = True
-
-                
-                if existing_item:
-                    is_projected = projected_data[asset_id]['is_projected']
-                    if is_projected:
-                        continue
-                    else:
-                        print(f"Asset ID {asset_id} is marked as not projected. Skipping.")
-                else:
-                    # If asset_id does not exist in the JSON, check projection status
-                    is_projected = roblox_api.RobloxAPI().is_projected(asset_id)
-                    if is_projected:
-                        self.projected_json.update_projected_status(asset_id, is_projected)
-                        continue
-                    else:
-                        print(f"Asset ID {asset_id} is not projected.")
-                        self.projected_json.update_projected_status(asset_id, is_projected)
-
+                if is_projected(asset_id) == True:
+                    continue
 
 
             filtered_inventory[item] = {
