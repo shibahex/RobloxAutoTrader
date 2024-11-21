@@ -80,7 +80,9 @@ class RequestsHandler:
         
         if not self.proxies:
             self.use_proxies = False
-
+        
+        consecutive_rate_limits = 0  
+        
         while True:
             proxy_dict = self.return_proxy() if self.use_proxies else None
 
@@ -107,23 +109,35 @@ class RequestsHandler:
             """
             Status Code Managment
             """
+
+            if Response.status_code == 429:
+                print("hit ratelimit on url", URL)
+                print(Response.json())
+                if self.use_proxies:
+                    self.rate_limit(proxy_dict['http'])
+                else:
+                    consecutive_rate_limits += 1
+                    wait_time = 45 * (3 ** consecutive_rate_limits)
+                    print(f"Rate limited without proxies, waiting {wait_time} secs.")
+
+                    time.sleep(wait_time)
+
+                    # If this API is hard limited return 429
+                    if consecutive_rate_limits > 5:
+                        return 429
+            else:
+                consecutive_rate_limits = 0
+
+
             if Response.status_code == 200:
                 print("200", URL)
                 return Response
-
             elif Response.status_code == 403:
                 # debug purposes also items/details returns 403 on purpose
                 if URL != "https://catalog.roblox.com/v1/catalog/items/details":
                     print("Error code 403: Authorization declined on url", URL)
                     #print(proxy_dict)
                 return Response
-            elif Response.status_code == 429:
-                print("hit ratelimit on url", URL)
-                if self.use_proxies:
-                    self.rate_limit(proxy_dict['http'])
-                else:
-                    print("Rate limited without proxies, waiting 45 secs.")
-                    time.sleep(45)
             elif Response.status_code == 500:
                 print("API failed to respond..", URL)
                 return Response
