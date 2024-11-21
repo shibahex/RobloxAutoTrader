@@ -60,6 +60,7 @@ class TradeMaker():
                     if self.validate_trade(self_rap, self_value, their_rap, their_value):
                         valid_trades.append((self_side, their_side))
                         if len(valid_trades) > 1:
+                            # TODO: make it queue multiple trades and then pick the best one based on config
                             return valid_trades[0]
 
         return valid_trades[0] if valid_trades else None
