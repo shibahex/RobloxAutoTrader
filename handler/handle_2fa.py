@@ -13,6 +13,7 @@ class AuthHandler:
 
 
     def verify_request(self, req_handler, user_Id, metadata_challengeId, auth_code):
+        print("trying to verify 2fa")
         request = req_handler.Session.post("https://twostepverification.roblox.com/v1/users/" + user_Id + "/challenges/authenticator/verify", headers=req_handler.headers, json={
             "actionType": "Generic",
             "challengeId": metadata_challengeId,
@@ -21,7 +22,8 @@ class AuthHandler:
 
         if "errors" in request.json():
             print("2fa error")
-            input(request.json()["errors"][0]["message"])
+            print(request.json())
+            #input(request.json()["errors"][0]["message"])
             return False
         return request.json()["verificationToken"]
 
