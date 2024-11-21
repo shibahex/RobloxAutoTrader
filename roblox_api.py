@@ -142,7 +142,57 @@ class RobloxAPI():
             'rblx-challenge-type': "twostepverification"
         }
 
-    def send_trade(self, trader_id, trade_send, trade_recieve):
+    
+    def counter_trades(self):
+        # TODO: make the counter kind of like the original trade
+        def return_inbounds():
+            cursor = ""
+            trades = {}
+            while cursor != None:
+                inbound_url = f"https://trades.roblox.com/v1/trades/inbound?cursor={cursor}&limit=100&sortOrder=Desc"
+                print("getting inbounds")
+                response = self.request_handler.requestAPI(inbound_url)
+                if response.status_code == 200:
+                    cursor = response.json()['nextPageCursor']
+                    for trade in response.json()['data']:
+                        trades[trade['id']] = {
+                            "trade_id": trade['id'],
+                            "user_id": trade['user']['id']
+                        }
+
+            return trades            
+        #https://trades.roblox.com/v1/trades/132
+        # Get info about trade
+
+        trades = return_inbounds()
+        for trade_id, trade_info in trades.items():
+            trader_id = trade_info['user_id']
+            trade_id = trade_info['trade_id']
+
+            trader_inventory = self.fetch_inventory(trader_id)
+            generated_trade = TradeMaker().generate_trade_with_timeout(self.account_inventory, trader_inventory)
+
+            if not generated_trade:
+                print("couldnt generate trade for counter")
+                continue
+
+            self_side, their_side = generated_trade
+            send_trade_response = self.send_trade(trader_id, self_side, their_side, counter_trade=True, counter_id=trade_id)
+            if send_trade_response == 429:
+                print("ratelimit countering")
+            if send_trade_response:
+                print("sent counter")
+            else:
+                print("None counter erro")
+            
+
+
+
+        #https://trades.roblox.com/v1/trades/3274127520679365/counter
+
+
+        pass
+    def send_trade(self, trader_id, trade_send, trade_recieve, counter_trade=False, counter_id=None):
         """
             Send Trader ID Then the list of items (list of assetids)
         """
@@ -153,20 +203,27 @@ class RobloxAPI():
             "robux":None}]}
 
 
+        trade_api = "https://trades.roblox.com/v1/trades/send"
+        if counter_trade == True and counter_id != None:
+            trade_api = f"https://trades.roblox.com/v1/trades/{counter_id}/counter"
+
+
         validation_headers = None
         while True:
-            trade_response = self.request_handler.requestAPI("https://trades.roblox.com/v1/trades/send", "post", payload=trade_payload, additional_headers=validation_headers)
+            trade_response = self.request_handler.requestAPI(trade_api, "post", payload=trade_payload, additional_headers=validation_headers)
             
             if trade_response.status_code == 200:
                 print("Trade sent!", trade_response.text)
                 return trade_response.json()['id']
+            elif trade_response.status_code == 429:
+                return trade_response.status_code
             elif trade_response.status_code == 403:
                 print("403 error:", trade_response.json())
                 if 'rblx-challenge-id' in trade_response.headers:
                     print("doing 2fa shit")
                     validation = self.validate_2fa(trade_response)
                     if validation == False:
-                        return None
+                        return 403
                     validation_headers = validation
                     continue
                
@@ -197,6 +254,15 @@ class RobloxAPI():
         if outbounds:
             for trade in outbounds:
                 trade_id = trade['trade_id']
+                
+                # Delete outbound if its already expired
+                timestamp = trade['timestamp']
+                timestamp_date = datetime.fromtimestamp(timestamp)
+                current_date = datetime.now()
+                if current_date - timestamp_date >= timedelta(days=5):
+                    self.json.remove_trade(cookie=self.cookies['.ROBLOSECURITY'], trade_id=trade_id)
+                    continue
+
 
                 account_items = trade['self_items']
                 account_rap = 0
@@ -214,13 +280,9 @@ class RobloxAPI():
                     trader_rap += self.rolimon.item_data[item]['rap']
                     trader_value += self.rolimon.item_data[item]['total_value']
                 
-                timestamp = trade['timestamp']
-                timestamp_date = datetime.fromtimestamp(timestamp)
-                
-                current_date = datetime.now()
                 valid_trade = TradeMaker().validate_trade(account_rap, account_value, trader_rap, trader_value)
 
-                if not TradeMaker().validate_trade(account_rap, account_value, trader_rap, trader_value) or current_date - timestamp_date >= timedelta(days=5):
+                if not TradeMaker().validate_trade(account_rap, account_value, trader_rap, trader_value):
                     # Cancel
                     #https://trades.roblox.com/v1/trades/3534001725946517/decline
                     url = f"https://trades.roblox.com/v1/trades/{trade_id}/decline"
