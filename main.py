@@ -6,19 +6,15 @@ from handler import *
 import threading
 from datetime import datetime, timedelta
 from handler.handle_json import JsonHandler
+
 """
-    1. Outbound Checker
-    2. dont send duplicate traders to users
-    (also make it so it only sends to active users)
-    3. check if can trade before trading maybe?
-    4. Remove projects from json if timestamp is greater than a week
-    5. remove outbounds if timestamp is like 5 days
-    6. Auth system
-    7. add price to projected.json and scan it again if the price difference is huge
-    8. Use https://inventory.roblox.com/v2/assets/128208025/owners?sortOrder=Asc&limit=100 to get active users instead of rolimons
-            (and dont use rolimons to get inventory use roblox inventory API)
-        so get random item ID then use the owner API to get one random player that owned within like a week and see if you can trade with them
-    
+    1. add price to projected.json and scan it again if the price difference is huge
+    (you're gonna have to add the price the projected was when scanned and put it in the json)
+
+    2. multithread appending owners (bake in get inventory so multiple threads work on inventories)
+
+    3. Counter trades even with the ratelimit because it seems like counters are a seperate limit?
+    (for the counters try to make the countertrade have the most amount of common items that were used in the first trade, AKA dont send a totally different trade but just make it so you are winning with the same items)
 """
 class Doggo:
     def __init__(self):
@@ -91,7 +87,6 @@ class Doggo:
         while True:
             for account in roblox_accounts:
                 account.outbound_checker()
-                #time.sleep(600)
                 account_inventory = account.account_inventory
                 if not self.user_queue:  # Check if user_queue is empty
                     print("No users to trade with. Waiting...")
@@ -110,6 +105,12 @@ class Doggo:
                             continue
                         self_side, their_side = generated_trade
                         send_trade_response = account.send_trade(trader, self_side, their_side)
+
+                        if send_trade_response == 429:
+                            # TODO: add value in cookies.json for ratelimit_timestamp and set to null if not ratelimited
+                            print("Roblox account limited")
+                            account.counter_trades()
+                            break
                         
                         # Save to cache for outbound checker
                         self_item_ids = [account_inventory[key]['item_id'] for key in self_side]
