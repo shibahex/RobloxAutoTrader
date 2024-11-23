@@ -1,7 +1,7 @@
 from handler.handle_config import ConfigHandler
 from itertools import combinations, product
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
-
+import math
 
 import time
 class TradeMaker():
@@ -20,8 +20,64 @@ class TradeMaker():
 
         self.min_items_their = self.config.trading['MinimumItemsTheirSide']
         self.max_items_their = self.config.trading['MaximumItemsTheirSide']
+        self.select_by = self.config.trading['Select_Trade_Using']
 
-    def generate_trade(self, self_inventory, their_inventory):
+        self.max_robux = self.config.trading['MaxRobux']
+        self.robux_divide = self.config.trading['RobuxDividePercentage']
+        self.trade_robux = self.config.trading['TradeRobux']
+
+    def select_trade(self, valid_trades, select_by='lowest_rap_gain'):
+        """
+            Returns the trade that matches the sort arg
+        """
+
+        if select_by == 'lowest_demand':
+            return min(valid_trades, key=lambda trade: trade['demand'])
+
+        elif select_by  == 'random':
+            return random.choice(valid_trades)
+
+        elif select_by == 'highest_demand':
+            return max(valid_trades, key=lambda trade: trade['demand'])
+            
+        elif select_by == 'highest_sum_of_trade':
+            return max(valid_trades, key=lambda trade: trade['total_value'] + trade['total_rap'])
+
+        elif select_by == 'lowest_sum_of_trade':
+            return min(valid_trades, key=lambda trade: trade['total_value'] + trade['total_rap'])
+
+        elif select_by == 'closest_score':
+            return min(valid_trades, key=lambda trade: abs(trade['score']))
+
+        elif select_by == 'highest_rap_gain':
+            return max(valid_trades, key=lambda trade: trade['their_rap'] - trade['self_rap'])
+
+        elif select_by == 'lowest_rap_gain':
+            return min(valid_trades, key=lambda trade: trade['their_rap'] - trade['self_rap'])
+
+        elif select_by == 'highest_value_gain':
+            return max(valid_trades, key=lambda trade: trade['their_value'] - trade['self_value'])
+
+        elif select_by == 'lowest_value_gain':
+            return min(valid_trades, key=lambda trade: trade['their_value'] - trade['self_value'])
+
+        elif select_by == 'upgrade':
+            # Select the trade with the most "upgrade" (i.e., their side has more items than self side)
+            return max(valid_trades, key=lambda trade: (trade['num_items_their'] - trade['num_items_self']))
+
+        elif select_by == 'downgrade':
+            # Select the trade with the most "downgrade" (i.e., self side has more items than their side)
+            return max(valid_trades, key=lambda trade: (trade['num_items_self'] - trade['num_items_their']))
+        else:
+            raise ValueError(f"Unknown selection type: {select_by}")
+
+    def generate_trade(self, self_inventory, their_inventory, counter_trade=False):
+        """
+            Algorithm responsible for generating combinations and validating them..
+        """
+
+
+        # TODO: add roblox in the combinations so we open up more trades
         self_keys = list(self_inventory.keys())
         their_keys = list(their_inventory.keys())
 
@@ -30,9 +86,29 @@ class TradeMaker():
         their_combinations = self.generate_combinations(their_keys, self.min_items_their, self.max_items_their)
 
         # Create sets of item IDs for quick lookup
-        print(self_inventory, self_keys)
+ #       print(self_inventory, self_keys)
         self_item_ids = {self_inventory[key]['item_id'] for key in self_keys}
         valid_trades = []
+
+        def get_total_values(items, inventory):
+            """
+                Gets the total value, rap and demand of a list of items
+            """
+            value = 0
+            rap = 0
+            demand = 0
+            for key in items:
+                item = inventory[key]
+                value += item['value']
+                rap += item['rap']
+
+                current_demand = item['demand']
+                if current_demand:
+                    demand += current_demand
+
+            return value, rap, demand
+
+
 
         for self_side in self_combinations:
             # Create a set for the current self_side to check against
@@ -43,29 +119,86 @@ class TradeMaker():
 
                 # Ensure no overlapping item IDs
                 if self_side_item_ids.isdisjoint(their_side_item_ids):
-                    self_value = 0
-                    self_rap = 0
-                    for key in self_side:
-                        item = self_inventory[key]
-                        self_value += item['value']
-                        self_rap += item['rap']
 
-                    their_value = 0
-                    their_rap = 0
-                    for key in their_side:
-                        item = their_inventory[key]
-                        their_value += item['value']
-                        their_rap += item['rap']
+                    self_value, self_rap, self_demand = get_total_values(self_side_item_ids, self_inventory)
 
-                    if self.validate_trade(self_rap, self_value, their_rap, their_value):
-                        valid_trades.append((self_side, their_side))
-                        if len(valid_trades) > 1:
-                            # TODO: make it queue multiple trades and then pick the best one based on config
-                            return valid_trades[0]
+                    their_value, their_rap, their_demand = get_total_values(their_side_item_ids, their_inventory)
+                    
+                    send_robux = None
+                    #TODO: check if roblox acc has enough roblox and it it doenst send self.max_robux to remaning robux
+
+                    #calc_robux = round((their_rap - self_rap) // float(2))
+                    # round down
+                    calc_robux = math.floor((their_rap - self_rap) // float(2))
+
+                    # Cap the result at self_rap * 0.5 (Roblox limit)
+                    calc_robux = min(calc_robux, self_rap * 0.5)
+                    if calc_robux > 0 and self.trade_robux:
+                        # If calculated robux if more than max robux just use max robux?
+                        if calc_robux > self.max_robux:
+                            calc_robux = self.max_robux
+
+                        send_robux = calc_robux
+
+
+                    if self.validate_trade(self_rap, self_value, their_rap, their_value, robux=send_robux):
+                        # Calculate the trade sum (RAP and value)
+                        total_value = self_value + their_value
+                        total_rap = self_rap + their_rap
+
+                        # Calculate close score (percentage)
+                        score = ((their_rap - self_rap) / (their_rap + self_rap)) * 100 if (self_rap + their_rap) != 0 else 0
+
+                        # Assume 'demand' is calculated somehow (could be based on rarity, user preference, or external data)
+                        demand = self_demand + their_demand
+
+                        # Determine upgrade/downgrade based on number of items
+                        num_items_self = len(self_side)
+                        num_items_their = len(their_side)
+
+                        # Upgrade: Maximize number of items on their side, minimize on self side
+                        upgrade = num_items_their > num_items_self
+
+                        # Downgrade: Maximize number of items on self side, minimize on their side
+                        downgrade = num_items_self > num_items_their
+
+                        # Append all necessary details to valid_trades
+                        valid_trades.append({
+                            'self_side': self_side,
+                            'self_robux': send_robux,
+                            'their_side': their_side,
+                            'self_value': self_value,
+                            'their_value': their_value,
+                            'self_rap': self_rap,
+                            'their_rap': their_rap,
+                            'total_value': total_value,
+                            'total_rap': total_rap,
+                            'score': score,
+                            'demand': demand,
+                            'upgrade': upgrade,
+                            'downgrade': downgrade,
+                            'num_items_self': num_items_self,
+                            'num_items_their': num_items_their
+                        })
+
+                        if len(valid_trades) > 150:
+                            break
+
+            if valid_trades:
+                # pick random trade to avoid sending the same counter trade
+                if counter_trade == True:
+                    trade = self.select_trade(valid_trades, select_by="random")
+                    return trade
+
+                trade = self.select_trade(valid_trades, select_by=self.select_by.lower())
+
+
+                # TODO: make it queue multiple trades and then pick the best one based on config
+                return trade
 
         return valid_trades[0] if valid_trades else None
 
-    def generate_trade_with_timeout(self, self_inventory, their_inventory, timeout=120):
+    def generate_trade_with_timeout(self, self_inventory, their_inventory, counter_trade=False, timeout=120):
         # Run generate_trade in a separate thread with a timeout
         with ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(self.generate_trade, self_inventory, their_inventory)
@@ -83,10 +216,21 @@ class TradeMaker():
     def check_value_gain(self, their_value, self_value):
         return self.config.check_gain(their_value, self_value, self.min_value_gain, self.max_value_gain)
 
-    def validate_trade(self, self_rap, self_value, their_rap, their_value):
+    def validate_trade(self, self_rap, self_value, their_rap, their_value, robux=None):
+
+        value_gain = their_value - self_value
+        if robux != None and robux != 0:
+            # see if value is losing because of robux
+            # TODO: test to make sure this is a valid method of doing this
+            if (value_gain + robux) < self.min_value_gain:
+                return False
+
+            #if robux > calc_robux:
+            #    return False
+
+
         # Precompute the total value and RAP for both sides in a single loop
         # Calculate value gain and close percentage
-        value_gain = their_value - self_value
         if self_rap + their_rap == 0:
             close_percentage = 0  # Prevent division by zero
         else:
@@ -105,6 +249,7 @@ class TradeMaker():
             return False
 
         return True
+
     def check_rap_gain(self, their_rap, self_rap):
         # Calculate the RAP gain
         rap_gain = their_rap - self_rap
