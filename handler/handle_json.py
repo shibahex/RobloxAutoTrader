@@ -57,20 +57,88 @@ class JsonHandler:
         if not account_found:
             new_account = {
                 'cookie': cookie,
-                'trades': [trade_dict]
+                'trades': [trade_dict],
+                'ratelimit_timestamp': None
             }
             data['roblox_accounts'].append(new_account)
 
         # Write the updated data back to the file
         self.write_data(data)
 
+    def add_ratelimit_timestamp(self, cookie) -> None:
+        data = self.read_data()
+        for account in data['roblox_accounts']:
+            if account.get('cookie') == cookie:
+                current_date = datetime.now()
+
+                account['ratelimit_timestamp'] = current_date.isoformat()
+                self.write_data(data)
+                return True
+
+        pass
+
+    def is_all_ratelimited(self):
+        
+        data = self.read_data()
+        for account in data['roblox_accounts']:
+            current_date = datetime.now()
+
+            ratelimit_timestamp = account['ratelimit_timestamp']
+            # Parse the timestamp string into a datetime object
+            try:
+                timestamp_date = datetime.fromisoformat(ratelimit_timestamp)
+            except:
+                # Handle invalid timestamp format if needed
+                return False
+            
+
+
+            if current_date - timestamp_date >= timedelta(hours=6):
+                # greater than 6 hours
+                account['ratelimit_timestamp'] = None
+                self.write_data(data)
+                return False
+
+        return True
+
+    def check_ratelimit_cookie(self, cookie) -> None:
+        """
+            Checks if the cookie is ratelimited or not
+        """
+
+        data = self.read_data()
+        for account in data['roblox_accounts']:
+            if account.get('cookie') == cookie:
+                ratelimit_timestamp = account['ratelimit_timestamp']
+                if ratelimit_timestamp == None:
+                    return False
+
+                
+                timestamp = account['ratelimit_timestamp']
+                # Parse the timestamp string into a datetime object
+                try:
+                    timestamp_date = datetime.fromisoformat(ratelimit_timestamp)
+                except:
+                    # Handle invalid timestamp format if needed
+                    return False
+
+                current_date = datetime.now()
+
+                if current_date - timestamp_date >= timedelta(hours=6):
+                    # greater than 1 day
+                    account['ratelimit_timestamp'] = None
+                    self.write_data(data)
+                    return False
+                
+                return True
 
     def add_cookie(self, cookie, auth, auth_ticket) -> None:
         data = self.read_data()
         
         # Check for duplicate cookies
         if not any(account['cookie'] == cookie for account in data['roblox_accounts']):
-            data['roblox_accounts'].append({'cookie': cookie, 'auth_secret': auth, 'auth_ticket': auth_ticket})
+            data['roblox_accounts'].append({'cookie': cookie, 'auth_secret': auth, 'auth_ticket': auth_ticket, 'ratelimit_timestamp': None})
+
             self.write_data(data)
             self.cli.print_success("Cookie added suscessfully")
             time.sleep(1)
@@ -146,11 +214,15 @@ class JsonHandler:
             print("No cookies found.")
 
 
-    def update_projected_status(self, item_id:int or str, projected_status: bool):
+    def update_projected_status(self, item_id:int or str, projected_status: bool, current_price: int or str) -> None:
         """Updates the projected status of a specific item ID."""
         data = self.read_data()
         now_time = datetime.now()
 
-        data[item_id] = {"is_projected": projected_status, 'timestamp': now_time.timestamp()}
+        data[item_id] = {
+            'is_projected': projected_status, 
+            'timestamp': now_time.timestamp(),
+            'last_price': current_price
+        }
         self.write_data(data)
 
