@@ -19,6 +19,8 @@ class RobloxAPI():
 
     def __init__(self, cookie:dict=None, auth_secret=None, auth_ticket=None, Proxies=False):
 
+        self.outbounds_userids = []
+
         self.parse_handler = RequestsHandler(Session=requests.Session(), use_proxies=True) 
         self.config = ConfigHandler('config.cfg')
 
@@ -142,57 +144,71 @@ class RobloxAPI():
             'rblx-challenge-type': "twostepverification"
         }
 
-    
+
+
+    def return_trade_details(self, data):
+        """
+            For APIs like inbounds, outbounds and inactive, scrapes the data and returns it formatted
+        """
+        trades = {}
+        for trade in data:
+            trades[trade['id']] = {
+                "trade_id": trade['id'],
+                "user_id": trade['user']['id'],
+                "created": trade['created'] 
+            }
+        return trades
+
+    def get_trades(self, page_url, limit_pages=None) -> list:
+        """
+            Get every trade_id from trade pages from APIs: inbounds, outbounds and inactive
+            Make sure cursor isn't in the URL arg as the func adds it for you
+        """
+        cursor = ""
+        page_count = 0
+        trades = {}
+        while cursor != None:
+            if page_count and page_count >= limit_pages:
+                break
+
+            response = self.request_handler.requestAPI(f"{page_url}&cursor={cursor}")
+            if response.status_code == 200:
+                trades.update(self.return_trade_details(response.json()['data']))
+                cursor = response.json()['nextPageCursor']
+                page_count += 1
+
+        return trades  
+
     def counter_trades(self):
         # TODO: make the counter kind of like the original trade
-        def return_inbounds():
-            cursor = ""
-            trades = {}
-            while cursor != None:
-                inbound_url = f"https://trades.roblox.com/v1/trades/inbound?cursor={cursor}&limit=100&sortOrder=Desc"
-                print("getting inbounds")
-                response = self.request_handler.requestAPI(inbound_url)
-                if response.status_code == 200:
-                    cursor = response.json()['nextPageCursor']
-                    for trade in response.json()['data']:
-                        trades[trade['id']] = {
-                            "trade_id": trade['id'],
-                            "user_id": trade['user']['id']
-                        }
-
-            return trades            
-        #https://trades.roblox.com/v1/trades/132
         # Get info about trade
-
-        trades = return_inbounds()
+        trades = self.get_trades("https://trades.roblox.com/v1/trades/inbound?limit=100&sortOrder=Desc")
         for trade_id, trade_info in trades.items():
             trader_id = trade_info['user_id']
             trade_id = trade_info['trade_id']
 
             trader_inventory = self.fetch_inventory(trader_id)
-            generated_trade = TradeMaker().generate_trade_with_timeout(self.account_inventory, trader_inventory)
+
+            generated_trade = TradeMaker().generate_trade_with_timeout(self.account_inventory, trader_inventory, counter_trade=True)
 
             if not generated_trade:
                 print("couldnt generate trade for counter")
                 continue
 
-            self_side, their_side = generated_trade
-            send_trade_response = self.send_trade(trader_id, self_side, their_side, counter_trade=True, counter_id=trade_id)
+            their_side = generated_trade['their_side']
+
+            self_side = generated_trade['self_side']
+            self_robux = generated_trade['self_robux']
+
+            send_trade_response = self.send_trade(trader_id, self_side, their_side, counter_trade=True, counter_id=trade_id, self_robux=self_robux)
             if send_trade_response == 429:
                 print("ratelimit countering")
             if send_trade_response:
                 print("sent counter")
             else:
                 print("None counter erro")
-            
 
-
-
-        #https://trades.roblox.com/v1/trades/3274127520679365/counter
-
-
-        pass
-    def send_trade(self, trader_id, trade_send, trade_recieve, counter_trade=False, counter_id=None):
+    def send_trade(self, trader_id, trade_send, trade_recieve, self_robux=None, counter_trade=False, counter_id=None):
         """
             Send Trader ID Then the list of items (list of assetids)
         """
@@ -200,8 +216,10 @@ class RobloxAPI():
             {"userId":trader_id,"userAssetIds":trade_recieve,
             "robux":None},
             {"userId":self.account_id,"userAssetIds":trade_send,
-            "robux":None}]}
+            "robux":self_robux}]}
 
+        if trader_id not in self.outbounds_userids:
+            self.outbounds_userids.append(trader_id)
 
         trade_api = "https://trades.roblox.com/v1/trades/send"
         if counter_trade == True and counter_id != None:
@@ -211,6 +229,8 @@ class RobloxAPI():
         validation_headers = None
         while True:
             trade_response = self.request_handler.requestAPI(trade_api, "post", payload=trade_payload, additional_headers=validation_headers)
+            # this is a very ratelimited API so dont spam
+            time.sleep(1)
             
             if trade_response.status_code == 200:
                 print("Trade sent!", trade_response.text)
@@ -242,58 +262,96 @@ class RobloxAPI():
                 print(trade_response.text)
                 break
 
-        #trade_response = self.TradeSendSession.post("https://trades.roblox.com/v1/trades/send", proxies=self.SendProxy, json=data, headers=self.headers, timeout=60)
 
-        pass
-
-    def outbound_checker(self):
+    def inactive_trades_list(self, max_days_inactive=5):
         """
-            Scans Json for trades then cancel trades that dont fit into the config
+            Sends a list of your last inbounds
+            TODO: make it have dates too so we can have cooldowns on users
         """
-        outbounds = self.json.get_outbounds(cookie=self.cookies['.ROBLOSECURITY'])
-        if outbounds:
-            for trade in outbounds:
-                trade_id = trade['trade_id']
-                
-                # Delete outbound if its already expired
-                timestamp = trade['timestamp']
-                timestamp_date = datetime.fromtimestamp(timestamp)
-                current_date = datetime.now()
-                if current_date - timestamp_date >= timedelta(days=5):
-                    self.json.remove_trade(cookie=self.cookies['.ROBLOSECURITY'], trade_id=trade_id)
-                    continue
+        trades = self.get_trades("https://trades.roblox.com/v1/trades/inactive?limit=100&sortOrder=Desc", limit_pages=6)
+        recently_traded = []
+
+        for trade_id, trade_info in trades.items():
+            trader_id = trade_info['user_id']
+            trade_id = trade_info['trade_id']
+            created = trade_info['created']
+
+            timestamp_format = datetime.fromisoformat(created.replace("Z", "+00:00"))
+            timestamp_format = timestamp_format.replace(tzinfo=None)
+            current_time = datetime.utcnow()
+
+            time_difference = current_time - timestamp_format
+            
+            if time_difference > timedelta(days=max_days_inactive):
+                #not longer (recently traded)
+                recently_traded.append(trader_id)
+
+        return recently_traded
+
+    def outbound_api_checker(self):
+        """
+            Scans the outbound API for bad trades then cancels them.
+            Json way is more messy and not needed for this bot
+        """
+
+        trades = self.get_trades("https://trades.roblox.com/v1/trades/outbound?limit=100&sortOrder=Asc")
+        def return_items(user_assets):
+            asset_ids = []
+            for asset in user_assets:
+                asset_ids.append(asset['assetId'])
+            return asset_ids
+            
+
+        def calculate_gains(items):
+            account_rap = 0
+            account_value = 0
+            for item in items:
+                account_rap += self.rolimon.item_data[str(item)]['rap']
+                account_value += self.rolimon.item_data[str(item)]['total_value']
+
+            return account_rap, account_value
 
 
-                account_items = trade['self_items']
-                account_rap = 0
-                account_value = 0
+        # Loop through outbounds
+        for trade_id, trade_info in trades.items():
+            trader_id = trade_info['user_id']
+            if trader_id not in self.outbounds_userids:
+                self.outbounds_userids.append(trader_id)
 
-                for item in account_items:
-                    account_rap += self.rolimon.item_data[item]['rap']
-                    account_value += self.rolimon.item_data[item]['total_value']
+            trade_id = trade_info['trade_id']
+            
+            print("scanning outbound")
+            trade_info = self.request_handler.requestAPI(f"https://trades.roblox.com/v1/trades/{trade_id}")
+            if trade_info.status_code != 200:
+                print("trade info api", trade_info.status_code, trade_info.text)
+                return False
 
+            data = trade_info.json() 
 
-                trader_items = trade['their_items']
-                trader_rap = 0
-                trader_value = 0
-                for item in trader_items:
-                    trader_rap += self.rolimon.item_data[item]['rap']
-                    trader_value += self.rolimon.item_data[item]['total_value']
-                
-                valid_trade = TradeMaker().validate_trade(account_rap, account_value, trader_rap, trader_value)
+            self_offer = data['offers'][0]
+            self_robux = self_offer['robux']
+            self_items = return_items(self_offer['userAssets'])
 
-                if not TradeMaker().validate_trade(account_rap, account_value, trader_rap, trader_value):
-                    # Cancel
-                    #https://trades.roblox.com/v1/trades/3534001725946517/decline
-                    url = f"https://trades.roblox.com/v1/trades/{trade_id}/decline"
+            trader_offer = data['offers'][1]
+            trader_items = return_items(trader_offer['userAssets'])
 
-                    cancel_request = self.request_handler.requestAPI(url, method="post")
-          #          print(cancel_request.status_code, "outbound")
-                    if cancel_request.status_code == 200 or cancel_request.status_code == 400:
-                        self.json.remove_trade(cookie=self.cookies['.ROBLOSECURITY'], trade_id=trade_id)
-         #               print("Cleared losing outbound...")
-                    else:
-                        print(cancel_request.text)
+            self_rap, self_value = calculate_gains(self_items)
+            trader_rap, trader_value = calculate_gains(trader_items)
+
+            valid_trade = TradeMaker().validate_trade(self_rap, self_value, trader_rap, trader_value, robux=self_robux)
+
+            if not valid_trade:
+                url = f"https://trades.roblox.com/v1/trades/{trade_id}/decline"
+
+                print(self_rap, trader_rap, "cancel raps", "robux:",self_robux, "Values:", self_value, trader_value)
+                cancel_request = self.request_handler.requestAPI(url, method="post")
+                time.sleep(1)
+                if cancel_request.status_code == 200 or cancel_request.status_code == 400:
+                    print("Cleared losing outbound...")
+                else:
+                    print(cancel_request.text)
+            else:
+                print("Valid trade")
 
     def check_can_trade(self, userid):
         """
@@ -315,7 +373,7 @@ class RobloxAPI():
             return False
         return True
     
-    def is_projected(self, item_id):
+    def is_projected_api(self, item_id):
         # TODO: GET the dates and see how much the item sells so we dont trade dead items or we can
         # see how active an item is
         # TODO: Delete all the value: "1" from data points
@@ -452,7 +510,7 @@ class RobloxAPI():
 
 
 
-        print("return") 
+        print("return", owners) 
         return owners
     
 #while True:
