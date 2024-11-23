@@ -116,13 +116,17 @@ class RequestsHandler:
                 if self.use_proxies:
                     self.rate_limit(proxy_dict['http'])
                 else:
-                    consecutive_rate_limits += 1
-                    wait_time = 45 * (3 ** consecutive_rate_limits)
-                    print(f"Rate limited without proxies, waiting {wait_time} secs.")
-
+                    wait_time = 60 * (2 ** consecutive_rate_limits)
+                    print(f"Rate limited without proxies, waiting {wait_time} secs.", URL)
                     time.sleep(wait_time)
+                    consecutive_rate_limits += 1
 
-                    # If this API is hard limited return 429
+                    # If this API isnt hard ratelimited then contiue to try, if it is return 429 after 5 tries
+                    if "errors" in Response.json():
+                        if "too many requests" in Response.json()['errors'][0]['message'].lower():
+                            print("Too many request continuing")
+                            continue
+
                     if consecutive_rate_limits > 5:
                         return 429
             else:
