@@ -181,12 +181,11 @@ class RolimonAPI():
 
         filtered_inventory = {}
 
-        def is_projected(asset_id):
+        def projected_detector(asset_id):
             """
                 Checks if item is already cached as projected then checks if its projected.
                 if its not in cache we check if its projected then save it
                 
-                TODO: If the price changed alot then rescan it
             """
             def is_recently_scanned(projected_data, asset_id):
                 timestamp = projected_data[str(asset_id)]['timestamp']
@@ -199,27 +198,60 @@ class RolimonAPI():
                 # Get the number of days in the time difference
                 days_ago = time_difference.days
 
-                # Check if it's been more than 3 days
-                if days_ago > 3:
+                print(days_ago)
+                # Check if it's been more than 2 day
+                if days_ago > 2:
                     return False
-
                 return True
 
             def check_projected(asset_id):
-                is_projected = roblox_api.RobloxAPI().is_projected(asset_id)
-                if is_projected:
-                    self.projected_json.update_projected_status(asset_id, is_projected)
+                """
+                    writes to the json if projected
+                """
+                item_price = self.item_data[asset_id]['best_price']
+                is_projected_api = roblox_api.RobloxAPI().is_projected_api(asset_id)
+
+                if is_projected_api:
+                    self.projected_json.update_projected_status(asset_id, is_projected_api, item_price)
                     return True
+                
                 else:
                     print(f"Asset ID {asset_id} is not projected.")
-                    self.projected_json.update_projected_status(asset_id, is_projected)
+                    self.projected_json.update_projected_status(asset_id, is_projected_api, item_price)
                     return False
+
+
+            def big_price_change(assetid, project_data, threshold=.5): 
+                """
+                    The threshold is set to 1.0 (100%), which represents a "double" in price.
+                    If the percentage change is 1.0 (100%), the price has doubled.
+                    If the percentage change is greater than 1.0, the price has more than doubled.
+                    If the percentage change is less than 1.0, the price has not doubled yet.
+                    
+                    For example:
+                    A price change from 200 to 400 has a 100% increase, or 1.0 (doubling).
+                    A price change from 100 to 150 has a 50% increase, or 0.5 (not double).
+                    A price change from 100 to 200 has a 100% increase, or 1.0 (doubling).
+                """
+
+                last_price = projected_data[str(asset_id)]['last_price']
+                current_price = self.item_data[asset_id]['best_price']
+                percentage_change = abs(current_price - last_price) / last_price
+
+                print(last_price, current_price, "percentage change:", percentage_change)
+                if percentage_change >= threshold:
+                    return True  # There is a significant change
+
+                return False
+
+
 
             projected_data = self.projected_json.read_data()
             projected_ids = projected_data.keys()
 
             if str(asset_id) in projected_ids:
-                if not is_recently_scanned(projected_data, asset_id):
+                if not is_recently_scanned(projected_data, asset_id) or big_price_change(asset_id, projected_data):
+                    print(f"recently scanned: {is_recently_scanned(projected_data, asset_id)} (shouild be true) big price change (should be false) {big_price_change(asset_id, projected_data)}")
                     return check_projected(asset_id)
 
 
@@ -239,8 +271,10 @@ class RolimonAPI():
             
             value = self.item_data[asset_id]['total_value']
             rap = self.item_data[asset_id]['rap']
+            demand = self.item_data[asset_id]['demand']
+
             if rap == value:
-                if is_projected(asset_id) == True:
+                if projected_detector(asset_id) == True:
                     continue
 
 
@@ -248,6 +282,7 @@ class RolimonAPI():
                 'item_id': asset_id,
                 'value': value,
                 'rap': rap,
+                "demand": demand,
             }
 
         # apply more usefull info about the item
