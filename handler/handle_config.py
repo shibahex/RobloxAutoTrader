@@ -161,7 +161,8 @@ class ConfigHandler:
             'MinimumItemsTheirSide': self.get_int('Trading', 'MinimumItemsTheirSide'),
             'MaximumItemsTheirSide': self.get_int('Trading', 'MaximumItemsTheirSide'),
             'MinimumSumOfTrade': self.get_float('Trading', 'MinimumSumOfTrade'),
-            'MinDemand': self.get_int('Trading', 'MinDemand')
+            'MinDemand': self.get_int('Trading', 'MinDemand'),
+            'Select_Trade_Using': self.get_string('Trading', 'Select Trade Using')
         }
 
     def load_projected_detection(self):
@@ -222,7 +223,6 @@ class ConfigHandler:
         # Check if any required values are None and raise an error
         for section in [self.scan_items, self.filter_users, self.prediction_algorithm, self.trading, self.projected_detection]:
             for key, value in section.items():
-                #print(key, value)
                 if value is None:
                     raise ValueError(f"Configuration error: '{key}' is missing or invalid.")
 
