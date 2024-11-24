@@ -12,6 +12,8 @@ from handler.handle_json import JsonHandler
 from handler.handle_2fa import AuthHandler
 from trade_algorithm import TradeMaker
 
+from handler.price_algorithm import SalesVolumeAnalyzer
+
 class RobloxAPI():
     """
         Pass in Cookie if you want it to be an account
@@ -21,7 +23,16 @@ class RobloxAPI():
 
         self.outbounds_userids = []
 
-        self.parse_handler = RequestsHandler(Session=requests.Session(), use_proxies=True) 
+
+        # For rolimon Trade Ads
+        self.last_outbound = None
+        # TODO:
+        # put this in cookies.json
+        self.tradead_timestamp = None
+
+
+        #TODO: USE PROXIES
+        self.parse_handler = RequestsHandler(Session=requests.Session(), use_proxies=False) 
         self.config = ConfigHandler('config.cfg')
 
         self.rolimon = rolimons_api.RolimonAPI()
@@ -218,8 +229,6 @@ class RobloxAPI():
             {"userId":self.account_id,"userAssetIds":trade_send,
             "robux":self_robux}]}
 
-        if trader_id not in self.outbounds_userids:
-            self.outbounds_userids.append(trader_id)
 
         trade_api = "https://trades.roblox.com/v1/trades/send"
         if counter_trade == True and counter_id != None:
@@ -263,28 +272,32 @@ class RobloxAPI():
                 break
 
 
-    def inactive_trades_list(self, max_days_inactive=5):
+    def get_recent_traders(self, max_days_since=5):
         """
-            Sends a list of your last inbounds
+            Sends a list of your last inbounds and outbounds
             TODO: make it have dates too so we can have cooldowns on users
         """
-        trades = self.get_trades("https://trades.roblox.com/v1/trades/inactive?limit=100&sortOrder=Desc", limit_pages=6)
+
         recently_traded = []
+        check_urls = ["https://trades.roblox.com/v1/trades/inactive?limit=100&sortOrder=Desc", "https://trades.roblox.com/v1/trades/outbound?limit=100&sortOrder=Asc", "https://trades.roblox.com/v1/trades/inbound?cursor=&limit=100&sortOrder=Desc"]
 
-        for trade_id, trade_info in trades.items():
-            trader_id = trade_info['user_id']
-            trade_id = trade_info['trade_id']
-            created = trade_info['created']
+        for url in check_urls:
+            trades = self.get_trades(url, limit_pages=6)
 
-            timestamp_format = datetime.fromisoformat(created.replace("Z", "+00:00"))
-            timestamp_format = timestamp_format.replace(tzinfo=None)
-            current_time = datetime.utcnow()
+            for trade_id, trade_info in trades.items():
+                trader_id = trade_info['user_id']
+                trade_id = trade_info['trade_id']
+                created = trade_info['created']
 
-            time_difference = current_time - timestamp_format
-            
-            if time_difference > timedelta(days=max_days_inactive):
-                #not longer (recently traded)
-                recently_traded.append(trader_id)
+                timestamp_format = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                timestamp_format = timestamp_format.replace(tzinfo=None)
+                current_time = datetime.utcnow()
+
+                time_difference = current_time - timestamp_format
+                
+
+                if time_difference < timedelta(days=max_days_since):
+                    recently_traded.append(trader_id)
 
         return recently_traded
 
@@ -305,11 +318,19 @@ class RobloxAPI():
         def calculate_gains(items):
             account_rap = 0
             account_value = 0
+            account_algorithm_value = 0
+            projected_data = self.rolimon.projected_json.read_data()
+
             for item in items:
+                if str(item) in projected_data.keys():
+                    account_algorithm_value += projected_data[str(item)]['value']
+                else:
+                    account_algorithm_value += self.rolimon.item_data[str(item)]['total_value']
+
                 account_rap += self.rolimon.item_data[str(item)]['rap']
                 account_value += self.rolimon.item_data[str(item)]['total_value']
 
-            return account_rap, account_value
+            return account_rap, account_value, account_algorithm_value
 
 
         # Loop through outbounds
@@ -335,10 +356,10 @@ class RobloxAPI():
             trader_offer = data['offers'][1]
             trader_items = return_items(trader_offer['userAssets'])
 
-            self_rap, self_value = calculate_gains(self_items)
-            trader_rap, trader_value = calculate_gains(trader_items)
+            self_rap, self_value, self_algorithm_value = calculate_gains(self_items)
+            trader_rap, trader_value, trader_algorithm_value = calculate_gains(trader_items)
 
-            valid_trade = TradeMaker().validate_trade(self_rap, self_value, trader_rap, trader_value, robux=self_robux)
+            valid_trade = TradeMaker().validate_trade(self_rap, self_algorithm_value, self_value, trader_rap, trader_algorithm_value, trader_value, robux=self_robux)
 
             if not valid_trade:
                 url = f"https://trades.roblox.com/v1/trades/{trade_id}/decline"
@@ -357,7 +378,10 @@ class RobloxAPI():
         """
             Checks if /trade endpoint is valid for userid
         """
-        # TODO: Handle this pls tmr next priority
+        if int(userid) not in self.outbounds_userids:
+            self.outbounds_userids.append(int(userid))
+
+
         validation_headers = None
         can_trade = self.request_handler.requestAPI(f"https://www.roblox.com/users/{userid}/trade", additional_headers=validation_headers)
         if can_trade.status_code == 403:
@@ -373,6 +397,19 @@ class RobloxAPI():
             return False
         return True
     
+    def median(self, lst):
+        """
+            Pmethod wrote this and im lazy
+        """
+        print(lst)
+        n = len(lst)
+        if n < 1:
+            return None
+        if n % 2 == 1:
+            return sorted(lst)[n // 2]
+        else:
+            return sum(sorted(lst)[n // 2 - 1:n // 2 + 1]) / 2.0
+
     def is_projected_api(self, item_id):
         # TODO: GET the dates and see how much the item sells so we dont trade dead items or we can
         # see how active an item is
@@ -388,9 +425,6 @@ class RobloxAPI():
         value = self.rolimon.item_data[item_id]['total_value']
         price = self.rolimon.item_data[item_id]['best_price']
 
-        if value != rap:
-            return False
-
         config_projected = self.config.projected_detection
         min_graph_difference  = config_projected['MinimumGraphDifference']
         max_graph_difference = config_projected['MaximumGraphDifference']
@@ -403,37 +437,79 @@ class RobloxAPI():
 
         # Check graph for projecteds
         resale_data = self.parse_handler.requestAPI(f"https://economy.roblox.com/v1/assets/{item_id}/resale-data")
+
         if resale_data.status_code == 200:
-            #print(resale_data.json())
+
+            is_projected = False
+
+            def parse_api_data(data_points):
+                return sorted(
+                    [{"value": point["value"], "date": datetime.strptime(point["date"], "%Y-%m-%dT%H:%M:%SZ").timestamp()}
+                     for point in data_points],
+                    key=lambda x: x["date"],
+                )
+
+            sales_data = parse_api_data(resale_data.json()["priceDataPoints"])
+            volume_data = parse_api_data(resale_data.json()["volumeDataPoints"])
+
+            # Instantiate and process the analyzer
+            result = SalesVolumeAnalyzer(sales_data, volume_data, item_id).process()
+
+            result_value = result['value']
+            result_volume = result['volume']
+            result_timestamp = result['timestamp']
+            #{'value': 558.2293577981651, 'volume': 84.825, 'timestamp': 1732423848.2720559, 'age': 63157848.272055864} 1609402609
+
+
             data_points = resale_data.json()['priceDataPoints']
-
             for data in data_points:
-                if data['value'] == 1:
+                if data['value'] < 5:
                     data_points.remove(data)
-            # If doesnt have enough sale data just mark it as projected
-            if len(data_points) < 100:
-                return True
 
-            current_data = int(data_points[0]['value'])
+            if len(data_points) < 50:
+                return None
 
+            today = datetime.utcnow()
+            three_months_ago = today - timedelta(days=90)
+            
+            current_price = int(data_points[0]['value'])
             amount_of_sales = config_projected['AmountofSalestoScan']
 
-            #print(data_points, current_data)
-            for data_point in range(1, amount_of_sales+1):
-                rap_data_point = int(data_points[data_point]['value'])
-                is_in_range = self.config.check_gain(rap_data_point, current_data, min_gain=min_graph_difference, max_gain=max_graph_difference) 
+            recent_data_points = [
+                point for point in data_points
+                if datetime.strptime(point['date'], "%Y-%m-%dT%H:%M:%SZ") > three_months_ago
+            ]
+
+            sum_of_price = 0
+            for num, data in enumerate(recent_data_points):
+                loop_price = int(data['value'])
+                percentage_change = (current_price - loop_price)/current_price
+
+                if percentage_change < -0.4 and percentage_change > 0.4:
+                    print("projected", item_id)
+                    is_projected = True
+
+
+            #for data_point in range(1, amount_of_sales+1):
+                # TODO: THIS IS BROKEN 
+            
+            #   rap_data_point = int(data_points[data_point]['value'])
+              #  print(rap_data_point, current_data)
+               # is_in_range = self.config.check_gain(rap_data_point, current_data, min_gain=min_graph_difference, max_gain=max_graph_difference) 
                 #print(rap_data_point - current_data,  ": minimum", min_graph_difference, "max", max_graph_difference, is_in_range)
 
-                if is_in_range == False:
-                    return True
-            
-            #for volume_data in resale_data.json()['volumeDataPoints']:
+                #if is_in_range == False:
+                 #   print("is projected")
+                  #  is_projected = True
+                   # break
+
             volume_data_points = resale_data.json().get('volumeDataPoints', [])[:30]
-            if self.analyze_volume_data(volume_data_points) == False:
-                return True
+#           #if self.analyze_volume_data(volume_data_points) == False:
+                #is_projected = True
 
 
-        return False
+        return {f"{item_id}": {"is_projected": is_projected, "value": result_value, "volume": result_volume, "timestamp":result_timestamp, "last_price": self.rolimon.item_data[item_id]['best_price']}}
+        #return False
 
     def analyze_volume_data(self, volume_data_points):
         """
