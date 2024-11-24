@@ -10,6 +10,9 @@ class TradeMaker():
 
         self.min_rap_gain = self.config.trading['Minimum_RAP_Gain']
         self.max_rap_gain = self.config.trading['Maximum_RAP_Gain']
+        self.min_algo_gain = self.config.trading['Minimum_Algo_Gain']
+        self.max_algo_gain = self.config.trading['Maximum_Algo_Gain']
+
         self.min_value_gain = self.config.trading['Minimum_Value_Gain']
         self.max_value_gain = self.config.trading['Maximum_Value_Gain']
         self.min_score_percentage = self.config.trading['MinScorePercentage']
@@ -55,6 +58,13 @@ class TradeMaker():
         elif select_by == 'lowest_rap_gain':
             return min(valid_trades, key=lambda trade: trade['their_rap'] - trade['self_rap'])
 
+        
+        elif select_by == 'highest_algo_gain':
+            return max(valid_trades, key=lambda trade: trade['their_rap_algo'] - trade['self_rap_algo'])
+
+        elif select_by == 'lowest_algo_gain':
+            return min(valid_trades, key=lambda trade: trade['their_rap_algo'] - trade['self_rap_algo'])
+
         elif select_by == 'highest_value_gain':
             return max(valid_trades, key=lambda trade: trade['their_value'] - trade['self_value'])
 
@@ -71,10 +81,12 @@ class TradeMaker():
         else:
             raise ValueError(f"Unknown selection type: {select_by}")
 
-    def generate_trade(self, self_inventory, their_inventory, counter_trade=False):
+    def generate_trade(self, self_inventory, their_inventory, counter_trade=False, timeout=120):
+
         """
             Algorithm responsible for generating combinations and validating them..
         """
+        start_time = time.time()  # Record the start time
 
 
         # TODO: add roblox in the combinations so we open up more trades
@@ -85,32 +97,36 @@ class TradeMaker():
         self_combinations = self.generate_combinations(self_keys, self.min_items_self, self.max_items_self)
         their_combinations = self.generate_combinations(their_keys, self.min_items_their, self.max_items_their)
 
-        # Create sets of item IDs for quick lookup
- #       print(self_inventory, self_keys)
-        self_item_ids = {self_inventory[key]['item_id'] for key in self_keys}
         valid_trades = []
 
         def get_total_values(items, inventory):
             """
-                Gets the total value, rap and demand of a list of items
+            Gets the total value, rap, and demand of a list of items.
             """
             value = 0
             rap = 0
             demand = 0
+            rap_algorithm = 0
             for key in items:
                 item = inventory[key]
+            
                 value += item['value']
                 rap += item['rap']
+                rap_algorithm += item['rap_algorithm']
 
                 current_demand = item['demand']
                 if current_demand:
                     demand += current_demand
 
-            return value, rap, demand
+            #print("returning", value, rap, rap_algorithm, demand)
+            return value, rap, rap_algorithm, demand
 
 
 
         for self_side in self_combinations:
+            if time.time() - start_time > timeout:
+                print("Timeout reached while generating trades.")
+                return valid_trades[0] if valid_trades else None
             # Create a set for the current self_side to check against
             self_side_item_ids = {self_inventory[key]['item_id'] for key in self_side}
 
@@ -120,16 +136,17 @@ class TradeMaker():
                 # Ensure no overlapping item IDs
                 if self_side_item_ids.isdisjoint(their_side_item_ids):
 
-                    self_value, self_rap, self_demand = get_total_values(self_side_item_ids, self_inventory)
+                    self_value, self_rap, self_rap_algo, self_demand = get_total_values(self_side,self_inventory)
 
-                    their_value, their_rap, their_demand = get_total_values(their_side_item_ids, their_inventory)
+                    their_value, their_rap, their_rap_algo, their_demand = get_total_values(their_side, their_inventory)
                     
+                    #print(self_rap_algo, their_rap_algo, "gr")
                     send_robux = None
                     #TODO: check if roblox acc has enough roblox and it it doenst send self.max_robux to remaning robux
 
                     #calc_robux = round((their_rap - self_rap) // float(2))
                     # round down
-                    calc_robux = math.floor((their_rap - self_rap) // float(2))
+                    calc_robux = math.floor((their_rap_algo - self_rap_algo) // float(2))
 
                     # Cap the result at self_rap * 0.5 (Roblox limit)
                     calc_robux = min(calc_robux, self_rap * 0.5)
@@ -141,7 +158,7 @@ class TradeMaker():
                         send_robux = calc_robux
 
 
-                    if self.validate_trade(self_rap, self_value, their_rap, their_value, robux=send_robux):
+                    if self.validate_trade(self_rap, self_rap_algo, self_value, their_rap, their_rap_algo, their_value, robux=send_robux):
                         # Calculate the trade sum (RAP and value)
                         total_value = self_value + their_value
                         total_rap = self_rap + their_rap
@@ -149,7 +166,7 @@ class TradeMaker():
                         # Calculate close score (percentage)
                         score = ((their_rap - self_rap) / (their_rap + self_rap)) * 100 if (self_rap + their_rap) != 0 else 0
 
-                        # Assume 'demand' is calculated somehow (could be based on rarity, user preference, or external data)
+                        # Demand is all the int of rolimons assigned demands combined
                         demand = self_demand + their_demand
 
                         # Determine upgrade/downgrade based on number of items
@@ -171,6 +188,8 @@ class TradeMaker():
                             'their_value': their_value,
                             'self_rap': self_rap,
                             'their_rap': their_rap,
+                            'self_rap_algo': self_rap_algo,
+                            'their_rap_algo': their_rap_algo,
                             'total_value': total_value,
                             'total_rap': total_rap,
                             'score': score,
@@ -198,25 +217,16 @@ class TradeMaker():
 
         return valid_trades[0] if valid_trades else None
 
-    def generate_trade_with_timeout(self, self_inventory, their_inventory, counter_trade=False, timeout=120):
-        # Run generate_trade in a separate thread with a timeout
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(self.generate_trade, self_inventory, their_inventory)
-            try:
-                # Wait for the result with the specified timeout
-                return future.result(timeout=timeout)
-            except TimeoutError:
-                print("generate_trade timed out")
-                return None  # Return None if the function times out
-
-
     def check_rap_gain(self, their_rap, self_rap):
         return self.config.check_gain(their_rap, self_rap, self.min_rap_gain, self.max_rap_gain)
 
     def check_value_gain(self, their_value, self_value):
         return self.config.check_gain(their_value, self_value, self.min_value_gain, self.max_value_gain)
 
-    def validate_trade(self, self_rap, self_value, their_rap, their_value, robux=None):
+    def check_algo_gain(self, their_algo, self_algo):
+        return self.config.check_gain(their_algo, self_algo, self.min_algo_gain, self.max_algo_gain)
+
+    def validate_trade(self, self_rap, self_rap_algo, self_value, their_rap, their_rap_algo, their_value, robux=None):
 
         value_gain = their_value - self_value
         if robux != None and robux != 0:
@@ -242,10 +252,16 @@ class TradeMaker():
 
         # Check if RAP gain passes the criteria
         if not self.check_rap_gain(their_rap, self_rap):
+            #print("rap gain false their, self", their_rap, self_rap)
+            return False
+
+        if not self.check_algo_gain(their_rap_algo, self_rap_algo):
+            #print("algo gain false their, self", their_rap_algo, self_rap_algo)
             return False
 
         # Check if value gain passes the criteria
         if not self.check_value_gain(their_value, self_value):
+            #print("valu gain false their, self", their_value, self_value)
             return False
 
         return True
