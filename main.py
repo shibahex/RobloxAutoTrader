@@ -16,6 +16,10 @@ from handler.handle_json import JsonHandler
     Projected scanner is always checking for my inventory i think, so somethings off wehre it scans the same item, maybe it doesnt change the last price?
 
     Rolimon ads and discord ads for more counters!
+
+
+    Trade send thread should be seprate from scanning inventories threads bc ratelimit on resale-data
+
 """
 class Doggo:
     def __init__(self):
@@ -62,8 +66,6 @@ class Doggo:
         while not self.stop_event.is_set():
 
             # Put all outbound users in cached traders so we dont double send
-            merged = self.merge_lists(self.all_cached_traders, roblox_account.outbounds_userids)
-            self.all_cached_traders = merged
 
             if len(self.user_queue) > 20:
                 time.sleep(60)
@@ -75,10 +77,14 @@ class Doggo:
             for owner in owners:
                 # Uncomment the following line if user validation is needed
                 # if self.rolimons.validate_user(owner):
+
                 if int(owner) in self.all_cached_traders:
                     print("already traded with player, skipping")
                     continue
+                else:
+                    print(int(owner), self.all_cached_traders)
 
+                self.all_cached_traders.append(owner)
                 if roblox_account.check_can_trade(owner) == True:
                     inventory = roblox_account.fetch_inventory(owner)
                     self.user_queue[owner] = inventory  
@@ -96,7 +102,8 @@ class Doggo:
 
             for account in roblox_accounts:
                 account.outbound_api_checker()
-                account.counter_trades()
+                # NOTE: off bc i have a good inbound
+                #account.counter_trades()
 
 
     def start_trader(self):
@@ -109,7 +116,6 @@ class Doggo:
         while True:
             threads = []
             for account in roblox_accounts:
-
                 # Check if all accounts are rate-limited
                 if self.json.is_all_ratelimited():
                     print("All cookies are ratelimited. Waiting for 20 minutes...")
@@ -120,11 +126,10 @@ class Doggo:
                     print("account ratelimited continuing to next acc")
                     continue
 
-                print("Scanning inactive trades")
-                # TODO: add max days inactive in cfg and parse as arg
+                print("Scanning recent traders")
+                self.all_cached_traders = list(set(account.get_recent_traders() + self.all_cached_traders)) 
 
-                # Put all the traders that declined our trades into the cached traders
-                self.all_cached_traders = self.merge_lists(account.inactive_trades_list(), self.all_cached_traders)
+                # TODO: add max days inactive in cfg and parse as arg
 
                 queue_thread = threading.Thread(target=self.queue_traders, args=(account,))
                 queue_thread.daemon = True
@@ -148,18 +153,23 @@ class Doggo:
 
             # Check if user queue is empty
             while not self.user_queue:
-                print("No users to trade with. Waiting 60 seconds...")
-                time.sleep(60)  # Wait before checking again
+                print("No users to trade with. Waiting 1 second...")
+                time.sleep(1)
 
-            current_user_queue = self.user_queue.copy()
-
-            for trader, trader_inventory in current_user_queue.items():
-
+            #current_user_queue = self.user_queue.copy()
+            
+            for trader in list(self.user_queue.keys()):  # Using list() creates a copy of the keys
+                trader_inventory = self.user_queue[trader]
+                
+                # Delete the key from the dictionary
+                self.user_queue.pop(trader, None)  # Safely remove the key using pop
+                
                 # Generate and send trade if there are items to trade
                 if account_inventory and trader_inventory:
-                    generated_trade = self.trader.generate_trade_with_timeout(account_inventory, trader_inventory)
+                    generated_trade = self.trader.generate_trade(account_inventory, trader_inventory)
 
                     if not generated_trade:
+                        print("no generated trade")
                         break
 
                     print(f"Generated trade: {generated_trade}")
@@ -170,7 +180,7 @@ class Doggo:
                     their_side = generated_trade['their_side']
 
                     # Send trade request
-                    print("SEWND ROBUX!!!", self_robux)
+                    print("SEND ROBUX!!!", self_robux)
                     send_trade_response = account.send_trade(trader, self_side, their_side, self_robux=self_robux)
 
                     if send_trade_response == 429:  # Rate-limited
@@ -191,8 +201,6 @@ class Doggo:
                         self.json.add_trade(account.cookies['.ROBLOSECURITY'], trade_dict)
                         print(f"Trade recorded: {trade_dict}")
 
-                del self.user_queue[trader]  # Remove trader from user queue after trade   
-
     def load_roblox_accounts(self):
         cookie_json = self.json.read_data()
         roblox_accounts = []
@@ -205,6 +213,14 @@ class Doggo:
             roblox_accounts.append(RobloxAPI(cookie=roblox_cookie, auth_secret=auth_secret, auth_ticket=auth_ticket))
 
         return roblox_accounts
+    
+    def trade_ad_thread(self):
+        trade_ad_API = "https://api.rolimons.com/tradeads/v1/createad"
+        #{"player_id":1283171278,"offer_item_ids":[138844851,9255011,1609402609,111776247],"request_item_ids":[],"request_tags":["robux","upgrade","downgrade"]}
+
+        data={"player_id":1283171278,"offer_item_ids":[138844851,9255011,1609402609,111776247],"request_item_ids":[],"request_tags":[]}
+
+        #self.rolimon_account.requestAPI(trade_ad_API, method='post', data=)
 
 
 if __name__ == "__main__":
