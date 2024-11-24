@@ -49,7 +49,7 @@ class ConfigHandler:
             max_gain = max_gain * 100 if is_max_percentage else max_gain
 
         # Debug output after calculations
- #       print(f"Calculated Gain: {gain}, Min Gain: {min_gain}, Max Gain: {max_gain}")
+        #print(f"Calculated Gain: {gain}, Min Gain: {min_gain}, Max Gain: {max_gain}")
 
         if min_gain is not None and max_gain is not None:
             return min_gain <= gain <= max_gain
@@ -59,43 +59,6 @@ class ConfigHandler:
             return gain <= max_gain
         return True
 
-    def check_rap_gain(self, their_rap, self_rap):
-        """
-        Check if the RAP gain meets the criteria.
-        """
-        return self.check_gain(their_rap, self_rap, self.min_rap_gain, self.max_rap_gain)
-
-    def check_value_gain(self, their_value, self_value):
-        """
-        Check if the value gain meets the criteria.
-        """
-        return self.check_gain(their_value, self_value, self.min_value_gain, self.max_value_gain)
-
-    def check_rap_gain(self, their_rap, self_rap):
-        """
-        Check if the RAP gain meets the criteria.
-        """
-        return self.check_gain(their_rap, self_rap, self.min_rap_gain, self.max_rap_gain)
-
-    def check_value_gain(self, their_value, self_value):
-        """
-        Check if the value gain meets the criteria.
-        """
-        return self.check_gain(their_value, self_value, self.min_value_gain, self.max_value_gain)
-
-
-
-    def check_rap_gain(self, their_rap, self_rap):
-        """
-        Check if the RAP gain meets the criteria.
-        """
-        return self.check_gain(their_rap, self_rap, self.min_rap_gain, self.max_rap_gain)
-
-    def check_value_gain(self, their_value, self_value):
-        """
-        Check if the value gain meets the criteria.
-        """
-        return self.check_gain(their_value, self_value, self.min_value_gain, self.max_value_gain)
 
     def process_trade(self, close_percentage, their_rap, self_rap, their_value, self_value):
         """
@@ -147,6 +110,8 @@ class ConfigHandler:
             'Maximum_RAP_Gain': self.get_float('Trading', 'Maximum RAP Gain'),
             'Minimum_Value_Gain': self.get_float('Trading', 'Minimum Value Gain'),
             'Maximum_Value_Gain': self.get_float('Trading', 'Maximum Value Gain'),
+            'Minimum_Algo_Gain': self.get_float('Trading', 'Minimum Rap Algorithm Gain'),
+            'Maximum_Algo_Gain': self.get_float('Trading', 'Maximum Rap Algorithm Gain'),
             'NFT': self.get_string('Trading', 'NFT'),
             'NFR': self.get_string('Trading', 'NFR'),
             'MinAlgorithmGain': self.get_int('Trading', 'MinAlgorithmGain'),
