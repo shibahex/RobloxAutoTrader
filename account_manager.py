@@ -1,4 +1,9 @@
 from handler import *
+from roblox_api import RobloxAPI
+
+COOKIE_WARNING = "_|WARNING:-DO-NOT-SHARE-THIS.--Sharing-this-will-allow-someone-to-log-in-as-you-and-to-steal-your-ROBUX-and-items.|"
+
+# TODO: Add support for adding rolimon cookies
 class AccountManager:
     def __init__(self):
         self.json_handler = JsonHandler('cookies.json')
@@ -12,7 +17,8 @@ class AccountManager:
                 ("1", "Add Account (Firefox)"),
                 ("2", "Add Account (Manual)"),
                 ("3", "Remove Accounts"),
-                ("4", "Back to Main Menu")
+                ("4", "Toggle Accounts"),
+                ("5", "Back to Main Menu")
             )
             self.cli.print_menu("Account Manager", options)
             try:
@@ -29,16 +35,37 @@ class AccountManager:
                 case 3:
                     self.remove_accounts()
                 case 4:
+                    self.toggle_accounts()
+                case 5:
                     break
 
 
+    def toggle_accounts(self):
+        while True:
+            self.cli.clear_console()
+            self.json_handler.list_cookies()
+            try:
+                index = self.cli.input_prompt("Enter the number of the cookie to toggle (Press enter to stop)")
+                self.json_handler.toggle_cookie(int(index)-1)
+            except ValueError:
+                if index.lower() == " " or index.lower() == "":
+                    break
+
+                self.cli.print_error(f"Invalid input: '{index}' is not a valid number.")
+            except Exception as e:
+                self.cli.print_error(f"got execption {e} trying to delete cookie")
+                break
+
     def remove_accounts(self):
         while True:
+            self.cli.clear_console()
             self.json_handler.list_cookies()
             try:
                 index = self.cli.input_prompt("Enter the number of the cookie to delete (Press enter to stop)")
-                self.json_handler.delete_cookie(int(index))
+                self.json_handler.delete_cookie(int(index)-1)
             except ValueError:
+                if index.lower() == " " or index.lower() == "":
+                    break
                 self.cli.print_error(f"Invalid input: '{index}' is not a valid number.")
             except Exception as e:
                 self.cli.print_error(f"got execption {e} trying to delete cookie")
@@ -47,44 +74,40 @@ class AccountManager:
     def manually_add_account(self):
         auth_secret = self.cli.input_prompt("Enter the authorization key")
 
-        try:
-            auth_code = AuthHandler().verify_auth_key(auth_secret)
-        except ValueError as e:
+        if not AuthHandler().verify_auth_secret(auth_secret):
             self.cli.print_error(f"{e}\nSkipping account...")
-            return None 
+            return None
 
         acc_cookie = self.cli.input_prompt("Enter Cookie (include warning)")
 
-        if cookie_warning not in acc_cookie:
+        if COOKIE_WARNING not in acc_cookie:
             self.cli.print_error("Invalid cookie format try again")
             return None
 
         try:
-            roblox_login = RobloxAPI(cookie=cookie_payload)
-        except ValueError as e:
-            self.cli.print_error(f"{e}\nSkipping account...")
+            roblox_login = RobloxAPI(cookie={".ROBLOSECURITY": acc_cookie})
+        except ValueError as error:
+            self.cli.print_error(f"{error}\nSkipping account...")
             return None
 
-        auth_ticket = self.cli.input_prompt("enter auth ticket")
-        self.json_handler.add_cookie(acc_cookie, auth_secret, auth_ticket)
+        self.json_handler.add_cookie(acc_cookie, roblox_login.username, auth_secret)
 
 
     def add_account(self):
         auth_secret = self.cli.input_prompt("Enter the authorization key")
 
         firefox = FirefoxLogin()
-        try:
-            auth_code = AuthHandler().verify_auth_key(auth_secret)
-        except ValueError as e:
+        if not AuthHandler().verify_auth_secret(auth_secret):
             self.cli.print_error(f"{e}\nSkipping account...")
-            return None 
+            return None
+
         try:
-            cookie, auth_ticket = firefox.roblox_login(auth_secret)
+            cookie, username, auth_ticket = firefox.roblox_login(auth_secret)
             firefox.stop()
         except ValueError as e:
             self.cli.print_error(f"{e}\nSkipping account...")
             firefox.stop()
             return None
-        self.json_handler.add_cookie(cookie, auth_secret, auth_ticket)
+        self.json_handler.add_cookie(cookie, username, auth_secret)
 
 
