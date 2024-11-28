@@ -187,6 +187,7 @@ class RolimonAPI():
                 
             """
 
+            # TODO: this doesnt get followed properly
             def is_recently_scanned(projected_data, asset_id):
                 timestamp = projected_data[str(asset_id)]['timestamp']
                 timestamp_datetime = datetime.utcfromtimestamp(timestamp)
@@ -199,6 +200,7 @@ class RolimonAPI():
                 days_ago = time_difference.days
 
                 # Check if it's been more than 2 day
+                print(days_ago, "days ago")
                 if days_ago > 2:
                     return False
                 return True
@@ -246,11 +248,17 @@ class RolimonAPI():
                 #print(f"recently scanned: {recently_scanned} (should be true) big price change (should be false): {price_change}")
                 
                 # Scan if not recently scanned or if there's a big price change
-                return not recently_scanned or price_change
+                if not recently_scanned or price_change:
+                    print("true!!")
+                    return True
+                else:
+                    return False
             else:
-                # Skip scanning if the item is valued
+                return True
 
-                return self.item_data[str(asset_id)]['rap'] != self.item_data[str(asset_id)]['value']
+                # Commented out so value items can have rap algo value
+                # Skip scanning if the item is valued
+                #return self.item_data[str(asset_id)]['rap'] != self.item_data[str(asset_id)]['value']
 
 
 
@@ -269,6 +277,7 @@ class RolimonAPI():
 
             demand = self.item_data[asset_id]['demand']
             item_price = self.item_data[asset_id]['best_price']
+            total_value = self.item_data[asset_id]['total_value']
 
             is_projected = False
 
@@ -293,17 +302,18 @@ class RolimonAPI():
                     self.projected_json.write_data(data)
 
             else: 
-                if value != 0:
+                #if value != 0:
                     # NOTE: this doens't apply the rap algorithm to value items, i can change this later
-                    rap_algo_value = 0
-                    is_projected = False
-                else:
-                    data = self.projected_json.read_data()
-                    is_projected = data[asset_id]['is_projected']
-                    rap_algo_value = data[asset_id]['value']
-                    item_volume = data[asset_id]['volume']
+                #    rap_algo_value = 0
+                #    is_projected = False
+                #else:
+                data = self.projected_json.read_data()
+                is_projected = data[asset_id]['is_projected']
+                rap_algo_value = data[asset_id]['value']
+                item_volume = data[asset_id]['volume']
 
-            if is_projected or item_volume and float(item_volume) < 3:
+            # TODO: PUT THIS IN CONFIG 
+            if is_projected or item_volume and float(item_volume) < 1.35:
                 continue
 
             filtered_inventory[item] = {
@@ -312,6 +322,7 @@ class RolimonAPI():
                 'rap': rap,
                 'demand': demand,
                 'rap_algorithm': rap_algo_value,
+                'total_value': total_value
             }
 
         # apply more usefull info about the item
