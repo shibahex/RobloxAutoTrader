@@ -6,8 +6,10 @@ from handler import *
 import threading
 from datetime import datetime, timedelta
 from handler.handle_json import JsonHandler
+from account_manager import AccountManager
 
 """
+PROBLEM WITH MULTI COOKIES, WHEN I WASO ON SHADOWKILLER IT HAD THE USERID OF DESIREDEDESIGNER IN THE ID, SO I THINK THE 2AUTHS ARENT SYCNED TO SWELECTED COOKIE
     1. multithread appending owners (bake in get inventory so multiple threads work on inventories)
     maybe have projected scanning in another thread somehow? dont let the whole program wait on 1 thread for projected scanning
 
@@ -30,6 +32,8 @@ class Doggo:
         self.trader = TradeMaker()
         self.all_cached_traders = []
 
+        self.discord_webhook = DiscordHandler()
+
         # Define a stop event that will be shared between threads
         self.stop_event = threading.Event()
 
@@ -37,7 +41,6 @@ class Doggo:
         while True:
             self.cli.clear_console()
             self.display_main_menu()
-            time.sleep(30)
 
     def display_main_menu(self):
         options = (
@@ -55,6 +58,7 @@ class Doggo:
     def handle_menu_selection(self, selection):
         match selection:
             case 1:
+                
                 AccountManager().main()
             case 2:
                 # Trade Manager functionality can be implemented here
@@ -73,7 +77,6 @@ class Doggo:
             random_item = self.rolimons.return_item_to_scan()['item_id']
             owners = roblox_account.get_active_traders(random_item)
 
-            accounts = self.json.read_data()
             for owner in owners:
                 # Uncomment the following line if user validation is needed
                 # if self.rolimons.validate_user(owner):
@@ -81,8 +84,6 @@ class Doggo:
                 if int(owner) in self.all_cached_traders:
                     print("already traded with player, skipping")
                     continue
-                else:
-                    print(int(owner), self.all_cached_traders)
 
                 self.all_cached_traders.append(owner)
                 if roblox_account.check_can_trade(owner) == True:
@@ -102,6 +103,7 @@ class Doggo:
 
             for account in roblox_accounts:
                 account.outbound_api_checker()
+                account.check_completeds()
                 # NOTE: off bc i have a good inbound
                 #account.counter_trades()
 
@@ -115,30 +117,45 @@ class Doggo:
         time.sleep(1)
         while True:
             threads = []
-            for account in roblox_accounts:
+            if roblox_accounts == []:
+                input("No active accounts found!")
+                break
+            for current_account in roblox_accounts:
+                print(current_account.username, current_account.request_handler.Session.cookies.get_dict(), "[debug]")
                 # Check if all accounts are rate-limited
+                # TODO: EDIT ratelimited function to not count disabled accounts
                 if self.json.is_all_ratelimited():
                     print("All cookies are ratelimited. Waiting for 20 minutes...")
-                    time.sleep(20 * 60)  # Wait for 20 minutes before retrying
-                    break  # Skip to the next account if rate-limited
+                    time.sleep(20 * 60)
+                    break  # retry loop
 
-                if self.json.check_ratelimit_cookie(account.cookies['.ROBLOSECURITY']):
-                    print("account ratelimited continuing to next acc")
+                if self.json.check_ratelimit_cookie(current_account.cookies['.ROBLOSECURITY']):
+                    print(account.username, "ratelimited continuing to next acc")
                     continue
 
-                print("Scanning recent traders")
-                self.all_cached_traders = list(set(account.get_recent_traders() + self.all_cached_traders)) 
+                # Get inventory
+                current_account.refresh_self_inventory()
+
+                if not current_account.account_inventory:
+                    print(account.username, "has no tradeable inventory")
+                    time.sleep(5)
+                    continue
+
+                self.all_cached_traders = list(set(current_account.get_recent_traders() + self.all_cached_traders)) 
 
                 # TODO: add max days inactive in cfg and parse as arg
 
-                queue_thread = threading.Thread(target=self.queue_traders, args=(account,))
+                print("trading with:", current_account.username, "auth code", current_account.auth_secret, current_account.account_id, "cookie=", current_account.request_handler.Session.cookies.get_dict())
+
+                queue_thread = threading.Thread(target=self.queue_traders, args=(current_account,))
+
                 queue_thread.daemon = True
                 queue_thread.start()
 
                 threads.append((queue_thread))
 
                 # After queuing, start processing trades for the account (is a while true)
-                self.process_trades_for_account(account)
+                self.process_trades_for_account(current_account)
 
                 # Wait for all threads to finish before moving to next iteration
                 print("Stopping threads...")
@@ -147,14 +164,15 @@ class Doggo:
                 for thread in threads:
                     thread.join()
 
+
     def process_trades_for_account(self, account):
         while True:
             account_inventory = account.account_inventory
 
             # Check if user queue is empty
             while not self.user_queue:
-                print("No users to trade with. Waiting 1 second...")
-                time.sleep(1)
+                print("No users to trade with. Waiting 10 second...")
+                time.sleep(10)
 
             #current_user_queue = self.user_queue.copy()
             
@@ -176,10 +194,9 @@ class Doggo:
 
                     # Extract trade details
                     self_side = generated_trade['self_side']
-                    self_robux = generated_trade['self_robux']
                     their_side = generated_trade['their_side']
+                    self_robux = generated_trade['self_robux']
 
-                    # Send trade request
                     print("SEND ROBUX!!!", self_robux)
                     send_trade_response = account.send_trade(trader, self_side, their_side, self_robux=self_robux)
 
@@ -190,27 +207,29 @@ class Doggo:
 
                     # Cache trade info if sent successfully
                     if send_trade_response:
-                        now_time = datetime.now()
-                        trade_dict = {
-                            'trader_id': trader,
-                            'trade_id': send_trade_response,
-                            'self_items': [account_inventory[key]['item_id'] for key in self_side],
-                            'their_items': [trader_inventory[key]['item_id'] for key in their_side],
-                            'timestamp': now_time.timestamp()
-                        }
-                        self.json.add_trade(account.cookies['.ROBLOSECURITY'], trade_dict)
-                        print(f"Trade recorded: {trade_dict}")
+                        embed_fields, total_profit = self.discord_webhook.embed_fields_from_trade(generated_trade, self.rolimons.item_data, self.rolimons.projected_json.read_data())
+
+                        embed = self.discord_webhook.setup_embed(title=f"Sent a trade with {total_profit} total profit", color=1, user_id=trader, embed_fields=embed_fields, footer="Frick shedletsky")
+                        self.discord_webhook.send_webhook(embed, "https://discord.com/api/webhooks/1311127129731108944/RNlwYAMpLH1tJmwSTNDfuFOb9id2EmfC9AEvwSu5Gh-RNKcze35Pnp8asRBGt7dRsUaI")                    # Send trade request
+                        pass
 
     def load_roblox_accounts(self):
         cookie_json = self.json.read_data()
         roblox_accounts = []
 
         for account in cookie_json['roblox_accounts']:
+            # Dont use account if its disabled
+            if account['use_account'] == False:
+                continue
+
             roblox_cookie = {'.ROBLOSECURITY': account['cookie']}
             auth_secret = account['auth_secret']
-            auth_ticket = account['auth_ticket']
-            print("auth:secret", auth_secret, "auth ticket:", auth_ticket)
-            roblox_accounts.append(RobloxAPI(cookie=roblox_cookie, auth_secret=auth_secret, auth_ticket=auth_ticket))
+            last_completed = account['last_completed']
+                
+            roblox_account = RobloxAPI(cookie=roblox_cookie, auth_secret=auth_secret)
+
+            print(roblox_account.username, roblox_account.request_handler.Session.cookies.get_dict(), "[APPENDING]")
+            roblox_accounts.append(roblox_account)
 
         return roblox_accounts
     
