@@ -4,6 +4,8 @@ import os
 import handler.handle_cli as handle_cli
 import time
 from datetime import datetime, timedelta
+# NOTE: I can optimize json reading and stuff by not having cookies.json a list of dicts
+# rather it could be dicts with the keys as the userids
 
 class JsonHandler:
     def __init__(self, filename):
@@ -29,7 +31,7 @@ class JsonHandler:
             except FileNotFoundError:
                 return {'roblox_accounts': []}
             except json.JSONDecodeError:
-                self.cli.print_error("Error decoding JSON, returning empty data.")
+                self.cli.print_error(f"Error decoding JSON, returning empty data. {self.filename}")
                 return {'roblox_accounts': []}
 
     def write_data(self, data: dict) -> None:
@@ -38,32 +40,8 @@ class JsonHandler:
             with open(self.filename, 'w') as file:
                 json.dump(data, file, indent=4)
 
-    def add_trade(self, cookie, trade_dict):
-        """Adds a trade to the specified Roblox account."""
-        data = self.read_data()
+        print(f"Data successfully written to {self.filename}")
 
-        # Check if the account already exists
-        account_found = False
-        for account in data['roblox_accounts']:
-            if account.get('cookie') == cookie:
-                # If account exists, append the trade_dict to its trades
-                if 'trades' not in account:
-                    account['trades'] = []
-                account['trades'].append(trade_dict)
-                account_found = True
-                break
-
-        # If account does not exist, create a new entry
-        if not account_found:
-            new_account = {
-                'cookie': cookie,
-                'trades': [trade_dict],
-                'ratelimit_timestamp': None
-            }
-            data['roblox_accounts'].append(new_account)
-
-        # Write the updated data back to the file
-        self.write_data(data)
 
     def add_ratelimit_timestamp(self, cookie) -> None:
         data = self.read_data()
@@ -75,31 +53,70 @@ class JsonHandler:
                 self.write_data(data)
                 return True
 
-        pass
+
+    def toggle_cookie(self, index:int) -> None:
+        data = self.read_data()
+        if 0 <= index < len(data['roblox_accounts']):
+            toggle = data['roblox_accounts'][index]['use_account']
+
+            data['roblox_accounts'][index]['use_account'] = not toggle
+
+            self.write_data(data)
+            self.cli.print_success(f"Cookie toggled to {toggle}")
+            time.sleep(1)
+        else:
+            self.cli.print_error("Invalid index. No cookie deleted.")
+
+    def is_disabled(self, cookie):
+        data = self.read_data()
+        for account in data['roblox_accounts']:
+            if account.get('cookie') == cookie:
+                print(account['use_account'], type(account['use_account']))
+                return account['use_account']
+
+        # for some reason if theres no use account value
+        return False
 
     def is_all_ratelimited(self):
         
         data = self.read_data()
         for account in data['roblox_accounts']:
-            current_date = datetime.now()
+            if account['use_account'] == True:
+                current_date = datetime.now()
 
-            ratelimit_timestamp = account['ratelimit_timestamp']
-            # Parse the timestamp string into a datetime object
-            try:
-                timestamp_date = datetime.fromisoformat(ratelimit_timestamp)
-            except:
-                # Handle invalid timestamp format if needed
-                return False
-            
+                ratelimit_timestamp = account['ratelimit_timestamp']
+                # Parse the timestamp string into a datetime object
+                try:
+                    timestamp_date = datetime.fromisoformat(ratelimit_timestamp)
+                except:
+                    # Handle invalid timestamp format if needed
+                    return False
+                
 
 
-            if current_date - timestamp_date >= timedelta(hours=6):
-                # greater than 6 hours
-                account['ratelimit_timestamp'] = None
-                self.write_data(data)
-                return False
+                if current_date - timestamp_date >= timedelta(hours=6):
+                    # greater than 6 hours
+                    account['ratelimit_timestamp'] = None
+                    self.write_data(data)
+                    return False
 
         return True
+
+    def update_last_completed(self, cookie, last_completed: int or str) -> None:
+        data = self.read_data()
+        for account in data['roblox_accounts']:
+            if account.get('cookie') == cookie:
+                account['last_completed'] = last_completed
+                self.write_data(data)
+                return True
+
+    def get_last_completed(self, cookie) -> str or None:
+        data = self.read_data()
+        for account in data['roblox_accounts']:
+            if account.get('cookie') == cookie:
+                return account['last_completed']
+
+
 
     def check_ratelimit_cookie(self, cookie) -> None:
         """
@@ -132,18 +149,19 @@ class JsonHandler:
                 
                 return True
 
-    def add_cookie(self, cookie, auth, auth_ticket) -> None:
+    def add_cookie(self, cookie, username, auth) -> None:
         data = self.read_data()
         
         # Check for duplicate cookies
         if not any(account['cookie'] == cookie for account in data['roblox_accounts']):
-            data['roblox_accounts'].append({'cookie': cookie, 'auth_secret': auth, 'auth_ticket': auth_ticket, 'ratelimit_timestamp': None})
+            data['roblox_accounts'].append({'username': username, 'use_account': True, 'last_completed': None,'cookie': cookie, 'auth_secret': auth, 'ratelimit_timestamp': None})
 
             self.write_data(data)
             self.cli.print_success("Cookie added suscessfully")
             time.sleep(1)
         else:
             print("Cookie already exists.")
+            time.sleep(1)
 
     def delete_cookie(self, index:int) -> None:
         data = self.read_data()
@@ -154,36 +172,6 @@ class JsonHandler:
             time.sleep(1)
         else:
             self.cli.print_error("Invalid index. No cookie deleted.")
-
-    def get_outbounds(self, cookie) -> dict:
-        data = self.read_data()
-        account_found = False
-        for account in data['roblox_accounts']:
-            if account.get('cookie') == cookie:
-                if 'trades' not in account:
-                    break
-
-                return account["trades"]
-        return False
-
-
-    def remove_trade(self, cookie, trade_id):
-        data = self.read_data()
-
-        for account in data['roblox_accounts']:
-            if account.get('cookie') == cookie:
-                if 'trades' not in account:
-                    break
-                trades = account['trades']
-                for trade in trades:
-                    if trade['trade_id'] == trade_id:
-                        trades.remove(trade)
-                        self.write_data(data)
-                        break
-
-                    
-                    
-
 
     
     def list_cookies(self) -> None:
@@ -205,7 +193,7 @@ class JsonHandler:
                 title = f"{handle_cli.magenta}[{handle_cli.reset+str(i)+handle_cli.magenta}] {ordinal(i)} Cookie{handle_cli.reset}"
 
                 shorten_cookie = account['cookie'][:len(account['cookie']) // 6]
-                cookie_info = f"\nShortened Cookie: {shorten_cookie}\n\nAuth Secret: {account['auth_secret']}\nAuth Ticket: {account['auth_ticket']}\n"
+                cookie_info = f"\nUsername: {account['username']}\nRatelimited: {account['ratelimit_timestamp']}\nEnabled: {account['use_account']}\n\nShortened Cookie: {shorten_cookie}\nAuth Secret: {account['auth_secret']}\n"
 
 
                 print("---" + title + "---" + cookie_info )
