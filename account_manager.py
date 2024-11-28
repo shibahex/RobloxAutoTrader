@@ -102,7 +102,7 @@ class AccountManager:
             return None
 
         try:
-            cookie, username, auth_ticket = firefox.roblox_login(auth_secret)
+            cookie, username = firefox.roblox_login(auth_secret)
             firefox.stop()
         except ValueError as e:
             self.cli.print_error(f"{e}\nSkipping account...")
