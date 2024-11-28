@@ -146,6 +146,15 @@ class RequestsHandler:
                 if URL != "https://catalog.roblox.com/v1/catalog/items/details":
                     print("Error code 403: Authorization declined on url", URL)
                     #print(proxy_dict)
+                try:
+                    if "errors" in Response.json():
+                        if "Token Validation Failed" in Response.json()['errors'][0]['message'].lower():
+                            print("Generating new token")
+                            self.headers['x-csrf-token'] = self.generate_csrf()
+                            continue
+                except:
+                    pass
+
                 return Response
             elif Response.status_code == 500:
                 print("API failed to respond..", URL)
