@@ -1,6 +1,8 @@
 import time
+
 import random
 import requests
+
 
 
 class RequestsHandler:
@@ -16,9 +18,11 @@ class RequestsHandler:
             self.load_proxies()
 
         self.Session = Session
-        if cookie != None:
+
+        if cookie:
             self.Session.cookies.update(cookie)
             print("Updated cookie")
+
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -73,6 +77,7 @@ class RequestsHandler:
         """
         Proxy Managment
         """
+
         headers = self.headers.copy()  # Create a copy of the original headers
         
         if additional_headers:
@@ -134,7 +139,7 @@ class RequestsHandler:
 
 
             if Response.status_code == 200:
-                print("200", URL)
+                #print("200", URL)
                 return Response
             elif Response.status_code == 403:
                 # debug purposes also items/details returns 403 on purpose
@@ -144,6 +149,10 @@ class RequestsHandler:
                 return Response
             elif Response.status_code == 500:
                 print("API failed to respond..", URL)
+                return Response
+            elif Response.status_code == 400:
+                print("Requests payload error, returning")
+                print(Response.text, payload)
                 return Response
             else:
                 print("Unknown Error Code on", URL, Response.status_code, Response.text)
