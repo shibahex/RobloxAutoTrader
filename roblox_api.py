@@ -19,10 +19,11 @@ class RobloxAPI():
         Pass in Cookie if you want it to be an account
     """
 
-    def __init__(self, cookie:dict=None, auth_secret=None, auth_ticket=None, Proxies=False):
-
+    def __init__(self, cookie:dict=None, auth_secret=None, Proxies=False):
+        self.auth_secret = auth_secret
         self.outbounds_userids = []
 
+        self.json = JsonHandler('cookies.json')
 
         # For rolimon Trade Ads
         self.last_outbound = None
@@ -37,37 +38,39 @@ class RobloxAPI():
 
         self.rolimon = rolimons_api.RolimonAPI()
 
+        self.discord_webhook = DiscordHandler()
 
         if cookie != None:
             self.cookies = cookie
-            self.authenticator = pyotp.TOTP(auth_secret)
-            self.auth_ticket = auth_ticket
-            self.request_handler = RequestsHandler(cookie=self.cookies, use_proxies=False)
-            self.json = JsonHandler('cookies.json')
-            self.auth_handler = AuthHandler()
+            self.last_completed_scanned = self.json.get_last_completed(cookie['.ROBLOSECURITY'])
 
+            self.authenticator = pyotp.TOTP(self.auth_secret)
+            self.request_handler = RequestsHandler(cookie=self.cookies, use_proxies=False, Session=requests.Session())
+            self.auth_handler = AuthHandler()
 
             self.account_id, self.username = self.fetch_userid_and_name()
             self.account_inventory = self.fetch_inventory(self.account_id)
+            self.account_robux = 0
+            self.get_robux()
+            
             if self.account_id == False:
                 print("Failed to get userid for cookie", cookie)
                 raise ValueError("Invalid account or cookie.")
 
-            if not self.account_inventory:
-                print(f"{self.username} has no tradeable items")
-                raise ValueError("Account has no tradeable items.")
+            self.check_completeds()
 
             self.request_handler.headers.update({'X-CSRF-TOKEN': self.refresh_csrf()})
-
     
     # refresh current inventory
     def refresh_self_inventory(self):
+        # TODO: make this refresh if a trade gets completed
         """
             Gets inventory of current .ROBLOSECURITY used on class
         """
         self.account_inventory = self.fetch_inventory(self.account_id)
+        #self.account_inventory = self.fetch_inventory(121642019)
         if self.account_inventory == False:
-            raise ValueError("Account has no tradeable items")
+            return False
 
     def refresh_csrf(self):
         """
@@ -91,7 +94,7 @@ class RobloxAPI():
         if auth_response.status_code == 200: 
             return auth_response.json()['id'], auth_response.json()['name']
         else:
-            raise ValueError("Couldnt login with cookie", self.cookies)
+            raise ValueError(f"Couldnt login with cookie {self.cookies}")
 
     def fetch_inventory(self, userid):
         #TODO: use roblox API
@@ -109,9 +112,23 @@ class RobloxAPI():
                     continue
                 # TODO: APPLY NFT
                 # TODO: IF USERID = SELF.USERID THEN DONT APPLY NFT
+                    
                 uaid = str(item['userAssetId'])
                 itemId = str(item['assetId'])
-                inventory[uaid] = {"item_id": itemId}
+                if userid == self.account_id:
+                    nft_list = self.config.trading['NFT']
+                    if itemId not in nft_list:
+                        inventory[uaid] = {"item_id": itemId}
+                    else:
+                        print(itemId, "in NFT", nft_list)
+                else:
+                    nfr_list = self.config.trading['NFR']
+                    if itemId not in nfr_list:
+                        inventory[uaid] = {"item_id": itemId}
+                    else:
+                        print(itemId, "in NFR", nfr_list)
+
+
 
             return self.rolimon.add_data_to_inventory(inventory)
 
@@ -138,7 +155,7 @@ class RobloxAPI():
             return False
 
         # send the totp verify request to roblox
-        verification_token = self.auth_handler.verify_request(self.request_handler, senderid, metadata_challengeid, self.authenticator.now())
+        verification_token = self.auth_handler.verify_request(self.request_handler, senderid, metadata_challengeid, self.authenticator)
 
         # send the continue request, its really important
         self.auth_handler.continue_request(self.request_handler, challengeid, verification_token, metadata_challengeid)
@@ -219,10 +236,36 @@ class RobloxAPI():
             else:
                 print("None counter erro")
 
+    def handle_auth_failed(self, response):
+        """
+            For when you get 403, it will try to generate 2fa or generate token
+            403 = Errored even after making the 2fa code
+            False = Wasn't 2fa problem and csrf token erroed
+        """
+        print(response.headers, response.text, self.username, self.account_id, "3"*30)
+        if 'rblx-challenge-id' in response.headers:
+            print("doing 2fa")
+            validation = self.validate_2fa(response)
+            if validation == False:
+                return 403
+            return validation
+        else:
+            print("getting csrf")
+            newtoken = self.refresh_csrf()
+            if newtoken:
+                self.request_handler.headers.update({'X-CSRF-TOKEN': newtoken})
+                print("update x csrf token", self.request_handler.headers)
+            else: 
+                    print("got error getting token")
+                    return False
+
+
     def send_trade(self, trader_id, trade_send, trade_recieve, self_robux=None, counter_trade=False, counter_id=None):
         """
             Send Trader ID Then the list of items (list of assetids)
         """
+        if self_robux and self_robux > self.account_robux:
+            self_robux = self.account_robux 
         trade_payload = {"offers":[
             {"userId":trader_id,"userAssetIds":trade_recieve,
             "robux":None},
@@ -247,30 +290,64 @@ class RobloxAPI():
             elif trade_response.status_code == 429:
                 return trade_response.status_code
             elif trade_response.status_code == 403:
-                print("403 error:", trade_response.json())
-                if 'rblx-challenge-id' in trade_response.headers:
-                    print("doing 2fa shit")
-                    validation = self.validate_2fa(trade_response)
-                    if validation == False:
-                        return 403
-                    validation_headers = validation
+                auth_response = self.handle_auth_failed(trade_response)
+                if auth_response == 403:
                     continue
-               
-                else:
-                    print("getting csrf")
-                    newtoken = self.refresh_csrf()
-                    if newtoken:
-                        self.request_handler.headers.update({'X-CSRF-TOKEN': newtoken})
-                        print("update x csrf token", self.request_handler.headers)
-                    else: 
-                        print("got error getting token")
+                if auth_response == False:
+                    break
+            elif trade_response.status_code == 400:
+                """
+                    https://trades.roblox.com/v1/trades/send 400 {"errors":[{"code":17,"message":"You have insufficient Robux to make this offer.","userFacingMessage":"Something went wrong"}]}
+
+
+                    {"errors":[{"code":12,"message":"One or more userAssets are invalid. See fieldData for details.","userFacingMessage":"Something went wrong","field":"userAssetIds","fieldData":[{"userAssetId":13003706,"reason":"NotOwned"},{"userAssetId":30456875,"reason":"NotOwned"}]}]}
+
+                """
+                # Error code 17 = Not enough robux
+                # Error code 12 = Someone doesn't own the robux anymore
+                error = trade_response.json()['errors'][0]
+                error_code = error['code']
+
+                if error_code == 12:
+                    # Check if its our inventory erroring
+                    if self.handle_invalid_ids(error_data):
+                        continue
+                    else:
                         break
-                    print("got 403 sending trade, trying to generate csrf")
+                elif error_code == 17:
+                    self.get_robux()
+                    continue
+                else:
+                    print("Unknown error", error)
+                    break
             else:
-                print("errored at trade")
+                print("errored at trade", trade_response.status_code)
                 print(trade_response.text)
                 break
 
+    def handle_invalid_ids(self, error_data):
+        missing_asset_ids = [entry["userAssetId"] for entry in error_data["errors"][0]["fieldData"]]
+
+        def is_in_inventory():
+            for user_asset_id in missing_asset_ids:
+                if user_asset_id in self.account_inventory:
+                    return True
+
+        if is_in_inventory():
+            self.check_completeds()
+            return True
+        else:
+            return False
+
+    def get_robux(self):
+        robux_api = f"https://economy.roblox.com/v1/users/{self.account_id}/currency"
+
+        response = self.request_handler.requestAPI(robux_api)
+
+        if response.status_code == 200:
+            self.account_robux = response.json()['robux']
+        else:
+            self.account_robux = 0
 
     def get_recent_traders(self, max_days_since=5):
         """
@@ -301,6 +378,128 @@ class RobloxAPI():
 
         return recently_traded
 
+    def format_trade_api(self, trade_json):
+        # TODO: If this function is only used for webhook reasons, scrap it and remake it,
+        # Because grouping up RAP as a total value then VALUE has a total value to get webhook totals don't work because  they shouldnt be added together to get a value of an item
+        self_offer = trade_json['offers'][0]
+        self_user = self_offer['user']['id']
+        self_assets = [asset['assetId'] for asset in self_offer['userAssets']]  # Extract only the asset IDs
+
+        # Assign the second offer to trader_offer
+        trader_offer = trade_json['offers'][1]
+        trader_assets = [asset['assetId'] for asset in trader_offer['userAssets']]  # Extract only the asset IDs
+
+        self_rap, self_value, self_algorithm_value, self_total = self.calculate_gains(self_assets)
+        trader_rap, trader_value, trader_algorithm_value, trader_total = self.calculate_gains(trader_assets)
+        trade = {
+            "their_id": trader_offer['user']['id'],
+            "their_side_item_ids": trader_assets,
+            "their_value": trader_value,
+            "their_rap": trader_rap,
+            "their_rap_algo": trader_algorithm_value,
+            "their_total": trader_total,
+            "self_robux": self_offer['robux'],
+            "self_rap": self_rap,
+            "self_id": self_user,
+            "self_value": self_value,
+            "self_rap_algo": self_algorithm_value,
+            "self_side_item_ids": self_assets,
+            "self_total": self_total
+
+        }
+
+        return trade
+
+
+
+
+    def check_completeds(self):
+        # TODO: DO SOMETHING WITH UNLOGGED TRADES, AKA SEND THROUGH WEBHOOK ALSO MAYBE MAKE IT RUN WITH THE UPDATE DATA THREAD 
+        #if sendtrade api gets error check completeds 
+        
+        print("checking completeds")
+        
+        trades = self.get_trades("https://trades.roblox.com/v1/trades/completed?limit=100&sortOrder=Desc", limit_pages=1)
+
+        # if trades are empty return None
+        if trades == {}:
+            return None
+
+        # get new trades not logged
+        
+        trades_items = list(reversed(trades.items()))
+        unlogged_trades = []
+        found_start = False
+
+        for trade_id, trade_data in trades_items:
+            if found_start:
+                print("Found start appending")
+                unlogged_trades.append(trade_id)
+            elif trade_id == self.last_completed_scanned:
+                found_start = True  
+
+
+
+        first_trade = next(iter(trades))
+        self.last_completed_scanned = first_trade
+        self.json.update_last_completed(self.cookies['.ROBLOSECURITY'], self.last_completed_scanned)
+
+        if unlogged_trades != []:
+            self.account_inventory = self.refresh_self_inventory()
+            for trade_id in unlogged_trades:
+                trade_info = self.request_handler.requestAPI(f"https://trades.roblox.com/v1/trades/{trade_id}")
+
+                if trade_info.status_code == 200:
+                    trade_json = trade_info.json()
+                    formatted_trade = self.format_trade_api(trade_json)
+                    embed_fields, total_profit = self.discord_webhook.embed_fields_from_trade(formatted_trade, self.rolimon.item_data, self.rolimon.projected_json.read_data())
+
+                    embed = self.discord_webhook.setup_embed(title=f"Trade Completed ({total_profit} profit)", color=2, user_id=formatted_trade['their_id'], embed_fields=embed_fields, footer="Frick shedletsky")
+
+                    self.discord_webhook.send_webhook(embed, "https://discord.com/api/webhooks/1311127315316478053/Pz_ZrnTRWqCuJoKfnv6W4F9vo04xFVS6pKolHUiP16ByUeGgm-jyHMht9ZF68lStg1v2")   
+                else:
+                    continue
+
+        return unlogged_trades
+
+
+    def calculate_gains(self, item_ids):
+        # TODO: COMPLETELY REMAKE THIS AND IMMITATE THE TRADE ALGORITHM
+        # OR DRAW THIS MATH OUT, THE MAIN ISSUE IM HAVING IS TELL IF I SHOULD
+        # SEPERATE VALUE AND RAP OR KEEP THEM ADDED TOGETHER?
+        # I DONT THINK TRADE ALGORITHM GROUPS THEM TOGETHER BECAUSE VALUE WOULD BE 0 FOR AN RAP ITEM  BUT VALUE SILL HAS RAP I THINK HOW DO  I SEPERATE THEM
+        # after thinking I should cant just add value and rap together, make another function for this for webhooks for combining them.
+
+
+        # I THINK THE MAIN PROBLEM IM HAVING IS IM COMBINING VALUE AND RAP IN THE WEBHOOKS WHEN ITS NOT THAT SIMPLE
+
+        account_rap = 0
+        account_value = 0
+        account_algorithm_value = 0
+        projected_data = self.rolimon.projected_json.read_data()
+
+        account_total = 0
+        for item in item_ids:
+            if str(item) in projected_data.keys():
+                account_algorithm_value += projected_data[str(item)]['value']
+            else:
+                account_algorithm_value += 0
+                #account_algorithm_value += self.rolimon.item_data[str(item)]['rap']
+
+            rap = self.rolimon.item_data[str(item)]['rap']
+            value = self.rolimon.item_data[str(item)]['value']
+            total_value = self.rolimon.item_data[str(item)]['total_value']
+      
+            if not value:
+                value = 0
+            account_rap += rap
+            account_value += value
+            account_total += total_value
+
+
+        return account_rap, account_value, account_algorithm_value, account_total
+
+
     def outbound_api_checker(self):
         """
             Scans the outbound API for bad trades then cancels them.
@@ -315,22 +514,6 @@ class RobloxAPI():
             return asset_ids
             
 
-        def calculate_gains(items):
-            account_rap = 0
-            account_value = 0
-            account_algorithm_value = 0
-            projected_data = self.rolimon.projected_json.read_data()
-
-            for item in items:
-                if str(item) in projected_data.keys():
-                    account_algorithm_value += projected_data[str(item)]['value']
-                else:
-                    account_algorithm_value += self.rolimon.item_data[str(item)]['total_value']
-
-                account_rap += self.rolimon.item_data[str(item)]['rap']
-                account_value += self.rolimon.item_data[str(item)]['total_value']
-
-            return account_rap, account_value, account_algorithm_value
 
 
         # Loop through outbounds
@@ -356,8 +539,8 @@ class RobloxAPI():
             trader_offer = data['offers'][1]
             trader_items = return_items(trader_offer['userAssets'])
 
-            self_rap, self_value, self_algorithm_value = calculate_gains(self_items)
-            trader_rap, trader_value, trader_algorithm_value = calculate_gains(trader_items)
+            self_rap, self_value, self_algorithm_value, self_total = self.calculate_gains(self_items)
+            trader_rap, trader_value, trader_algorithm_value, trader_total = self.calculate_gains(trader_items)
 
             valid_trade = TradeMaker().validate_trade(self_rap, self_algorithm_value, self_value, trader_rap, trader_algorithm_value, trader_value, robux=self_robux)
 
@@ -397,19 +580,6 @@ class RobloxAPI():
             return False
         return True
     
-    def median(self, lst):
-        """
-            Pmethod wrote this and im lazy
-        """
-        print(lst)
-        n = len(lst)
-        if n < 1:
-            return None
-        if n % 2 == 1:
-            return sorted(lst)[n // 2]
-        else:
-            return sum(sorted(lst)[n // 2 - 1:n // 2 + 1]) / 2.0
-
     def is_projected_api(self, item_id):
         # TODO: GET the dates and see how much the item sells so we dont trade dead items or we can
         # see how active an item is
@@ -510,40 +680,6 @@ class RobloxAPI():
 
         return {f"{item_id}": {"is_projected": is_projected, "value": result_value, "volume": result_volume, "timestamp":result_timestamp, "last_price": self.rolimon.item_data[item_id]['best_price']}}
         #return False
-
-    def analyze_volume_data(self, volume_data_points):
-        """
-            Scans volume date and sees how active an item is selling and if theres large gaps of 7 days between sales it returns False
-        """
-        # Function to calculate date differences in days
-        def calculate_date_diff(dates):
-            date_diffs = []
-            for i in range(1, len(dates)):
-                # Parse the previous and current date string to datetime objects
-                prev_date = datetime.strptime(dates[i - 1], "%Y-%m-%dT%H:%M:%SZ")
-                curr_date = datetime.strptime(dates[i], "%Y-%m-%dT%H:%M:%SZ")
-                # Calculate the difference in days between the two dates
-                diff = abs((curr_date - prev_date).days)
-                date_diffs.append(diff)
-            return date_diffs
-        
-        values = [point['value'] for point in volume_data_points]
-        dates = [point['date'] for point in volume_data_points]
-
-        avg_value = sum(values) / len(values) if values else 0
-        print(f"Average Value: {avg_value:.2f}")
-
-        date_diffs = calculate_date_diff(dates)
-
-        avg_date_diff = sum(date_diffs) / len(date_diffs) if date_diffs else 0
-        print(f"Average Date Difference (in days): {avg_date_diff:.2f}")
-
-        large_gaps = [diff for diff in date_diffs if diff > 7]
-
-        # Optionally, print the large gaps for debugging purposes
-        if large_gaps:
-            print("Large gaps between dates (in days):", large_gaps)
-            return False
 
     def get_active_traders(self, item_id):
         """
