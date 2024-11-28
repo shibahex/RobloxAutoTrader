@@ -107,19 +107,21 @@ class TradeMaker():
             rap = 0
             demand = 0
             rap_algorithm = 0
+            total_value = 0
             for key in items:
                 item = inventory[key]
             
                 value += item['value']
                 rap += item['rap']
                 rap_algorithm += item['rap_algorithm']
+                total_value += item['total_value']
 
                 current_demand = item['demand']
                 if current_demand:
                     demand += current_demand
 
             #print("returning", value, rap, rap_algorithm, demand)
-            return value, rap, rap_algorithm, demand
+            return value, rap, rap_algorithm, demand, total_value
 
 
 
@@ -136,20 +138,23 @@ class TradeMaker():
                 # Ensure no overlapping item IDs
                 if self_side_item_ids.isdisjoint(their_side_item_ids):
 
-                    self_value, self_rap, self_rap_algo, self_demand = get_total_values(self_side,self_inventory)
+                    self_value, self_rap, self_rap_algo, self_demand, self_total_value = get_total_values(self_side,self_inventory)
 
-                    their_value, their_rap, their_rap_algo, their_demand = get_total_values(their_side, their_inventory)
+                    their_value, their_rap, their_rap_algo, their_demand, their_total_value = get_total_values(their_side, their_inventory)
                     
                     #print(self_rap_algo, their_rap_algo, "gr")
-                    send_robux = None
+                    send_robux = 0
                     #TODO: check if roblox acc has enough roblox and it it doenst send self.max_robux to remaning robux
 
                     #calc_robux = round((their_rap - self_rap) // float(2))
                     # round down
-                    calc_robux = math.floor((their_rap_algo - self_rap_algo) // float(2))
-
+                    # NOTE: i tried to calcuate with algo but it didnt go too well
                     # Cap the result at self_rap * 0.5 (Roblox limit)
-                    calc_robux = min(calc_robux, self_rap * 0.5)
+                    robux_limit = self_rap * 0.5
+
+                    # Calculate the robux
+                    calc_robux = math.floor(min((their_rap - self_rap) / 4, robux_limit))
+
                     if calc_robux > 0 and self.trade_robux:
                         # If calculated robux if more than max robux just use max robux?
                         if calc_robux > self.max_robux:
@@ -182,8 +187,10 @@ class TradeMaker():
                         # Append all necessary details to valid_trades
                         valid_trades.append({
                             'self_side': self_side,
+                            'self_side_item_ids': self_side_item_ids,
                             'self_robux': send_robux,
                             'their_side': their_side,
+                            'their_side_item_ids': their_side_item_ids,
                             'self_value': self_value,
                             'their_value': their_value,
                             'self_rap': self_rap,
@@ -197,10 +204,13 @@ class TradeMaker():
                             'upgrade': upgrade,
                             'downgrade': downgrade,
                             'num_items_self': num_items_self,
-                            'num_items_their': num_items_their
+                            'num_items_their': num_items_their,
+                            'self_total': self_total_value,
+                            'their_total': their_total_value
                         })
 
-                        if len(valid_trades) > 150:
+                        # idk the number lol
+                        if len(valid_trades) > 1500:
                             break
 
             if valid_trades:
