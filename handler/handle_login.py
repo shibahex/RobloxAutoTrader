@@ -102,12 +102,16 @@ class FirefoxLogin:
 
                         # Extract the ticket from the response
                         response_data = json.loads(response_body)
+                        print(response_data)
+                        #time.sleep(60)
+
+                        username = response_data.get("user", {}).get("name", "")
                         ticket = response_data.get("twoStepVerificationData", {}).get("ticket", "")
                         if ticket:
                             roblosecurity_cookie = self.fetch_cookie()
 
                             if roblosecurity_cookie:
-                                return roblosecurity_cookie, ticket
+                                return roblosecurity_cookie, username
                             else:
                                 raise ValueError("Failed to login to account.")
                         else:
