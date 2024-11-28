@@ -121,7 +121,6 @@ class Doggo:
                 input("No active accounts found!")
                 break
             for current_account in roblox_accounts:
-                print(current_account.username, current_account.request_handler.Session.cookies.get_dict(), "[debug]")
                 # Check if all accounts are rate-limited
                 # TODO: EDIT ratelimited function to not count disabled accounts
                 if self.json.is_all_ratelimited():
@@ -130,14 +129,14 @@ class Doggo:
                     break  # retry loop
 
                 if self.json.check_ratelimit_cookie(current_account.cookies['.ROBLOSECURITY']):
-                    print(account.username, "ratelimited continuing to next acc")
+                    print(current_account.username, "ratelimited continuing to next acc")
                     continue
 
                 # Get inventory
                 current_account.refresh_self_inventory()
 
                 if not current_account.account_inventory:
-                    print(account.username, "has no tradeable inventory")
+                    print(current_account.username, "has no tradeable inventory")
                     time.sleep(5)
                     continue
 
@@ -228,7 +227,6 @@ class Doggo:
                 
             roblox_account = RobloxAPI(cookie=roblox_cookie, auth_secret=auth_secret)
 
-            print(roblox_account.username, roblox_account.request_handler.Session.cookies.get_dict(), "[APPENDING]")
             roblox_accounts.append(roblox_account)
 
         return roblox_accounts
