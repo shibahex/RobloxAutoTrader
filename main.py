@@ -146,8 +146,9 @@ class Doggo:
 
                 print("trading with:", current_account.username, "auth code", current_account.auth_secret, current_account.account_id, "cookie=", current_account.request_handler.Session.cookies.get_dict())
 
+                # to make the threads run even after stop event is called and another thread starts
+                self.stop_event.clear()
                 queue_thread = threading.Thread(target=self.queue_traders, args=(current_account,))
-
                 queue_thread.daemon = True
                 queue_thread.start()
 
