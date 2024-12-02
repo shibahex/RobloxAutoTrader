@@ -2,6 +2,7 @@ import json
 import threading
 import os
 import handler.handle_cli as handle_cli
+#import handler.handle_cli
 import time
 from datetime import datetime, timedelta
 # NOTE: I can optimize json reading and stuff by not having cookies.json a list of dicts
@@ -52,6 +53,15 @@ class JsonHandler:
                 account['ratelimit_timestamp'] = current_date.isoformat()
                 self.write_data(data)
                 return True
+
+    def return_userid_from_index(self, index:int):
+        index = int(index)-1
+        data = self.read_data()
+        if 0 <= index < len(data['roblox_accounts']):
+            try:
+                return data['roblox_accounts'][index]['user_id']
+            except:
+                return False
 
 
     def toggle_cookie(self, index:int) -> None:
@@ -149,12 +159,12 @@ class JsonHandler:
                 
                 return True
 
-    def add_cookie(self, cookie, username, auth) -> None:
+    def add_cookie(self, cookie, username, user_id, auth) -> None:
         data = self.read_data()
         
         # Check for duplicate cookies
         if not any(account['cookie'] == cookie for account in data['roblox_accounts']):
-            data['roblox_accounts'].append({'username': username, 'use_account': True, 'last_completed': None,'cookie': cookie, 'auth_secret': auth, 'ratelimit_timestamp': None})
+            data['roblox_accounts'].append({'username': username, "user_id": user_id, 'use_account': True, 'last_completed': None,'cookie': cookie, 'auth_secret': auth, 'ratelimit_timestamp': None})
 
             self.write_data(data)
             self.cli.print_success("Cookie added suscessfully")
@@ -193,7 +203,7 @@ class JsonHandler:
                 title = f"{handle_cli.magenta}[{handle_cli.reset+str(i)+handle_cli.magenta}] {ordinal(i)} Cookie{handle_cli.reset}"
 
                 shorten_cookie = account['cookie'][:len(account['cookie']) // 6]
-                cookie_info = f"\nUsername: {account['username']}\nRatelimited: {account['ratelimit_timestamp']}\nEnabled: {account['use_account']}\n\nShortened Cookie: {shorten_cookie}\nAuth Secret: {account['auth_secret']}\n"
+                cookie_info = f"\nUsername: {account['username']},\n User ID: {account['user_id']}\nRatelimited: {account['ratelimit_timestamp']}\nEnabled: {account['use_account']}\n\nShortened Cookie: {shorten_cookie}\nAuth Secret: {account['auth_secret']}\n"
 
 
                 print("---" + title + "---" + cookie_info )
