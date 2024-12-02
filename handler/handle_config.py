@@ -8,10 +8,10 @@ class ConfigHandler:
         # Load configuration values into attributes
         self.scan_items = self.load_scan_items()
         self.filter_users = self.load_filter_users()
-        self.prediction_algorithm = self.load_prediction_algorithm()
+        #self.prediction_algorithm = self.load_prediction_algorithm()
         self.trading = self.load_trading()
         self.projected_detection = self.load_projected_detection()
-        self.mass_sender = self.load_mass_sender()
+        #self.mass_sender = self.load_mass_sender()
         # Check if config is filled out 
         self.validate_config()
     def convert_gain(self, gain):
@@ -60,18 +60,6 @@ class ConfigHandler:
         return True
 
 
-    def process_trade(self, close_percentage, their_rap, self_rap, their_value, self_value):
-        """
-        Process the trade based on specified criteria.
-        """
-        if close_percentage < self.min_score_percentage or close_percentage > self.max_score_percentage:
-            return False
-        if not self.check_rap_gain(their_rap, self_rap):
-            return False
-        if not self.check_value_gain(their_value, self_value):
-            return False
-        return True
-
     def load_scan_items(self):
         return {
             'Minimum_Value_of_Item': self.get_int('Scan Items', 'Minimum Value of Item'),
@@ -90,19 +78,18 @@ class ConfigHandler:
             'Last_Traded': self.get_int('Filter Users', 'Last Traded'),
             'Minimum_Total_Value': self.get_int('Filter Users', 'Minimum Total Value'),
             'Minimum_Total_Items': self.get_int('Filter Users', 'Minimum Total Items'),
-            'Check_Rolimon_Verified': self.get_boolean('Filter Users', 'Has Rolimon Verfified Badge')
         }
 
-    def load_prediction_algorithm(self):
-        return {
-            'Predict_Values_of_Your_Inventory': self.get_string('Prediction Algorithm', 'Predict Values of your Inventory'),
-            'Predict_Values_of_Their_Inventory': self.get_string('Prediction Algorithm', 'Predict Values of their Inventory'),
-            'Max_Over_Pay': self.get_float('Prediction Algorithm', 'Max Over Pay'),
-            'Max_Loss': self.get_float('Prediction Algorithm', 'Max Loss'),
-            'NFT_from_Prediction': self.get_list_of_ints('Prediction Algorithm', 'NFT from Prediction'),
-            'Minimum_Value_to_predict': self.get_int('Prediction Algorithm', 'Minimum Value to predict'),
-            'Maximum_Value_to_predict': self.get_int('Prediction Algorithm', 'Maximum Value to predict')
-        }
+    #def load_prediction_algorithm(self):
+    #    return {
+    #        'Predict_Values_of_Your_Inventory': self.get_string('Prediction Algorithm', 'Predict Values of your Inventory'),
+    #        'Predict_Values_of_Their_Inventory': self.get_string('Prediction Algorithm', 'Predict Values of their Inventory'),
+    #        'Max_Over_Pay': self.get_float('Prediction Algorithm', 'Max Over Pay'),
+    #        'Max_Loss': self.get_float('Prediction Algorithm', 'Max Loss'),
+    #        'NFT_from_Prediction': self.get_list_of_ints('Prediction Algorithm', 'NFT from Prediction'),
+    #        'Minimum_Value_to_predict': self.get_int('Prediction Algorithm', 'Minimum Value to predict'),
+    #        'Maximum_Value_to_predict': self.get_int('Prediction Algorithm', 'Maximum Value to predict')
+    #    }
 
     def load_trading(self):
         return {
@@ -186,7 +173,7 @@ class ConfigHandler:
 
     def validate_config(self):
         # Check if any required values are None and raise an error
-        for section in [self.scan_items, self.filter_users, self.prediction_algorithm, self.trading, self.projected_detection]:
+        for section in [self.scan_items, self.filter_users, self.trading, self.projected_detection]:
             for key, value in section.items():
                 if value is None:
                     raise ValueError(f"Configuration error: '{key}' is missing or invalid.")
