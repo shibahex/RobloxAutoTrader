@@ -7,21 +7,20 @@ import threading
 from datetime import datetime, timedelta
 from handler.handle_json import JsonHandler
 from account_manager import AccountManager
+import config_manager
+from handler.account_settings import HandleConfigs
 
 """
-PROBLEM WITH MULTI COOKIES, WHEN I WASO ON SHADOWKILLER IT HAD THE USERID OF DESIREDEDESIGNER IN THE ID, SO I THINK THE 2AUTHS ARENT SYCNED TO SWELECTED COOKIE
+    Fix bad imports and messy imports..
+
+    problem with completeds not sending only sending when bot starts first
+
     1. multithread appending owners (bake in get inventory so multiple threads work on inventories)
     maybe have projected scanning in another thread somehow? dont let the whole program wait on 1 thread for projected scanning
 
-    also make ratelimit consecutively be on a timer since last ratelimit and if its not been 1minute keep multiplying?
-
-    Projected scanner is always checking for my inventory i think, so somethings off wehre it scans the same item, maybe it doesnt change the last price?
-
     Rolimon ads and discord ads for more counters!
 
-
     Trade send thread should be seprate from scanning inventories threads bc ratelimit on resale-data
-
 """
 class Doggo:
     def __init__(self):
@@ -29,8 +28,11 @@ class Doggo:
         self.cli = Terminal()
         self.json = JsonHandler(filename="cookies.json")
         self.rolimons = RolimonAPI()
-        self.trader = TradeMaker()
+
+        # NOTE: use roblo accounts trademaker
+        #self.trader = TradeMaker()
         self.all_cached_traders = []
+        self.account_configs = HandleConfigs()
 
         self.discord_webhook = DiscordHandler()
 
@@ -45,7 +47,7 @@ class Doggo:
     def display_main_menu(self):
         options = (
             (1, "Account Manager"),
-            (2, "Trade Manager"),
+            (2, "Config Manager"),
             (3, "Execute Trader"),
         )
         self.cli.print_menu("Main Menu", options)
@@ -53,15 +55,16 @@ class Doggo:
             answer = int(self.cli.input_prompt("Enter Option"))
             self.handle_menu_selection(answer)
         except ValueError as e:
-            self.cli.print_error("Invalid input. Please enter a number. ERROR:", e)
+            self.cli.print_error(f"ERROR: {e}")
 
     def handle_menu_selection(self, selection):
         match selection:
             case 1:
-                
                 AccountManager().main()
             case 2:
                 # Trade Manager functionality can be implemented here
+                config_manager.AccountSettings()
+                
                 pass
             case 3:
                 self.start_trader()
@@ -184,7 +187,7 @@ class Doggo:
                 
                 # Generate and send trade if there are items to trade
                 if account_inventory and trader_inventory:
-                    generated_trade = self.trader.generate_trade(account_inventory, trader_inventory)
+                    generated_trade = account.TradeMaker.generate_trade(account_inventory, trader_inventory)
 
                     if not generated_trade:
                         print("no generated trade")
@@ -225,9 +228,17 @@ class Doggo:
             roblox_cookie = {'.ROBLOSECURITY': account['cookie']}
             auth_secret = account['auth_secret']
             last_completed = account['last_completed']
+            user_id = account['user_id']
+
+            # TODO: ADD CUSTOM CONFIG
+                
                 
             roblox_account = RobloxAPI(cookie=roblox_cookie, auth_secret=auth_secret)
-
+            user_config = self.account_configs.get_config(user_id)
+            if user_config:
+                roblox_account.config.trading = user_config
+            else:
+                print("no config for", user_id)
             roblox_accounts.append(roblox_account)
 
         return roblox_accounts
