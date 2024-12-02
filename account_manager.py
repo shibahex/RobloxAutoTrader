@@ -90,7 +90,7 @@ class AccountManager:
             self.cli.print_error(f"{error}\nSkipping account...")
             return None
 
-        self.json_handler.add_cookie(acc_cookie, roblox_login.username, auth_secret)
+        self.json_handler.add_cookie(acc_cookie, roblox_login.username, roblox_login.account_id, auth_secret)
 
 
     def add_account(self):
@@ -102,12 +102,12 @@ class AccountManager:
             return None
 
         try:
-            cookie, username = firefox.roblox_login(auth_secret)
+            cookie, username, user_id = firefox.roblox_login(auth_secret)
             firefox.stop()
         except ValueError as e:
             self.cli.print_error(f"{e}\nSkipping account...")
             firefox.stop()
             return None
-        self.json_handler.add_cookie(cookie, username, auth_secret)
+        self.json_handler.add_cookie(cookie, username, user_id, auth_secret)
 
 
