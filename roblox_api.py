@@ -11,6 +11,7 @@ import rolimons_api
 from handler.handle_json import JsonHandler
 from handler.handle_2fa import AuthHandler
 from trade_algorithm import TradeMaker
+from handler.account_settings import HandleConfigs
 
 from handler.price_algorithm import SalesVolumeAnalyzer
 
@@ -22,6 +23,8 @@ class RobloxAPI():
     def __init__(self, cookie:dict=None, auth_secret=None, Proxies=False):
         self.auth_secret = auth_secret
         self.outbounds_userids = []
+
+        self.account_configs = HandleConfigs()
 
         self.json = JsonHandler('cookies.json')
 
@@ -35,9 +38,7 @@ class RobloxAPI():
         #TODO: USE PROXIES
         self.parse_handler = RequestsHandler(Session=requests.Session(), use_proxies=False) 
         self.config = ConfigHandler('config.cfg')
-
         self.rolimon = rolimons_api.RolimonAPI()
-
         self.discord_webhook = DiscordHandler()
 
         if cookie != None:
@@ -49,6 +50,15 @@ class RobloxAPI():
             self.auth_handler = AuthHandler()
 
             self.account_id, self.username = self.fetch_userid_and_name()
+            user_config = self.account_configs.get_config(str(self.account_id))
+            if user_config:
+                self.config.trading = user_config
+            else:
+                print("no user config for", self.account_id)
+
+            self.TradeMaker = TradeMaker(config=self.config)
+
+            print(self.config.trading)
             self.account_inventory = self.fetch_inventory(self.account_id)
             self.account_robux = 0
             self.get_robux()
@@ -59,7 +69,8 @@ class RobloxAPI():
 
             self.check_completeds()
 
-            self.request_handler.headers.update({'X-CSRF-TOKEN': self.refresh_csrf()})
+            self.request_handler.generate_csrf()
+            #self.request_handler.headers.update({'X-CSRF-TOKEN': self.refresh_csrf()})
     
     # refresh current inventory
     def refresh_self_inventory(self):
@@ -196,7 +207,7 @@ class RobloxAPI():
         page_count = 0
         trades = {}
         while cursor != None:
-            if page_count and page_count >= limit_pages:
+            if limit_pages and page_count >= limit_pages:
                 break
 
             response = self.request_handler.requestAPI(f"{page_url}&cursor={cursor}")
@@ -217,7 +228,7 @@ class RobloxAPI():
 
             trader_inventory = self.fetch_inventory(trader_id)
 
-            generated_trade = TradeMaker().generate_trade_with_timeout(self.account_inventory, trader_inventory, counter_trade=True)
+            generated_trade = self.TradeMaker.generate_trade_with_timeout(self.account_inventory, trader_inventory, counter_trade=True)
 
             if not generated_trade:
                 print("couldnt generate trade for counter")
@@ -542,7 +553,7 @@ class RobloxAPI():
             self_rap, self_value, self_algorithm_value, self_total = self.calculate_gains(self_items)
             trader_rap, trader_value, trader_algorithm_value, trader_total = self.calculate_gains(trader_items)
 
-            valid_trade = TradeMaker().validate_trade(self_rap, self_algorithm_value, self_value, trader_rap, trader_algorithm_value, trader_value, robux=self_robux)
+            valid_trade = self.TradeMaker.validate_trade(self_rap, self_algorithm_value, self_value, trader_rap, trader_algorithm_value, trader_value, robux=self_robux)
 
             if not valid_trade:
                 url = f"https://trades.roblox.com/v1/trades/{trade_id}/decline"
