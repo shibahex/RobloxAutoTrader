@@ -46,6 +46,7 @@ class AuthHandler:
             try:
                 return request.json()["verificationToken"]
             except:
+                req_handler.generate_csrf()
                 print("error returning verification token", request.text, request.status_code)
                 continue
 
