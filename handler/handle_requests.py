@@ -59,13 +59,14 @@ class RequestsHandler:
         return proxy_dict
 
     def generate_csrf(self):
-        response = self.Session.post(
-            'https://auth.roblox.com/v2/login', data={})
-        if 'x-csrf-token' in response.headers:
-            self.Session.headers["x-csrf-token"] = response.headers["x-csrf-token"]
-            # return response.headers['x-csrf-token']
+        token_post = self.Session.post('https://catalog.roblox.com/v1/catalog/items/details')
+
+        if 'x-csrf-token' in token_post.headers:
+            print("returning",token_post.headers['x-csrf-token'])
+            self.Session.headers["x-csrf-token"] = token_post.headers['x-csrf-token']
+            return True
         else:
-            print(f'Invalidated cookie returned in generate_csrf; {response.headers}')
+            print("Couldnt fetch x-csrf-token")
             return False
 
     def requestAPI(self, URL, method="get", payload=None, additional_headers=None) -> requests.Response:
@@ -142,6 +143,16 @@ class RequestsHandler:
                 #print("200", URL)
                 return Response
             elif Response.status_code == 403:
+                new_token = self.generate_csrf()
+                if new_token:
+                    print("got new token for requests")
+                else:
+                    print("couldn't get token", URL, self.Session.cookies.get_dict())
+                    return Response
+                continue
+
+                # TODO: FIX EDGE CASE
+                # <LeftMouse>
                 # debug purposes also items/details returns 403 on purpose
                 if URL != "https://catalog.roblox.com/v1/catalog/items/details":
                     print("Error code 403: Authorization declined on url", URL)
