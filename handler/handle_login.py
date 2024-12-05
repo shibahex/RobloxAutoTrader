@@ -112,7 +112,7 @@ class FirefoxLogin:
                             roblosecurity_cookie = self.fetch_cookie()
 
                             if roblosecurity_cookie:
-                                return roblosecurity_cookie, username, user_id
+                                return roblosecurity_cookie, username, str(user_id)
                             else:
                                 raise ValueError("Failed to login to account.")
                         else:
