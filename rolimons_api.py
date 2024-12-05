@@ -170,7 +170,8 @@ class RolimonAPI():
 
         return owners
 
-    def add_data_to_inventory(self, inventory) -> dict:
+    def add_data_to_inventory(self, inventory, is_self=False) -> dict:
+        print(inventory, "before added")
         """
             Returns inventory with rolimon data appended into it
             also scans for projecteds
@@ -291,6 +292,7 @@ class RolimonAPI():
                 
                 # If it has no sale data 
                 if is_projected_api == None:
+                    print("has no sale data")
                     is_projected = True
 
                 else:
@@ -313,7 +315,8 @@ class RolimonAPI():
                 item_volume = data[asset_id]['volume']
 
             # TODO: PUT THIS IN CONFIG 
-            if is_projected or item_volume and float(item_volume) < 1.35:
+            if is_projected or value == 0 and item_volume and float(item_volume) < 1.35:
+                print(is_projected, "or", item_volume, asset_id, value)
                 continue
 
             filtered_inventory[item] = {
