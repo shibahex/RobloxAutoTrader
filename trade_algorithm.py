@@ -13,7 +13,7 @@ class TradeMaker():
         self.min_algo_gain = self.config.trading['Minimum_Algo_Gain']
         self.max_algo_gain = self.config.trading['Maximum_Algo_Gain']
 
-        print(self.min_rap_gain, self.max_rap_gain, "hay")
+        #print(self.min_rap_gain, self.max_rap_gain, "hay")
         self.min_value_gain = self.config.trading['Minimum_Value_Gain']
         self.max_value_gain = self.config.trading['Maximum_Value_Gain']
         self.min_score_percentage = self.config.trading['MinScorePercentage']
@@ -30,11 +30,12 @@ class TradeMaker():
         self.robux_divide = self.config.trading['RobuxDividePercentage']
         self.trade_robux = self.config.trading['TradeRobux']
 
+        self.min_sum_of_trade = self.config.trading['MinimumSumOfTrade']
+
     def select_trade(self, valid_trades, select_by='lowest_rap_gain'):
         """
             Returns the trade that matches the sort arg
         """
-
         if select_by == 'lowest_demand':
             return min(valid_trades, key=lambda trade: trade['demand'])
 
@@ -70,8 +71,18 @@ class TradeMaker():
             return max(valid_trades, key=lambda trade: trade['their_value'] - trade['self_value'])
 
         elif select_by == 'lowest_value_gain':
-            return min(valid_trades, key=lambda trade: trade['their_value'] - trade['self_value'])
+            # Filter trades where the gain is not zero
+            non_zero_trades = [trade for trade in valid_trades if trade['self_value'] != 0 or trade['their_value'] != 0]
 
+            for trade in valid_trades:
+                gain = trade['their_value'] - trade['self_value']
+                print(f"Trade: Gain: {gain}")
+            if non_zero_trades:
+                print(min(non_zero_trades, key=lambda trade: trade['their_value'] - trade['self_value']), "HEYO"*30)
+                return min(non_zero_trades, key=lambda trade: trade['their_value'] - trade['self_value'])
+            else:
+                print(min(valid_trades, key=lambda trade: trade['their_value'] - trade['self_value']), "22"*30)
+                return min(valid_trades, key=lambda trade: trade['their_value'] - trade['self_value'])
         elif select_by == 'upgrade':
             # Select the trade with the most "upgrade" (i.e., their side has more items than self side)
             return max(valid_trades, key=lambda trade: (trade['num_items_their'] - trade['num_items_self']))
@@ -134,6 +145,8 @@ class TradeMaker():
             self_side_item_ids = {self_inventory[key]['item_id'] for key in self_side}
 
             for their_side in their_combinations:
+                if len(self_side) == 1 and len(their_side) == 1:
+                    continue
                 their_side_item_ids = {their_inventory[key]['item_id'] for key in their_side}
 
                 # Ensure no overlapping item IDs
@@ -228,17 +241,18 @@ class TradeMaker():
 
         return valid_trades[0] if valid_trades else None
 
-    def check_rap_gain(self, their_rap, self_rap):
-        return self.config.check_gain(their_rap, self_rap, self.min_rap_gain, self.max_rap_gain)
+    def check_rap_gain(self, their_rap, self_rap, max_offset=0):
+        return self.config.check_gain(their_rap, self_rap, self.min_rap_gain, self.max_rap_gain+max_offset)
 
-    def check_value_gain(self, their_value, self_value):
-        return self.config.check_gain(their_value, self_value, self.min_value_gain, self.max_value_gain)
+    def check_value_gain(self, their_value, self_value, max_offset=0):
+        return self.config.check_gain(their_value, self_value, self.min_value_gain, self.max_value_gain+max_offset)
 
-    def check_algo_gain(self, their_algo, self_algo):
-        return self.config.check_gain(their_algo, self_algo, self.min_algo_gain, self.max_algo_gain)
+    def check_algo_gain(self, their_algo, self_algo, max_offset=0):
+        return self.config.check_gain(their_algo, self_algo, self.min_algo_gain, self.max_algo_gain+max_offset)
 
-    def validate_trade(self, self_rap, self_rap_algo, self_value, their_rap, their_rap_algo, their_value, robux=None):
+    def validate_trade(self, self_rap, self_rap_algo, self_value, their_rap, their_rap_algo, their_value, robux=None, max_offset=0):
 
+        # Max offset is for outbounds
         value_gain = their_value - self_value
         if robux != None and robux != 0:
             # see if value is losing because of robux
@@ -249,6 +263,8 @@ class TradeMaker():
             #if robux > calc_robux:
             #    return False
 
+        if self.min_sum_of_trade > self_value + their_value:
+            return False
 
         # Precompute the total value and RAP for both sides in a single loop
         # Calculate value gain and close percentage
@@ -258,20 +274,20 @@ class TradeMaker():
             close_percentage = ((their_rap - self_rap) / (their_rap + self_rap)) * 100
 
         # Check if close percentage is within the acceptable range
-        if close_percentage < self.min_score_percentage or close_percentage > self.max_score_percentage:
+        if close_percentage < self.min_score_percentage or close_percentage > self.max_score_percentage+max_offset:
             return False
 
         # Check if RAP gain passes the criteria
-        if not self.check_rap_gain(their_rap, self_rap):
+        if not self.check_rap_gain(their_rap, self_rap, max_offset):
             #print("rap gain false their, self", their_rap, self_rap)
             return False
 
-        if not self.check_algo_gain(their_rap_algo, self_rap_algo):
+        if not self.check_algo_gain(their_rap_algo, self_rap_algo, max_offset):
             #print("algo gain false their, self", their_rap_algo, self_rap_algo)
             return False
 
         # Check if value gain passes the criteria
-        if not self.check_value_gain(their_value, self_value):
+        if not self.check_value_gain(their_value, self_value, max_offset):
             #print("valu gain false their, self", their_value, self_value)
             return False
 
