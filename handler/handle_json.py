@@ -54,14 +54,39 @@ class JsonHandler:
                 self.write_data(data)
                 return True
 
-    def return_userid_from_index(self, index:int):
-        index = int(index)-1
+    def return_name_from_id(self, user_id):
         data = self.read_data()
-        if 0 <= index < len(data['roblox_accounts']):
+        
+        for account in data['roblox_accounts']:
+            if str(account.get('user_id')) == str(user_id):
+                return account.get("username")
+        
+        return "Couldn't find username."
+
+
+    def return_userid_from_index(self, index: int, check_config=False):
+        index = int(index) - 1
+        data = self.read_data()
+        
+        # Filter accounts based on `check_config`
+        if check_config:
+            with open("account_configs.jsonc", 'r') as file:
+                settings_data = json.load(file)
+            filtered_accounts = [
+                account for account in data['roblox_accounts']
+                if account['user_id'] not in settings_data.keys()
+            ]
+        else:
+            filtered_accounts = data['roblox_accounts']
+
+        # Check if the index is within bounds for the filtered list
+        if 0 <= index < len(filtered_accounts):
             try:
-                return data['roblox_accounts'][index]['user_id']
+                return filtered_accounts[index]['user_id']
             except:
                 return False
+        else:
+            return False
 
 
     def toggle_cookie(self, index:int) -> None:
@@ -100,6 +125,7 @@ class JsonHandler:
                     timestamp_date = datetime.fromisoformat(ratelimit_timestamp)
                 except:
                     # Handle invalid timestamp format if needed
+                    print(account)
                     return False
                 
 
@@ -108,6 +134,7 @@ class JsonHandler:
                     # greater than 6 hours
                     account['ratelimit_timestamp'] = None
                     self.write_data(data)
+                    print(account)
                     return False
 
         return True
@@ -184,9 +211,9 @@ class JsonHandler:
             self.cli.print_error("Invalid index. No cookie deleted.")
 
     
-    def list_cookies(self) -> None:
+    def list_cookies(self, check_config=False) -> None:
         def ordinal(num):
-            special_ordinals = {1: "First", 2: "Second", 3: "Third"}
+            special_ordinals = {1: "first", 2: "second", 3: "third"}
             if num in special_ordinals:
                 return special_ordinals[num]
 
@@ -198,18 +225,26 @@ class JsonHandler:
             return f"{num}{suffix}"
 
         data = self.read_data()
+        cookie_count = 0
         if data['roblox_accounts']:
-            for i, account in enumerate(data['roblox_accounts'], 1):
-                title = f"{handle_cli.magenta}[{handle_cli.reset+str(i)+handle_cli.magenta}] {ordinal(i)} Cookie{handle_cli.reset}"
+            for account in data['roblox_accounts']:
+                if check_config == True:
+                    with open("account_configs.jsonc", 'r') as file:
+                        settings_data = json.load(file)
+                    if account['user_id'] in settings_data.keys():
+                        continue
+
+                cookie_count +=1
+                title = f"{handle_cli.magenta}[{handle_cli.reset+str(cookie_count)+handle_cli.magenta}] {ordinal(cookie_count)} cookie{handle_cli.reset}"
 
                 shorten_cookie = account['cookie'][:len(account['cookie']) // 6]
-                cookie_info = f"\nUsername: {account['username']},\n User ID: {account['user_id']}\nRatelimited: {account['ratelimit_timestamp']}\nEnabled: {account['use_account']}\n\nShortened Cookie: {shorten_cookie}\nAuth Secret: {account['auth_secret']}\n"
+                cookie_info = f"\nusername: {account['username']},\n user id: {account['user_id']}\nratelimited: {account['ratelimit_timestamp']}\nenabled: {account['use_account']}\n\nshortened cookie: {shorten_cookie}\nauth secret: {account['auth_secret']}\n"
 
 
                 print("---" + title + "---" + cookie_info )
 
         else:
-            print("No cookies found.")
+            print("no cookies found.")
 
 
     def update_projected_status(self, item_id:int or str, projected_status: bool, current_price: int or str) -> None:
