@@ -11,6 +11,11 @@ import config_manager
 from handler.account_settings import HandleConfigs
 
 """
+
+    if account has no value items, maybe swatch to rap_config.cfg?
+    have value_config.cfg
+
+    fix outbound checking cancel outbounds thats above the max
     Fix bad imports and messy imports..
 
     problem with completeds not sending only sending when bot starts first
@@ -71,6 +76,7 @@ class Doggo:
 
     def queue_traders(self, roblox_account):
         while not self.stop_event.is_set():
+            roblox_account.update_recently_traded(self.all_cached_traders)
 
             # Put all outbound users in cached traders so we dont double send
 
@@ -92,7 +98,7 @@ class Doggo:
                 if roblox_account.check_can_trade(owner) == True:
                     inventory = roblox_account.fetch_inventory(owner)
                     self.user_queue[owner] = inventory  
-                time.sleep(.1)  # Delay between iterations
+                time.sleep(.15)  # Delay between iterations
 
     def merge_lists(self, list1, list2):
         # Use set to merge and remove duplicates
@@ -138,6 +144,7 @@ class Doggo:
                 # Get inventory
                 current_account.refresh_self_inventory()
 
+                print(current_account.account_inventory)
                 if not current_account.account_inventory:
                     print(current_account.username, "has no tradeable inventory")
                     time.sleep(5)
@@ -190,7 +197,7 @@ class Doggo:
                     generated_trade = account.TradeMaker.generate_trade(account_inventory, trader_inventory)
 
                     if not generated_trade:
-                        print("no generated trade")
+                        print("no generated trade for", account.username)
                         break
 
                     print(f"Generated trade: {generated_trade}")
@@ -199,6 +206,7 @@ class Doggo:
                     self_side = generated_trade['self_side']
                     their_side = generated_trade['their_side']
                     self_robux = generated_trade['self_robux']
+                    print(self_side, "grrr"*300)
 
                     print("SEND ROBUX!!!", self_robux)
                     send_trade_response = account.send_trade(trader, self_side, their_side, self_robux=self_robux)
@@ -208,8 +216,24 @@ class Doggo:
                         self.json.add_ratelimit_timestamp(account.cookies['.ROBLOSECURITY'])
                         return False
 
-                    # Cache trade info if sent successfully
+                    # Handle webhook
                     if send_trade_response:
+                        def get_duplicate_items(side: tuple, inventory: dict) -> list:
+                            assetids = []
+                            for asset_id in side:
+                                print(assetids)
+                                valid_item = inventory.get(asset_id)
+                                if valid_item:
+                                    assetids.append(valid_item['item_id'])
+                            return assetids
+
+                        # Get duplicated item_ids from asset_ids
+                        self_items = get_duplicate_items(self_side, account_inventory)
+                        trader_items = get_duplicate_items(their_side, trader_inventory)
+
+                        generated_trade['self_side_item_ids'] = self_items
+                        generated_trade['their_side_item_ids'] = trader_items
+
                         embed_fields, total_profit = self.discord_webhook.embed_fields_from_trade(generated_trade, self.rolimons.item_data, self.rolimons.projected_json.read_data())
 
                         embed = self.discord_webhook.setup_embed(title=f"Sent a trade with {total_profit} total profit", color=1, user_id=trader, embed_fields=embed_fields, footer="Frick shedletsky")
