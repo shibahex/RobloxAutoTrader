@@ -24,6 +24,7 @@ class RobloxAPI():
         self.auth_secret = auth_secret
         self.outbounds_userids = []
 
+        self.recently_traded = []
         self.account_configs = HandleConfigs()
 
         self.json = JsonHandler('cookies.json')
@@ -71,7 +72,9 @@ class RobloxAPI():
 
             self.request_handler.generate_csrf()
             #self.request_handler.headers.update({'X-CSRF-TOKEN': self.refresh_csrf()})
-    
+    def update_recently_traded(self, users):
+        self.recently_traded = users
+
     # refresh current inventory
     def refresh_self_inventory(self):
         # TODO: make this refresh if a trade gets completed
@@ -127,17 +130,27 @@ class RobloxAPI():
                 uaid = str(item['userAssetId'])
                 itemId = str(item['assetId'])
                 if userid == self.account_id:
+                    print("self")
                     nft_list = self.config.trading['NFT']
                     if itemId not in nft_list:
                         inventory[uaid] = {"item_id": itemId}
                     else:
                         print(itemId, "in NFT", nft_list)
                 else:
+                    current_demand = self.rolimon.item_data[itemId]['demand']
+                    if current_demand != None and int(current_demand) < self.config.trading['MinDemand']:
+                        print(current_demand, itemId, "skipped")
+                        continue
+
                     nfr_list = self.config.trading['NFR']
                     if itemId not in nfr_list:
                         inventory[uaid] = {"item_id": itemId}
                     else:
                         print(itemId, "in NFR", nfr_list)
+
+
+
+                    # TODO: min demand
 
 
 
@@ -553,7 +566,7 @@ class RobloxAPI():
             self_rap, self_value, self_algorithm_value, self_total = self.calculate_gains(self_items)
             trader_rap, trader_value, trader_algorithm_value, trader_total = self.calculate_gains(trader_items)
 
-            valid_trade = self.TradeMaker.validate_trade(self_rap, self_algorithm_value, self_value, trader_rap, trader_algorithm_value, trader_value, robux=self_robux)
+            valid_trade = self.TradeMaker.validate_trade(self_rap, self_algorithm_value, self_value, trader_rap, trader_algorithm_value, trader_value, robux=self_robux, max_offset=50000)
 
             if not valid_trade:
                 url = f"https://trades.roblox.com/v1/trades/{trade_id}/decline"
@@ -712,6 +725,10 @@ class RobloxAPI():
             next_page_cursor = response.json()['nextPageCursor']
             for asset in response.json()['data']:
                 if asset['owner'] == None:
+                    continue
+                print(asset['owner'])
+                if int(asset['owner']['id']) in self.recently_traded:
+                    print("owner in recent ROBLOXAPI")
                     continue
                 owner_since = asset['updated']
 
