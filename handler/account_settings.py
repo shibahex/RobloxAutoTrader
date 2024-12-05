@@ -5,6 +5,7 @@ from handler.handle_config import ConfigHandler
 class HandleConfigs:
     def __init__(self):
         self.acc_configs =  JsonHandler("account_configs.jsonc")
+        self.cookies = JsonHandler("cookies.json")
 
     def get_config(self, user_id):
         """Retrieve the configuration for a specific user ID."""
@@ -13,6 +14,8 @@ class HandleConfigs:
 
     def select_user_id(self):
         """Prompt the user to select a user ID from available keys."""
+        # TODO: SHOW USERNAME
+        # TODO: add option to reset a config to default
         data = self.acc_configs.read_data()
         user_ids = list(data.keys())
         if not user_ids:
@@ -21,7 +24,7 @@ class HandleConfigs:
 
         print("\nSelect a user ID to configure:")
         for i, user_id in enumerate(user_ids, 1):
-            print(f"{i}. {user_id}")
+            print(f"{i}. {user_id}", self.cookies.return_name_from_id(str(user_id)))
 
         try:
             choice = int(input("\nEnter the number of the user ID: "))
@@ -67,13 +70,13 @@ class HandleConfigs:
     def create_config(self):
         json_handler = JsonHandler('cookies.json')
 
-        json_handler.list_cookies()
+        json_handler.list_cookies(check_config=True)
         index=input("Enter number to create config from (Press enter to quit): ")
         if index == None or index == '':
             return
 
         
-        user_id = json_handler.return_userid_from_index(index)
+        user_id = json_handler.return_userid_from_index(index, check_config=True)
 
         if user_id == False:
             print("Couldnt find userid")
@@ -98,41 +101,49 @@ class HandleConfigs:
         self.acc_configs.write_data(data)
 
     def edit_config(self):
-        """Edit a user's configuration interactively."""
+        """Edit a user's configuration interactively until they quit."""
         user_id = self.select_user_id()
         if not user_id:
             return
+        while True:
+            data_config = self.get_config(user_id)
+            if not data_config:
+                print(f"No configuration found for user ID {user_id}.")
+                return
 
-        data_config = self.get_config(user_id)
-        if not data_config:
-            print(f"No configuration found for user ID {user_id}.")
-            return
+            grouped_keys, single_keys = self.show_config(user_id)
 
-        grouped_keys, single_keys = self.show_config(user_id)
+            options = list(grouped_keys.keys()) + single_keys
 
-        options = list(grouped_keys.keys()) + single_keys
+            try:
+                choice_input = input("\nEnter the number of the configuration to edit (or type 'quit' to exit): ")
+                if choice_input.strip().lower() == 'quit' or not choice_input.strip():
+                    print("Exiting the configuration editor.")
+                    break
 
-        try:
-            choice = int(input("\nEnter the number of the configuration to edit: "))
-            if choice < 1 or choice > len(options):
-                raise ValueError
-        except ValueError:
-            print("Invalid input. Exiting.")
-            return
+                choice = int(choice_input)
+                if choice < 1 or choice > len(options):
+                    raise ValueError
+            except ValueError:
+                print("Invalid input. Please try again.")
+                continue
 
-        selected_option = options[choice - 1]
+            selected_option = options[choice - 1]
 
-        if selected_option in grouped_keys:
-            min_key, max_key = grouped_keys[selected_option]
-            for key in (min_key, max_key):
-                self.prompt_and_update(data_config, key)
-        else:
-            self.prompt_and_update(data_config, selected_option)
+            if selected_option in grouped_keys:
+                min_key, max_key = grouped_keys[selected_option]
+                for key in (min_key, max_key):
+                    self.prompt_and_update(data_config, key)
+            else:
+                self.prompt_and_update(data_config, selected_option)
 
-        all_data = self.acc_configs.read_data()
-        all_data[user_id] = data_config
-        self.acc_configs.write_data(all_data)
-        print("Data successfully written to account_configs.jsonc.")
+            all_data = self.acc_configs.read_data()
+            all_data[user_id] = data_config
+            self.acc_configs.write_data(all_data)
+            print("Data successfully written to account_configs.jsonc.")
+            
+
+
 
     def prompt_and_update(self, data_config, key):
         """Prompt the user to update a configuration value."""
