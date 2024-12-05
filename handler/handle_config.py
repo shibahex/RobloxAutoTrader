@@ -30,6 +30,10 @@ class ConfigHandler:
         Calculate the gain.
         Convert to percentage if required.
         """
+
+        if base_value == 0:
+            return 0 if is_percentage else gain  # Adjust fallback behavior as needed.
+
         return (gain / base_value) * 100 if is_percentage else gain
 
     def check_gain(self, their_value, self_value, min_gain=None, max_gain=None):
