@@ -59,7 +59,6 @@ class RobloxAPI():
 
             self.TradeMaker = TradeMaker(config=self.config)
 
-            print(self.config.trading)
             self.account_inventory = self.fetch_inventory(self.account_id)
             self.account_robux = 0
             self.get_robux()
@@ -130,7 +129,6 @@ class RobloxAPI():
                 uaid = str(item['userAssetId'])
                 itemId = str(item['assetId'])
                 if userid == self.account_id:
-                    print("self")
                     nft_list = self.config.trading['NFT']
                     if itemId not in nft_list:
                         inventory[uaid] = {"item_id": itemId}
@@ -334,7 +332,7 @@ class RobloxAPI():
 
                 if error_code == 12:
                     # Check if its our inventory erroring
-                    if self.handle_invalid_ids(error_data):
+                    if self.handle_invalid_ids(error_data=trade_response.json()):
                         continue
                     else:
                         break
@@ -726,7 +724,7 @@ class RobloxAPI():
             for asset in response.json()['data']:
                 if asset['owner'] == None:
                     continue
-                print(asset['owner'])
+                #print(asset['owner'])
                 if int(asset['owner']['id']) in self.recently_traded:
                     print("owner in recent ROBLOXAPI")
                     continue
@@ -745,7 +743,7 @@ class RobloxAPI():
                 time_diff = today - given_date_naive
 
                 if time_diff < timedelta(days=7):
-                    print("appended owner", asset['owner'])
+                    print("appended owner roblox api", asset['owner'])
                     owners.append(asset['owner']['id'])
 
 
