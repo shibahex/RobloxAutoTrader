@@ -81,6 +81,7 @@ class Doggo:
             # Put all outbound users in cached traders so we dont double send
 
             if len(self.user_queue) > 20:
+                print(self.user_queue, "is above 20")
                 time.sleep(60)
                 continue
             random_item = self.rolimons.return_item_to_scan()['item_id']
@@ -98,6 +99,7 @@ class Doggo:
                 if roblox_account.check_can_trade(owner) == True:
                     inventory = roblox_account.fetch_inventory(owner)
                     self.user_queue[owner] = inventory  
+                    print("appended", owner, "to queue")
                 time.sleep(.15)  # Delay between iterations
 
     def merge_lists(self, list1, list2):
@@ -144,7 +146,6 @@ class Doggo:
                 # Get inventory
                 current_account.refresh_self_inventory()
 
-                print(current_account.account_inventory)
                 if not current_account.account_inventory:
                     print(current_account.username, "has no tradeable inventory")
                     time.sleep(5)
@@ -200,15 +201,13 @@ class Doggo:
                         print("no generated trade for", account.username)
                         break
 
-                    print(f"Generated trade: {generated_trade}")
+                    print(f"Generated trade: {generated_trade}", account.username)
 
                     # Extract trade details
                     self_side = generated_trade['self_side']
                     their_side = generated_trade['their_side']
                     self_robux = generated_trade['self_robux']
-                    print(self_side, "grrr"*300)
 
-                    print("SEND ROBUX!!!", self_robux)
                     send_trade_response = account.send_trade(trader, self_side, their_side, self_robux=self_robux)
 
                     if send_trade_response == 429:  # Rate-limited
@@ -221,7 +220,6 @@ class Doggo:
                         def get_duplicate_items(side: tuple, inventory: dict) -> list:
                             assetids = []
                             for asset_id in side:
-                                print(assetids)
                                 valid_item = inventory.get(asset_id)
                                 if valid_item:
                                     assetids.append(valid_item['item_id'])
