@@ -2,4 +2,8 @@ __pycache__/
 venv/
 .git/
 *chrome*
+*json*
+*txt*
+proxies.txt
+cookies*
 
