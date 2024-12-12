@@ -18,7 +18,8 @@ class AccountSettings():
                 ("2", "Add Account Configs"),
                 ("3", "Edit Account Configs"),
                 ("4", "Remove Account Configs"),
-                ("5", "Back to Main Menu")
+                ("5", "Check for missing settings (new settings in configs.cfg)"),
+                ("6", "Back to Main Menu"),
             )
             self.cli.print_menu("Configs Manager", options)
 
@@ -39,6 +40,8 @@ class AccountSettings():
                 case 4:
                     self.account_settings.delete_config()
                 case 5:
+                    self.account_settings.check_for_updates()
+                case 6:
                     break
             
 
