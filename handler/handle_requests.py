@@ -21,7 +21,7 @@ class RequestsHandler:
 
         if cookie:
             self.Session.cookies.update(cookie)
-            print("Updated cookie")
+            #print("Updated cookie")
 
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0',
@@ -59,13 +59,17 @@ class RequestsHandler:
         return proxy_dict
 
     def generate_csrf(self):
-        token_post = self.Session.post('https://catalog.roblox.com/v1/catalog/items/details')
+        try:
+            token_post = self.Session.post('https://catalog.roblox.com/v1/catalog/items/details')
 
-        if 'x-csrf-token' in token_post.headers:
-            print("returning",token_post.headers['x-csrf-token'])
-            self.Session.headers["x-csrf-token"] = token_post.headers['x-csrf-token']
-            return True
-        else:
+            if 'x-csrf-token' in token_post.headers:
+                #print("returning",token_post.headers['x-csrf-token'])
+                self.Session.headers["x-csrf-token"] = token_post.headers['x-csrf-token']
+                return True
+            else:
+                print("Couldnt fetch x-csrf-token")
+                return False
+        except:
             print("Couldnt fetch x-csrf-token")
             return False
 
