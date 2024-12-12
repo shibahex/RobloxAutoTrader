@@ -35,7 +35,6 @@ class RobloxAPI():
         # put this in cookies.json
         self.tradead_timestamp = None
 
-
         #TODO: USE PROXIES
         self.parse_handler = RequestsHandler(Session=requests.Session(), use_proxies=False) 
         self.config = ConfigHandler('config.cfg')
@@ -563,6 +562,12 @@ class RobloxAPI():
 
             self_rap, self_value, self_algorithm_value, self_total = self.calculate_gains(self_items)
             trader_rap, trader_value, trader_algorithm_value, trader_total = self.calculate_gains(trader_items)
+
+            # if trade is profitable in rap
+            if trader_rap - self_rap > 0:
+                offset = self.config.trading['Outbound_Cancel_Offset']
+                self_rap += offset
+                trader_rap += offset
 
             valid_trade = self.TradeMaker.validate_trade(self_rap, self_algorithm_value, self_value, trader_rap, trader_algorithm_value, trader_value, robux=self_robux, max_offset=50000)
 
