@@ -48,7 +48,7 @@ class Doggo:
         while True:
             self.cli.clear_console()
             self.display_main_menu()
-
+    
     def display_main_menu(self):
         options = (
             (1, "Account Manager"),
@@ -61,7 +61,7 @@ class Doggo:
             self.handle_menu_selection(answer)
         except ValueError as e:
             self.cli.print_error(f"ERROR: {e}")
-
+    
     def handle_menu_selection(self, selection):
         match selection:
             case 1:
@@ -69,11 +69,11 @@ class Doggo:
             case 2:
                 # Trade Manager functionality can be implemented here
                 config_manager.AccountSettings()
-                
+               
                 pass
             case 3:
                 self.start_trader()
-
+    
     def queue_traders(self, roblox_account):
         while not self.stop_event.is_set():
             roblox_account.update_recently_traded(self.all_cached_traders)
@@ -81,7 +81,7 @@ class Doggo:
             # Put all outbound users in cached traders so we dont double send
 
             if len(self.user_queue) > 20:
-                print(self.user_queue, "is above 20")
+                print("user queue is above 20")
                 time.sleep(60)
                 continue
             random_item = self.rolimons.return_item_to_scan()['item_id']
@@ -188,6 +188,7 @@ class Doggo:
             #current_user_queue = self.user_queue.copy()
             
             for trader in list(self.user_queue.keys()):  # Using list() creates a copy of the keys
+                print("trading with", trader)
                 trader_inventory = self.user_queue[trader]
                 
                 # Delete the key from the dictionary
