@@ -142,7 +142,6 @@ class JsonHandler:
         for account in data['roblox_accounts']:
             if account.get('cookie') == cookie and account.get("last_completed") != last_completed:
                 account['last_completed'] = last_completed
-                print("triggered update data for completeds")
                 self.write_data(data)
                 return True
 
@@ -180,7 +179,6 @@ class JsonHandler:
                 if current_date - timestamp_date >= timedelta(hours=6):
                     # greater than 1 day
                     account['ratelimit_timestamp'] = None
-                    print("write trigger  for check ratelimit cookie")
                     self.write_data(data)
                     return False
                 
@@ -245,6 +243,32 @@ class JsonHandler:
 
         else:
             print("no cookies found.")
+
+    def update_missing_config(self, default_trading_config: dict) -> None:
+        # List all cookies
+        acc_configs = JsonHandler("account_configs.jsonc")
+        data = acc_configs.read_data()
+
+        default_keys = default_trading_config.keys()
+        for user_config in data:
+            inventory_keys = list(data[user_config].keys())  # Convert to list for safe iteration
+
+            # Add missing keys
+            for key in default_keys:
+                if key not in inventory_keys:
+                    data[user_config][key] = default_trading_config[key]
+                    print(f"Added missing key {key} to {user_config}")
+
+            # Remove extra keys
+            for key in inventory_keys:
+                if key not in default_keys:
+                    del data[user_config][key]
+                    print(f"Removed key {key} from {user_config}")
+
+        acc_configs.write_data(data)
+        print("Configurations updated with missing keys.")
+        time.sleep(3)
+
 
 
     def update_projected_status(self, item_id:int or str, projected_status: bool, current_price: int or str) -> None:
