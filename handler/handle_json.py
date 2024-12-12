@@ -134,7 +134,7 @@ class JsonHandler:
                     # greater than 6 hours
                     account['ratelimit_timestamp'] = None
                     self.write_data(data)
-                    print(account)
+                    print("wrote data for timestamp", current_date, "minus", timestamp_date, ">=", timedelta(hours=6))
                     return False
 
         return True
@@ -142,8 +142,9 @@ class JsonHandler:
     def update_last_completed(self, cookie, last_completed: int or str) -> None:
         data = self.read_data()
         for account in data['roblox_accounts']:
-            if account.get('cookie') == cookie:
+            if account.get('cookie') == cookie and account.get("last_completed") != last_completed:
                 account['last_completed'] = last_completed
+                print("triggered update data for completeds")
                 self.write_data(data)
                 return True
 
@@ -181,6 +182,7 @@ class JsonHandler:
                 if current_date - timestamp_date >= timedelta(hours=6):
                     # greater than 1 day
                     account['ratelimit_timestamp'] = None
+                    print("write trigger  for check ratelimit cookie")
                     self.write_data(data)
                     return False
                 
