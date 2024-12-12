@@ -171,7 +171,6 @@ class RolimonAPI():
         return owners
 
     def add_data_to_inventory(self, inventory, is_self=False) -> dict:
-        print(inventory, "before added")
         """
             Returns inventory with rolimon data appended into it
             also scans for projecteds
@@ -201,7 +200,7 @@ class RolimonAPI():
                 days_ago = time_difference.days
 
                 # Check if it's been more than 2 day
-                print(days_ago, "days ago")
+                #print(days_ago, "days ago")
                 if days_ago > 2:
                     return False
                 return True
@@ -229,9 +228,8 @@ class RolimonAPI():
 
                 try:
                     percentage_change = difference / last_price
-
                 except:
-                    print("WHATTT", difference, last_price, asset_id)
+                    pass
                 if percentage_change >= threshold:
                     return True  # There is a significant change
 
@@ -250,7 +248,6 @@ class RolimonAPI():
                 
                 # Scan if not recently scanned or if there's a big price change
                 if not recently_scanned or price_change:
-                    print("true!!")
                     return True
                 else:
                     return False
@@ -292,7 +289,6 @@ class RolimonAPI():
                 
                 # If it has no sale data 
                 if is_projected_api == None:
-                    print("has no sale data")
                     is_projected = True
 
                 else:
@@ -316,7 +312,6 @@ class RolimonAPI():
 
             # TODO: PUT THIS IN CONFIG 
             if is_projected or value == 0 and item_volume and float(item_volume) < 1.35:
-                print(is_projected, "or", item_volume, asset_id, value)
                 continue
 
             filtered_inventory[item] = {
