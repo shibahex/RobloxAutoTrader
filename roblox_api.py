@@ -223,7 +223,7 @@ class RobloxAPI():
             if limit_pages and page_count >= limit_pages:
                 break
 
-            response = self.request_handler.requestAPI(f"{page_url}&cursor={cursor}")
+            response = self.request_handler.requestAPI(f"{page_url}&cursor={cursor}&limit=100")
             if response.status_code == 200:
                 trades.update(self.return_trade_details(response.json()['data']))
                 cursor = response.json()['nextPageCursor']
@@ -549,7 +549,7 @@ class RobloxAPI():
             trade_id = trade_info['trade_id']
             
             print("scanning outbound")
-            trade_info = self.request_handler.requestAPI(f"https://trades.roblox.com/v1/trades/{trade_id}")
+            trade_info = self.request_handler.requestAPI(f"https://trades.roblox.com/v1/trades/{trade_id}&limit=100")
             if trade_info.status_code != 200:
                 print("trade info api", trade_info.status_code, trade_info.text)
                 return False
@@ -630,7 +630,7 @@ class RobloxAPI():
         #    return True
 
         # Check graph for projecteds
-        resale_data = self.parse_handler.requestAPI(f"https://economy.roblox.com/v1/assets/{item_id}/resale-data")
+        resale_data = self.parse_handler.requestAPI(f"https://economy.roblox.com/v1/assets/{item_id}/resale-data&limit=100")
 
         if resale_data.status_code == 200:
 
