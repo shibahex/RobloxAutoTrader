@@ -94,7 +94,6 @@ class TradeMaker():
             raise ValueError(f"Unknown selection type: {select_by}")
 
     def generate_trade(self, self_inventory, their_inventory, counter_trade=False, timeout=120):
-
         """
             Algorithm responsible for generating combinations and validating them..
         """
@@ -175,7 +174,6 @@ class TradeMaker():
                             calc_robux = self.max_robux
 
                         send_robux = calc_robux
-
 
                     if self.validate_trade(self_rap, self_rap_algo, self_value, their_rap, their_rap_algo, their_value, robux=send_robux):
                         # Calculate the trade sum (RAP and value)
@@ -258,12 +256,14 @@ class TradeMaker():
             # see if value is losing because of robux
             # TODO: test to make sure this is a valid method of doing this
             if (value_gain + robux) < self.min_value_gain:
+                # print("robux false")
                 return False
 
             #if robux > calc_robux:
             #    return False
 
         if self.min_sum_of_trade > self_value + their_value:
+            # print("sum of trade", self_value, their_value)
             return False
 
         # Precompute the total value and RAP for both sides in a single loop
@@ -279,22 +279,37 @@ class TradeMaker():
 
         # Check if RAP gain passes the criteria
         if not self.check_rap_gain(their_rap, self_rap, max_offset):
-            #print("rap gain false their, self", their_rap, self_rap)
+            # print("rap gain false their, self", their_rap, self_rap)
             return False
 
         if not self.check_algo_gain(their_rap_algo, self_rap_algo, max_offset):
-            #print("algo gain false their, self", their_rap_algo, self_rap_algo)
+            # print("algo gain false their, self", their_rap_algo, self_rap_algo)
             return False
 
         # Check if value gain passes the criteria
         if not self.check_value_gain(their_value, self_value, max_offset):
-            #print("valu gain false their, self", their_value, self_value)
+            # print("valu gain false their, self", their_value, self_value)
             return False
 
+        # print("trade valid")
         return True
 
     def generate_combinations(self, keys, min_items=1, max_items=4):
+        # Ensure valid bounds for min_items and max_items
+        if not keys:
+            print("Error: Keys list is empty.")
+            return []
+        
+        if len(keys) < min_items:
+            print(f"Error: Not enough keys to generate combinations. Keys: {keys}, Min items: {min_items}")
+            return []
+        
+        min_items = max(1, min_items)
+        max_items = min(max_items, len(keys))
+
+        # Generate combinations
         all_combinations = []
         for r in range(min_items, max_items + 1):
             all_combinations.extend(combinations(keys, r))
+        
         return all_combinations
