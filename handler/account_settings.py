@@ -6,11 +6,15 @@ class HandleConfigs:
     def __init__(self):
         self.acc_configs =  JsonHandler("account_configs.jsonc")
         self.cookies = JsonHandler("cookies.json")
+        self.default_config = ConfigHandler().trading
 
     def get_config(self, user_id):
         """Retrieve the configuration for a specific user ID."""
         data = self.acc_configs.read_data()
         return data.get(user_id, {})
+
+    def check_for_updates(self):
+        self.acc_configs.update_missing_config(self.default_config)
 
     def select_user_id(self):
         """Prompt the user to select a user ID from available keys."""
@@ -84,7 +88,7 @@ class HandleConfigs:
             return
 
         data = self.acc_configs.read_data()
-        data[user_id] = ConfigHandler().trading
+        data[user_id] = self.default_config
         self.acc_configs.write_data(data)
 
     def delete_config(self, user_id=None):
