@@ -20,7 +20,7 @@ class TradeMaker():
         self.max_score_percentage = self.config.trading['MaxScorePercentage']
 
         self.min_items_self = self.config.trading['MinimumItemsYourSide']
-        self.max_items_self = self.config.trading['MaximumItemsTheirSide']
+        self.max_items_self = self.config.trading['MaximumItemsYourSide']
 
         self.min_items_their = self.config.trading['MinimumItemsTheirSide']
         self.max_items_their = self.config.trading['MaximumItemsTheirSide']
