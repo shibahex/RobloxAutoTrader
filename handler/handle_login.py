@@ -102,9 +102,6 @@ class FirefoxLogin:
 
                         # Extract the ticket from the response
                         response_data = json.loads(response_body)
-                        print(response_data)
-                        time.sleep(60)
-
                         username = response_data.get("user", {}).get("name", "")
                         user_id = response_data.get("user", {}).get("id", "")
                         ticket = response_data.get("twoStepVerificationData", {}).get("ticket", "")

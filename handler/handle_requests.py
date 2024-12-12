@@ -14,7 +14,6 @@ class RequestsHandler:
         self.timeout_duration = 60
 
         if self.use_proxies == True:
-            print("Loading proxies", cookie)
             self.load_proxies()
 
         self.Session = Session
@@ -121,8 +120,7 @@ class RequestsHandler:
             """
 
             if Response.status_code == 429:
-                print("hit ratelimit on url", URL)
-                print(Response.json())
+                print("hit ratelimit on url", URL, Response.json())
                 if self.use_proxies:
                     self.rate_limit(proxy_dict['http'])
                 else:
@@ -175,8 +173,7 @@ class RequestsHandler:
                 print("API failed to respond..", URL)
                 return Response
             elif Response.status_code == 400:
-                print("Requests payload error, returning")
-                print(Response.text, payload)
+                print("Requests payload error, returning", Response.text, payload)
                 return Response
             else:
                 print("Unknown Error Code on", URL, Response.status_code, Response.text)

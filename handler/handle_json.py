@@ -106,7 +106,6 @@ class JsonHandler:
         data = self.read_data()
         for account in data['roblox_accounts']:
             if account.get('cookie') == cookie:
-                print(account['use_account'], type(account['use_account']))
                 return account['use_account']
 
         # for some reason if theres no use account value
@@ -125,7 +124,6 @@ class JsonHandler:
                     timestamp_date = datetime.fromisoformat(ratelimit_timestamp)
                 except:
                     # Handle invalid timestamp format if needed
-                    print(account)
                     return False
                 
 

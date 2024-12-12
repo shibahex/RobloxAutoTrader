@@ -22,7 +22,6 @@ class SalesVolumeAnalyzer:
     def get_age(self) -> float:
         """Calculate the age based on the oldest sales data entry."""
         if self.sales_data:
-            print(self.sales_data[0])
             return self.now - self.sales_data[0]["date"]
         return 0.0
 

@@ -81,7 +81,6 @@ class TradeMaker():
                 print(min(non_zero_trades, key=lambda trade: trade['their_value'] - trade['self_value']), "HEYO"*30)
                 return min(non_zero_trades, key=lambda trade: trade['their_value'] - trade['self_value'])
             else:
-                print(min(valid_trades, key=lambda trade: trade['their_value'] - trade['self_value']), "22"*30)
                 return min(valid_trades, key=lambda trade: trade['their_value'] - trade['self_value'])
         elif select_by == 'upgrade':
             # Select the trade with the most "upgrade" (i.e., their side has more items than self side)

@@ -99,7 +99,6 @@ class Doggo:
                 if roblox_account.check_can_trade(owner) == True:
                     inventory = roblox_account.fetch_inventory(owner)
                     self.user_queue[owner] = inventory  
-                    print("appended", owner, "to queue")
                 time.sleep(.15)  # Delay between iterations
 
     def merge_lists(self, list1, list2):
@@ -155,7 +154,7 @@ class Doggo:
 
                 # TODO: add max days inactive in cfg and parse as arg
 
-                print("trading with:", current_account.username, "auth code", current_account.auth_secret, current_account.account_id, "cookie=", current_account.request_handler.Session.cookies.get_dict())
+                #print("trading with:", current_account.username, "auth code", current_account.auth_secret, current_account.account_id, "cookie=", current_account.request_handler.Session.cookies.get_dict())
 
                 # to make the threads run even after stop event is called and another thread starts
                 self.stop_event.clear()

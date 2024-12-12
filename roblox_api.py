@@ -135,8 +135,6 @@ class RobloxAPI():
                     nft_list = self.config.trading['NFT']
                     if itemId not in nft_list:
                         inventory[uaid] = {"item_id": itemId}
-                    else:
-                        print(itemId, "in NFT", nft_list)
                 else:
                     current_demand = self.rolimon.item_data[itemId]['demand']
                     if current_demand != None and int(current_demand) < self.config.trading['MinDemand']:
@@ -146,8 +144,6 @@ class RobloxAPI():
                     nfr_list = self.config.trading['NFR']
                     if itemId not in nfr_list:
                         inventory[uaid] = {"item_id": itemId}
-                    else:
-                        print(itemId, "in NFR", nfr_list)
 
 
 
@@ -347,8 +343,8 @@ class RobloxAPI():
                     print("Unknown error", error)
                     break
             else:
-                print("errored at trade", trade_response.status_code)
-                print(trade_response.text)
+                print("errored at trade", trade_response.status_code, trade_response.text)
+                #print(trade_response.text)
                 break
 
     def handle_invalid_ids(self, error_data):
@@ -483,6 +479,7 @@ class RobloxAPI():
 
                     self.discord_webhook.send_webhook(embed, "https://discord.com/api/webhooks/1311127315316478053/Pz_ZrnTRWqCuJoKfnv6W4F9vo04xFVS6pKolHUiP16ByUeGgm-jyHMht9ZF68lStg1v2")   
                 else:
+                    time.sleep(2)
                     continue
 
         return unlogged_trades
@@ -577,8 +574,6 @@ class RobloxAPI():
                 time.sleep(1)
                 if cancel_request.status_code == 200 or cancel_request.status_code == 400:
                     print("Cleared losing outbound...")
-                else:
-                    print(cancel_request.text)
 
     def check_can_trade(self, userid):
         """
@@ -592,7 +587,7 @@ class RobloxAPI():
         can_trade = self.request_handler.requestAPI(f"https://www.roblox.com/users/{userid}/trade", additional_headers=validation_headers)
         if can_trade.status_code == 403:
             if "rblx-challenge-id" in can_trade.headers:
-                print(can_trade.headers, can_trade.text)
+                print(can_trade.headers, can_trade.text, "can trade debug")
                 validation = self.validate_2fa(can_trade)
                 if validation == False:
                     return None
@@ -743,7 +738,6 @@ class RobloxAPI():
                 time_diff = today - given_date_naive
 
                 if time_diff < timedelta(days=7):
-                    print("appended owner roblox api", asset['owner'])
                     owners.append(asset['owner']['id'])
         return owners
     
