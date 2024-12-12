@@ -114,12 +114,14 @@ class RobloxAPI():
         cursor = ""
         inventory = {}
         while cursor != None:
-            inventory_API = f"https://inventory.roblox.com/v1/users/{userid}/assets/collectibles?cursor={cursor}"
+            inventory_API = f"https://inventory.roblox.com/v1/users/{userid}/assets/collectibles?cursor={cursor}&limit=100"
             response = self.request_handler.requestAPI(inventory_API)
             if response.status_code != 200:
                 print("inventory API error", inventory_API, response.status_code, response.text)
                 return False
             
+            cursor = response.json()['nextPageCursor']
+
             for item in response.json()['data']:
                 if item['isOnHold'] == True:
                     continue
@@ -152,7 +154,7 @@ class RobloxAPI():
 
 
 
-            return self.rolimon.add_data_to_inventory(inventory)
+        return self.rolimon.add_data_to_inventory(inventory)
 
 
 
