@@ -92,7 +92,7 @@ class RobloxAPI():
         token_post = self.request_handler.requestAPI('https://catalog.roblox.com/v1/catalog/items/details', method="post")
 
         if 'x-csrf-token' in token_post.headers:
-            print("returning",token_post.headers['x-csrf-token'])
+            #print("returning",token_post.headers['x-csrf-token'])
             return token_post.headers['x-csrf-token']
         else:
             print("Couldnt fetch x-csrf-token")
@@ -110,11 +110,11 @@ class RobloxAPI():
             raise ValueError(f"Couldnt login with cookie {self.cookies}")
 
     def fetch_inventory(self, userid):
-        #TODO: use roblox API
         cursor = ""
         inventory = {}
         while cursor != None:
             inventory_API = f"https://inventory.roblox.com/v1/users/{userid}/assets/collectibles?cursor={cursor}&limit=100"
+
             response = self.request_handler.requestAPI(inventory_API)
             if response.status_code != 200:
                 print("inventory API error", inventory_API, response.status_code, response.text)
@@ -123,6 +123,7 @@ class RobloxAPI():
             cursor = response.json()['nextPageCursor']
 
             for item in response.json()['data']:
+                
                 if item['isOnHold'] == True:
                     continue
                 # TODO: APPLY NFT
@@ -139,7 +140,7 @@ class RobloxAPI():
                 else:
                     current_demand = self.rolimon.item_data[itemId]['demand']
                     if current_demand != None and int(current_demand) < self.config.trading['MinDemand']:
-                        print(current_demand, itemId, "skipped")
+                        #print(current_demand, itemId, "skipped")
                         continue
 
                     nfr_list = self.config.trading['NFR']
@@ -223,7 +224,7 @@ class RobloxAPI():
             if limit_pages and page_count >= limit_pages:
                 break
 
-            # Assuming the URL already has limit=100
+            # Assuming the URL already has page limit = 100
             response = self.request_handler.requestAPI(f"{page_url}&cursor={cursor}")
             if response.status_code == 200:
                 trades.update(self.return_trade_details(response.json()['data']))
@@ -442,7 +443,6 @@ class RobloxAPI():
         # TODO: DO SOMETHING WITH UNLOGGED TRADES, AKA SEND THROUGH WEBHOOK ALSO MAYBE MAKE IT RUN WITH THE UPDATE DATA THREAD 
         #if sendtrade api gets error check completeds 
         
-        print("checking completeds")
         
         trades = self.get_trades("https://trades.roblox.com/v1/trades/completed?limit=100&sortOrder=Desc", limit_pages=1)
 
@@ -549,8 +549,8 @@ class RobloxAPI():
 
             trade_id = trade_info['trade_id']
             
-            print("scanning outbound")
-            trade_info = self.request_handler.requestAPI(f"https://trades.roblox.com/v1/trades/{trade_id}?limit=100")
+            #print("scanning outbound")
+            trade_info = self.request_handler.requestAPI(f"https://trades.roblox.com/v1/trades/{trade_id}")
             if trade_info.status_code != 200:
                 print("trade info api", trade_info.status_code, trade_info.text)
                 return False
@@ -579,8 +579,6 @@ class RobloxAPI():
                     print("Cleared losing outbound...")
                 else:
                     print(cancel_request.text)
-            else:
-                print("Valid trade")
 
     def check_can_trade(self, userid):
         """
@@ -681,7 +679,6 @@ class RobloxAPI():
                 percentage_change = (current_price - loop_price)/current_price
 
                 if percentage_change < -0.4 and percentage_change > 0.4:
-                    print("projected", item_id)
                     is_projected = True
 
 
@@ -711,6 +708,7 @@ class RobloxAPI():
             Scan atleast 3 pages of owners and append new owners
             If less than 5 owners isn't found it will contintue to the next pages
         """
+        # TODO: Maybe add a date to recently scraped owners in projecteds.json to  avoid scraping the same item 
         owners = []
         next_page_cursor = ""
 
@@ -729,7 +727,6 @@ class RobloxAPI():
                     continue
                 #print(asset['owner'])
                 if int(asset['owner']['id']) in self.recently_traded:
-                    print("owner in recent ROBLOXAPI")
                     continue
                 owner_since = asset['updated']
 
@@ -748,10 +745,6 @@ class RobloxAPI():
                 if time_diff < timedelta(days=7):
                     print("appended owner roblox api", asset['owner'])
                     owners.append(asset['owner']['id'])
-
-
-
-        print("return", owners) 
         return owners
     
 #while True:
