@@ -38,12 +38,10 @@ class Doggo:
 
         # NOTE: use roblo accounts trademaker
         #self.trader = TradeMaker()
-        self.all_cached_traders = []
         self.account_configs = HandleConfigs()
 
         self.discord_webhook = DiscordHandler()
 
-        self.all_cached_traders = set()
         # Define a stop event that will be shared between threads
         self.stop_event = threading.Event()
 
@@ -77,10 +75,8 @@ class Doggo:
             case 3:
                 self.start_trader()
 
-    def queue_traders(self, roblox_account):
+    def queue_traders(self, roblox_account: RobloxAPI()):
             while not self.stop_event.is_set():
-                roblox_account.update_recently_traded(self.all_cached_traders)
-
                 if len(self.user_queue) > 20:
                     print("user queue is above 20")
                     time.sleep(60)
@@ -88,12 +84,13 @@ class Doggo:
                 random_item = self.rolimons.return_item_to_scan()['item_id']
                 owners = roblox_account.get_active_traders(random_item)
 
-                for owner in owners:
-                    if int(owner) in self.all_cached_traders:
-                        print("already traded with player, skipping")
-                        continue
 
-                    self.all_cached_traders.add(owner)
+                for owner in owners:
+                    if int(owner) in roblox_account.all_cached_traders:
+                            print("already traded with player, skipping")
+                            continue
+
+                    roblox_account.all_cached_traders.add(owner)
                     if roblox_account.check_can_trade(owner):
                         inventory = roblox_account.fetch_inventory(owner)
                         self.user_queue[owner] = inventory
@@ -148,7 +145,7 @@ class Doggo:
                     time.sleep(5)
                     continue
 
-                self.all_cached_traders = list(set(current_account.get_recent_traders() + self.all_cached_traders)) 
+                current_account.get_recent_traders()  
 
                 # TODO: add max days inactive in cfg and parse as arg
 

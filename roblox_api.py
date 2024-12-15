@@ -21,10 +21,9 @@ class RobloxAPI():
     """
 
     def __init__(self, cookie:dict=None, auth_secret=None, Proxies=False):
+        self.all_cached_traders = set()
         self.auth_secret = auth_secret
-        self.outbounds_userids = []
 
-        self.recently_traded = []
         self.account_configs = HandleConfigs()
 
         self.json = JsonHandler('cookies.json')
@@ -70,8 +69,6 @@ class RobloxAPI():
 
             self.request_handler.generate_csrf()
             #self.request_handler.headers.update({'X-CSRF-TOKEN': self.refresh_csrf()})
-    def update_recently_traded(self, users):
-        self.recently_traded = users
 
     # refresh current inventory
     def refresh_self_inventory(self):
@@ -117,7 +114,8 @@ class RobloxAPI():
             response = self.request_handler.requestAPI(inventory_API)
             if response.status_code != 200:
                 print("inventory API error", inventory_API, response.status_code, response.text)
-                return False
+                time.sleep(30)
+                #return False
             
             cursor = response.json()['nextPageCursor']
 
@@ -376,7 +374,6 @@ class RobloxAPI():
             TODO: make it have dates too so we can have cooldowns on users
         """
 
-        recently_traded = []
         check_urls = ["https://trades.roblox.com/v1/trades/inactive?limit=100&sortOrder=Desc", "https://trades.roblox.com/v1/trades/outbound?limit=100&sortOrder=Asc", "https://trades.roblox.com/v1/trades/inbound?cursor=&limit=100&sortOrder=Desc"]
 
         for url in check_urls:
@@ -395,9 +392,8 @@ class RobloxAPI():
                 
 
                 if time_difference < timedelta(days=max_days_since):
-                    recently_traded.append(trader_id)
+                    self.all_cached_traders.add(trader_id)
 
-        return recently_traded
 
     def format_trade_api(self, trade_json):
         # TODO: If this function is only used for webhook reasons, scrap it and remake it,
@@ -540,8 +536,8 @@ class RobloxAPI():
         # Loop through outbounds
         for trade_id, trade_info in trades.items():
             trader_id = trade_info['user_id']
-            if trader_id not in self.outbounds_userids:
-                self.outbounds_userids.append(trader_id)
+            if trader_id not in self.all_cached_traders:
+                self.all_cached_traders.add(trader_id)
 
             trade_id = trade_info['trade_id']
             
@@ -564,17 +560,26 @@ class RobloxAPI():
             trader_rap, trader_value, trader_algorithm_value, trader_total = self.calculate_gains(trader_items)
 
             # if trade is profitable in rap
-            if trader_rap - self_rap > 0:
-                offset = self.config.trading['Outbound_Cancel_Offset']
-                self_rap += offset
-                trader_rap += offset
+            offset = self.config.trading['Outbound_Cancel_Offset']
+            self_rap_offset = self_rap - offset
+            # NOTE: I dont think the trader should also get the offset
+            #trader_rap += offset
 
-            valid_trade = self.TradeMaker.validate_trade(self_rap, self_algorithm_value, self_value, trader_rap, trader_algorithm_value, trader_value, robux=self_robux, max_offset=50000)
+            valid_trade = self.TradeMaker.validate_trade(self_rap_offset, self_algorithm_value, self_value, trader_rap, trader_algorithm_value, trader_value, robux=self_robux, max_offset=50000)
 
             if not valid_trade:
                 url = f"https://trades.roblox.com/v1/trades/{trade_id}/decline"
 
-                print(self_rap, trader_rap, "cancel raps", "robux:",self_robux, "Values:", self_value, trader_value)
+                print(f"Self RAP: {self_rap}, Trader RAP: {trader_rap} | Cancel RAPs | Robux: {self_robux}", "self rap with offet:", self_rap_offset)
+                print(f"Values - Self: {self_value}, Trader: {trader_value}")
+                print(
+                    f"Settings:\n"
+                    f"  Outbound Cancel Offset: {self.config.trading['Outbound_Cancel_Offset']}\n"
+                    f"  Minimum RAP Gain: {self.config.trading['Minimum_RAP_Gain']}\n"
+                    f"  Maximum RAP Gain: {self.config.trading['Maximum_RAP_Gain']}\n"
+                    f"  Minimum Value Gain: {self.config.trading['Minimum_Value_Gain']}\n"
+                    f"  Maximum Value Gain: {self.config.trading['Maximum_Value_Gain']}"
+                )
                 cancel_request = self.request_handler.requestAPI(url, method="post")
                 time.sleep(1)
                 if cancel_request.status_code == 200 or cancel_request.status_code == 400:
@@ -584,8 +589,8 @@ class RobloxAPI():
         """
             Checks if /trade endpoint is valid for userid
         """
-        if int(userid) not in self.outbounds_userids:
-            self.outbounds_userids.append(int(userid))
+        if int(userid) not in self.all_cached_traders:
+            self.all_cached_traders.add(int(userid))
 
 
         validation_headers = None
@@ -726,7 +731,7 @@ class RobloxAPI():
                 if asset['owner'] == None:
                     continue
                 #print(asset['owner'])
-                if int(asset['owner']['id']) in self.recently_traded:
+                if int(asset['owner']['id']) in self.all_cached_traders:
                     continue
                 owner_since = asset['updated']
 
