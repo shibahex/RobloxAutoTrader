@@ -100,24 +100,24 @@ class TradeMaker():
 
 
         # TODO: add roblox in the combinations so we open up more trades
+        print("trade algorithm: getting keys")
         self_keys = list(self_inventory.keys())
         their_keys = list(their_inventory.keys())
+        print("Trade algorithm got keys")
 
         # Generate combinations for both inventories
+        print("Trade algorithm: generating combinations")
         self_combinations = self.generate_combinations(self_keys, self.min_items_self, self.max_items_self)
         their_combinations = self.generate_combinations(their_keys, self.min_items_their, self.max_items_their)
 
+        print("Trade algorithm: generated combinations")
         valid_trades = []
 
         def get_total_values(items, inventory):
             """
             Gets the total value, rap, and demand of a list of items.
             """
-            value = 0
-            rap = 0
-            demand = 0
-            rap_algorithm = 0
-            total_value = 0
+            value, rap, rap_algorithm, demand, total_value = 0, 0, 0, 0, 0
             for key in items:
                 item = inventory[key]
             
@@ -135,6 +135,7 @@ class TradeMaker():
 
 
 
+        print("Trade algorithm: starting trade generation")
         for self_side in self_combinations:
             if time.time() - start_time > timeout:
                 print("Timeout reached while generating trades.")
@@ -145,13 +146,16 @@ class TradeMaker():
             for their_side in their_combinations:
                 if len(self_side) == 1 and len(their_side) == 1:
                     continue
+                print(time.time() - start_time, timeout)
+                if time.time() - start_time > timeout:
+                    print("Timeout reached while generating trades.")
+                    return valid_trades[0] if valid_trades else None
+
                 their_side_item_ids = {their_inventory[key]['item_id'] for key in their_side}
 
                 # Ensure no overlapping item IDs
                 if self_side_item_ids.isdisjoint(their_side_item_ids):
-
                     self_value, self_rap, self_rap_algo, self_demand, self_total_value = get_total_values(self_side,self_inventory)
-
                     their_value, their_rap, their_rap_algo, their_demand, their_total_value = get_total_values(their_side, their_inventory)
                     
                     #print(self_rap_algo, their_rap_algo, "gr")
@@ -175,6 +179,8 @@ class TradeMaker():
                         send_robux = calc_robux
 
                     if self.validate_trade(self_rap, self_rap_algo, self_value, their_rap, their_rap_algo, their_value, robux=send_robux):
+                        print("Trade algorithm: validated trade")
+
                         # Calculate the trade sum (RAP and value)
                         total_value = self_value + their_value
                         total_rap = self_rap + their_rap
@@ -195,6 +201,7 @@ class TradeMaker():
                         # Downgrade: Maximize number of items on self side, minimize on their side
                         downgrade = num_items_self > num_items_their
 
+                        print("Trade algorithm: 6")
                         # Append all necessary details to valid_trades
                         valid_trades.append({
                             'self_side': self_side,
@@ -220,8 +227,10 @@ class TradeMaker():
                             'their_total': their_total_value
                         })
 
+                        print(len(valid_trades))
                         # idk the number lol
                         if len(valid_trades) > 1500:
+                            print("Trade algorithm: trade limit reached")
                             break
 
             if valid_trades:
@@ -294,21 +303,27 @@ class TradeMaker():
         return True
 
     def generate_combinations(self, keys, min_items=1, max_items=4):
-        # Ensure valid bounds for min_items and max_items
+        """
+        Lazily generates combinations of a list of keys to save memory.
+        Uses a generator to yield combinations one at a time.
+        """
         if not keys:
             print("Error: Keys list is empty.")
-            return []
+            return
+            # Returning an empty generator
         
         if len(keys) < min_items:
             print(f"Error: Not enough keys to generate combinations. Keys: {keys}, Min items: {min_items}")
-            return []
-        
+            return
+
+        # Adjust bounds for min_items and max_items
         min_items = max(1, min_items)
         max_items = min(max_items, len(keys))
 
-        # Generate combinations
-        all_combinations = []
+        # Lazily generate combinations for each size
         for r in range(min_items, max_items + 1):
-            all_combinations.extend(combinations(keys, r))
-        
-        return all_combinations
+            for combination in combinations(keys, r):
+                yield combination  # Yield one combination at a time
+
+
+
