@@ -732,6 +732,7 @@ class RobloxAPI():
                     continue
                 #print(asset['owner'])
                 if int(asset['owner']['id']) in self.all_cached_traders:
+                    print("Already in cached traders, scraping active traders")
                     continue
                 owner_since = asset['updated']
 

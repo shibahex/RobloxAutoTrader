@@ -13,6 +13,7 @@ import os
 import sys
 
 """
+    have total value gain (total value of items traded)
 
     if account has no value items, maybe swatch to rap_config.cfg?
     have value_config.cfg
@@ -20,7 +21,6 @@ import sys
     fix outbound checking cancel outbounds thats above the max
     Fix bad imports and messy imports..
 
-    problem with completeds not sending only sending when bot starts first
 
     1. multithread appending owners (bake in get inventory so multiple threads work on inventories)
     maybe have projected scanning in another thread somehow? dont let the whole program wait on 1 thread for projected scanning
@@ -186,12 +186,16 @@ class Doggo:
                     print("trading with", trader)
                     trader_inventory = self.user_queue[trader]
                     
+                        
                     # Delete the key from the dictionary
                     self.user_queue.pop(trader, None)  # Safely remove the key using pop
                     
+                    print("popped trader")
                     # Generate and send trade if there are items to trade
                     if account_inventory and trader_inventory:
+                        print("generating trade for", account.username)
                         generated_trade = account.TradeMaker.generate_trade(account_inventory, trader_inventory)
+
 
                         if not generated_trade:
                             print("no generated trade for", account.username)

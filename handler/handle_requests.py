@@ -132,7 +132,7 @@ class RequestsHandler:
                     # If this API isnt hard ratelimited then contiue to try, if it is return 429 after 5 tries
                     if "errors" in Response.json():
                         if "too many requests" in Response.json()['errors'][0]['message'].lower():
-                            print("Too many request continuing")
+                            print("Too many request continuing", Response.json())
                             continue
 
                     if consecutive_rate_limits > 5:

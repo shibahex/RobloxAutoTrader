@@ -134,42 +134,6 @@ class RolimonAPI():
         return random.choice(filtered_items)
         #print(filtered_items)
 
-    def return_formatted_owners(self, item_id: str or int) -> list:
-        """
-            Returns the rolimons.com/item/item_ID bc copies in formated by owners and datetime scanned
-        """
-        # Define the headers to mimic a real browser request
-        header = {
-            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',  # Can be adjusted based on your preferred language
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Referer': 'https://www.google.com/',  # Mimicking a referer header
-            'Cache-Control': 'max-age=0'
-        }
-
-        # Optionally, set cookies if the site requires them (can capture cookies using browser dev tools)
-        cookies = {
-            'some_cookie_name': 'cookie_value',  # Add your captured cookies here
-        }
-        # TODO: Make your own rolimons API
-        page_text = requests.get(f"https://www.rolimons.com/item/{item_id}", headers=header)
-        if page_text.status_code != 200:
-            print("rolimons items API error:", page_text.status_code)
-            return None
-
-        data = page_text.text.split("bc_copies_data")[1].split('[')[1].split("]")[0]
-
-        owners = data.split(',')
-        # Make it newest first and remove roblox 
-        owners = owners[::-1]
-        owners.remove("1")
-
-
-        return owners
-
     def add_data_to_inventory(self, inventory, is_self=False) -> dict:
         """
             Returns inventory with rolimon data appended into it
