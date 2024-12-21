@@ -117,7 +117,14 @@ class RobloxAPI():
                 time.sleep(30)
                 #return False
             
-            cursor = response.json()['nextPageCursor']
+            try:
+                cursor = response.json()['nextPageCursor']
+            except Exception as e:
+                print("Couldnt get cursor", response.json(), response.text)
+                with open("error.json", "w") as f:
+                    f.write(response.text)
+                cursor = None
+                break
 
             for item in response.json()['data']:
                 
@@ -283,8 +290,11 @@ class RobloxAPI():
         """
             Send Trader ID Then the list of items (list of assetids)
         """
-        if self_robux and self_robux > self.account_robux:
-            self_robux = self.account_robux 
+        if self_robux and self_robux >= self.account_robux:
+            self_robux = self.account_robux
+            if self_robux > 1:
+                self_robux -= 1
+
         trade_payload = {"offers":[
             {"userId":trader_id,"userAssetIds":trade_recieve,
             "robux":None},
@@ -326,6 +336,7 @@ class RobloxAPI():
                 # Error code 12 = Someone doesn't own the robux anymore
                 error = trade_response.json()['errors'][0]
                 error_code = error['code']
+                self.get_robux()
 
                 if error_code == 12:
                     # Check if its our inventory erroring
@@ -473,6 +484,8 @@ class RobloxAPI():
                     embed = self.discord_webhook.setup_embed(title=f"Trade Completed ({total_profit} profit)", color=2, user_id=formatted_trade['their_id'], embed_fields=embed_fields, footer="Frick shedletsky")
 
                     self.discord_webhook.send_webhook(embed, "https://discord.com/api/webhooks/1311127315316478053/Pz_ZrnTRWqCuJoKfnv6W4F9vo04xFVS6pKolHUiP16ByUeGgm-jyHMht9ZF68lStg1v2")   
+                elif trade_info.status_code == 500:
+                    continue
                 else:
                     time.sleep(2)
                     continue
@@ -602,11 +615,16 @@ class RobloxAPI():
                 if validation == False:
                     return None
                 validation_headers = validation
-
             return False
         if "NewLogin" in can_trade.url:
             return False
+        if can_trade.status_code == 500:
+            print("500 error on can trade")
+            time.sleep(10)
+            validation_headers = None
+            return False
         return True
+
     
     def is_projected_api(self, item_id):
         # TODO: GET the dates and see how much the item sells so we dont trade dead items or we can
@@ -636,6 +654,10 @@ class RobloxAPI():
         # Check graph for projecteds
         resale_data = self.parse_handler.requestAPI(f"https://economy.roblox.com/v1/assets/{item_id}/resale-data?limit=100")
 
+        if resale_data.status_code == 429:
+            print("ratelimited resale data")
+            time.sleep(30)
+            self.is_projected_api(item_id)
         if resale_data.status_code == 200:
 
             is_projected = False
@@ -705,25 +727,29 @@ class RobloxAPI():
                 #is_projected = True
 
 
-        return {f"{item_id}": {"is_projected": is_projected, "value": result_value, "volume": result_volume, "timestamp":result_timestamp, "last_price": self.rolimon.item_data[item_id]['best_price']}}
-        #return False
+            return {f"{item_id}": {"is_projected": is_projected, "value": result_value, "volume": result_volume, "timestamp":result_timestamp, "last_price": self.rolimon.item_data[item_id]['best_price']}}
 
-    def get_active_traders(self, item_id):
+        print("errored at resale data", resale_data.status_code, resale_data.text)
+        return None
+
+
+    def get_active_traders(self, item_id, owners):
         """
             Scan atleast 3 pages of owners and append new owners
             If less than 5 owners isn't found it will contintue to the next pages
         """
         # TODO: Maybe add a date to recently scraped owners in projecteds.json to  avoid scraping the same item 
-        owners = []
         next_page_cursor = ""
 
-        while len(owners) < 5 and next_page_cursor != None:
+        while len(owners) < 10:
+            if next_page_cursor == None:
+                break
             inventory_api = f"https://inventory.roblox.com/v2/assets/{item_id}/owners?sortOrder=Asc&cursor={next_page_cursor}&limit=100"
             
             response = self.request_handler.requestAPI(inventory_api)
 
             if response.status_code != 200:
-                print("Got API response", response.text, "on", response.url, "Trying again")
+                print("Got API response", response.text, "on", response.url, "Trying again, for GTETITING OWNERS")
                 continue
 
             next_page_cursor = response.json()['nextPageCursor']
@@ -734,6 +760,8 @@ class RobloxAPI():
                 if int(asset['owner']['id']) in self.all_cached_traders:
                     print("Already in cached traders, scraping active traders")
                     continue
+                else:
+                    print("appending", asset['owner']['id'], "if date is good")
                 owner_since = asset['updated']
 
                 # Assuming owner_since is a string like "2024-11-15T12:00:00Z"
@@ -748,8 +776,11 @@ class RobloxAPI():
                 # Calculate the difference between today and the given date
                 time_diff = today - given_date_naive
 
-                if time_diff < timedelta(days=7):
+                # If the owner has had the item for less than 7 days and is not already in the owners or all_cached_traders list, add them
+                if time_diff < timedelta(days=7) and asset['owner']['id'] not in owners and int(asset['owner']['id']) not in self.all_cached_traders:
+                    print("appending")
                     owners.append(asset['owner']['id'])
+        print("owners", owners)
         return owners
     
 #while True:
