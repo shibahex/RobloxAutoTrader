@@ -96,7 +96,8 @@ class TradeMaker():
         """
             Algorithm responsible for generating combinations and validating them..
         """
-        start_time = time.time()  # Record the start time
+        start_time = time.perf_counter()  # Use perf_counter for better precision
+
 
 
         # TODO: add roblox in the combinations so we open up more trades
@@ -137,7 +138,10 @@ class TradeMaker():
 
         print("Trade algorithm: starting trade generation")
         for self_side in self_combinations:
-            if time.time() - start_time > timeout:
+
+            #print(time.perf_counter() - start_time, timeout, "first scope")
+
+            if time.perf_counter() - start_time > timeout:
                 print("Timeout reached while generating trades.")
                 return valid_trades[0] if valid_trades else None
             # Create a set for the current self_side to check against
@@ -146,8 +150,8 @@ class TradeMaker():
             for their_side in their_combinations:
                 if len(self_side) == 1 and len(their_side) == 1:
                     continue
-                print(time.time() - start_time, timeout)
-                if time.time() - start_time > timeout:
+                #print(time.perf_counter() - start_time, timeout)
+                if time.perf_counter() - start_time > timeout:
                     print("Timeout reached while generating trades.")
                     return valid_trades[0] if valid_trades else None
 
