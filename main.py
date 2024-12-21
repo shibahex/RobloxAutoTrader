@@ -76,13 +76,17 @@ class Doggo:
                 self.start_trader()
 
     def queue_traders(self, roblox_account: RobloxAPI()):
+        try:
             while not self.stop_event.is_set():
                 if len(self.user_queue) > 20:
                     print("user queue is above 20")
-                    time.sleep(60)
+                    time.sleep(40)
                     continue
                 random_item = self.rolimons.return_item_to_scan()['item_id']
-                owners = roblox_account.get_active_traders(random_item)
+
+                owners=[]
+                roblox_account.get_active_traders(random_item, owners)
+                print("fetched new owners", owners, "\n","*"*30)
 
 
                 for owner in owners:
@@ -90,11 +94,19 @@ class Doggo:
                             print("already traded with player, skipping")
                             continue
 
+                    print("checking if can trade")
                     roblox_account.all_cached_traders.add(owner)
                     if roblox_account.check_can_trade(owner):
+                        print("can trade with", owner, "checking invetory..")
                         inventory = roblox_account.fetch_inventory(owner)
+                        print("fetched inventory for", owner)
                         self.user_queue[owner] = inventory
                     time.sleep(.15) 
+        except Exception as e:
+            print("Error in queue_traders:", e)
+            with open("log.txt", "a") as log_file:
+                log_file.write(f"Error in queue_traders: {e}\n")
+
 
     def merge_lists(self, list1, list2):
         # Use set to merge and remove duplicates
@@ -177,7 +189,6 @@ class Doggo:
 
                 # Check if user queue is empty
                 while not self.user_queue:
-                    print("No users to trade with. Waiting 10 second...")
                     time.sleep(10)
 
                 #current_user_queue = self.user_queue.copy()
