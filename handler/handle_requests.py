@@ -170,7 +170,9 @@ class RequestsHandler:
 
                 return Response
             elif Response.status_code == 500:
-                print("API failed to respond..", URL)
+                if "trade" not in Response.url:
+                    print("API failed to respond..", URL)
+
                 return Response
             elif Response.status_code == 400:
                 print("Requests payload error, returning", Response.text, payload)
