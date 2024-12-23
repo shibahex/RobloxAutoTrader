@@ -192,10 +192,10 @@ class RolimonAPI():
 
                 try:
                     percentage_change = difference / last_price
+                    if percentage_change >= threshold:
+                            return True  # There is a significant change
                 except:
                     pass
-                if percentage_change >= threshold:
-                    return True  # There is a significant change
 
                 return False
 
