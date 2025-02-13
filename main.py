@@ -1,4 +1,5 @@
 import time
+import traceback
 from rolimons_api import RolimonAPI
 from roblox_api import RobloxAPI
 from trade_algorithm import TradeMaker
@@ -11,6 +12,8 @@ import config_manager
 from handler.account_settings import HandleConfigs
 import os
 import sys
+from whitelist_manager import WhitelistManager
+from handler.handle_whitelist import Whitelist
 
 """
     have total value gain (total value of items traded)
@@ -44,6 +47,45 @@ class Doggo:
 
         # Define a stop event that will be shared between threads
         self.stop_event = threading.Event()
+        self.whitelist = Whitelist()
+        self.whitelist_manager = WhitelistManager()
+
+    def whitelist_thread(self):
+        while True:
+            time.sleep(300)
+            try:
+                if not os.path.isfile(".whitelist"):
+                    sys.exit()
+                data = self.whitelist_manager.json.read_data()
+                if data and data.get('username') and data.get('password') and data.get('orderid'):
+                    valid = self.whitelist.is_valid(username=data['username'], password=data['password'], orderid=data['orderid'])
+                    if not valid:
+                        print("Whitelist not valid")
+                        sys.exit()
+                else:
+                    sys.exit()
+
+            except Exception as e:
+                print("Couldn't validate whitelist", e)
+                sys.exit()
+    def validate_whitelist(self):
+        while True:
+            try:
+                if not os.path.isfile(".whitelist"):
+                    print("sending to whitelist menu")
+                    self.whitelist_manager.main()
+                data = self.whitelist_manager.json.read_data()
+                if data and data.get('username') and data.get('password') and data.get('orderid'):
+                    if self.whitelist.is_valid(data['username'], data['password'], data['orderid']):
+                        return True
+                    else:
+                        return False
+                else:
+                    self.whitelist_manager.main()
+            except Exception as e:
+                print(e)
+                pass
+
 
     def main(self):
         while True:
@@ -55,6 +97,7 @@ class Doggo:
             (1, "Account Manager"),
             (2, "Config Manager"),
             (3, "Execute Trader"),
+            (4, "Whitelist Menu")
         )
         self.cli.print_menu("Main Menu", options)
         try:
@@ -103,9 +146,10 @@ class Doggo:
                         self.user_queue[owner] = inventory
                     time.sleep(.15) 
         except Exception as e:
-            print("Error in queue_traders:", e)
+            tb = traceback.format_exc()  # Capture the full traceback
+            print(e, tb)
             with open("log.txt", "a") as log_file:
-                log_file.write(f"Error in queue_traders: {e}\n")
+                log_file.write(f"Error in queue_traders: {e}, {tb}\n")
 
 
     def merge_lists(self, list1, list2):
@@ -126,6 +170,9 @@ class Doggo:
 
 
     def start_trader(self):
+        if not self.validate_whitelist():
+            print("Whitelist not valid")
+            return False
         roblox_accounts = self.load_roblox_accounts()
         outbound_thread = threading.Thread(target=self.update_data_thread)
         outbound_thread.daemon = True
@@ -156,6 +203,10 @@ class Doggo:
                     print(current_account.username, "has no tradeable inventory")
                     time.sleep(5)
                     continue
+                if current_account.check_premium(current_account.account_id) == False:
+                    print(current_account.username, "is not premium")
+                    time.sleep(5)
+                    continue
 
                 current_account.get_recent_traders()  
 
@@ -180,6 +231,7 @@ class Doggo:
 
                 for thread in threads:
                     thread.join()
+            time.sleep(60)
 
 
     def process_trades_for_account(self, account):
@@ -253,12 +305,11 @@ class Doggo:
                 #exc_type, exc_obj, exc_tb = sys.exc_info()
                 #fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
                 #print(exc_type, fname, exc_tb.tb_lineno)
-                log_file = open("log.txt", "w")
+                log_file = open("log.txt", "a")
                 log_file.write(f"Error in process_trades_for_account: {e}\n")
                 log_file.close()
 
                 input("error in process_trades_for_account")
-                time.sleep(999990)
 
 
 
@@ -298,7 +349,17 @@ class Doggo:
         #self.rolimon_account.requestAPI(trade_ad_API, method='post', data=)
 
 
+# TODO: Check whitelist every 5 minutes
+
 if __name__ == "__main__":
     doggo = Doggo()
+    whitelist_thread = threading.Thread(target=doggo.whitelist_thread)
+    whitelist_thread.start()
+    if not Doggo().validate_whitelist():
+        print("Whitelist not valid")
+        time.sleep(1)
+        Doggo().whitelist_manager.main()
     doggo.main()
+
+
 
