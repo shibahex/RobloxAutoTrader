@@ -18,12 +18,16 @@ class Terminal:
 
     @staticmethod
     def print_error(message):
-        print('[' + red + "ERROR" + reset + '] ' + message)
+        try:
+            print('[' + red + "ERROR" + reset + ']', message)
+        except:
+            print("ERROR: ",message)
         time.sleep(2)
+
 
     @staticmethod
     def print_success(message):
-        print("[" + green + "SUCCESS" + reset + '] '+ message)
+        print("[" + green + "SUCCESS" + reset + ']', message)
 
     @staticmethod
     def input_prompt(prompt):
@@ -34,4 +38,5 @@ class Terminal:
     def clear_console():
         import os
         os.system('cls' if os.name == 'nt' else 'clear')
+
 

@@ -142,8 +142,15 @@ class RequestsHandler:
 
 
             if Response.status_code == 200:
-                #print("200", URL)
+                # Because roblox API is weird and sometimes returns 200 with errors
+                try:
+                    if "errors" in Response.json():
+                        Response.status_code = 500
+                        return Response
+                except:
+                    pass
                 return Response
+
             elif Response.status_code == 403:
                 new_token = self.generate_csrf()
                 if new_token:
@@ -193,3 +200,4 @@ class RequestsHandler:
 
     def refresh_proxies(self, file_path='proxies.txt'):
         self.load_proxies(file_path)
+

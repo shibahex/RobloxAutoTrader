@@ -19,9 +19,9 @@ class JsonHandler:
             }
             self.write_data(initial_data)
 
-        if self.filename == "projected_checker.json" and not os.path.exists(self.filename):
-            initial_data = {}
-            self.write_data(initial_data)
+        if not os.path.exists(self.filename):
+            print("File doenst exist generating empty json.")
+            self.write_data({})
 
     def read_data(self) -> dict:
         """Reads data from the JSON file."""
@@ -29,11 +29,9 @@ class JsonHandler:
             try:
                 with open(self.filename, 'r') as file:
                     return json.load(file)
-            except FileNotFoundError:
-                return {'roblox_accounts': []}
             except json.JSONDecodeError:
                 self.cli.print_error(f"Error decoding JSON, returning empty data. {self.filename}")
-                return {'roblox_accounts': []}
+                return  None
 
     def write_data(self, data: dict) -> None:
         """Writes data to the JSON file."""
@@ -282,4 +280,5 @@ class JsonHandler:
             'last_price': current_price
         }
         self.write_data(data)
+
 
