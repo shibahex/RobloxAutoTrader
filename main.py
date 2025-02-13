@@ -49,25 +49,25 @@ class Doggo:
         self.stop_event = threading.Event()
         self.whitelist = Whitelist()
         self.whitelist_manager = WhitelistManager()
+        self.whitelist_checked = time.time()
 
-    def whitelist_thread(self):
-        while True:
-            time.sleep(300)
-            try:
-                if not os.path.isfile(".whitelist"):
-                    sys.exit()
-                data = self.whitelist_manager.json.read_data()
-                if data and data.get('username') and data.get('password') and data.get('orderid'):
-                    valid = self.whitelist.is_valid(username=data['username'], password=data['password'], orderid=data['orderid'])
-                    if not valid:
-                        print("Whitelist not valid")
-                        sys.exit()
+    def whitelist_check(self):
+        try:
+            if not os.path.isfile(".whitelist"):
+                return None
+
+            data = self.whitelist_manager.json.read_data()
+            if data and data.get('username') and data.get('password') and data.get('orderid'):
+                valid = self.whitelist.is_valid(username=data['username'], password=data['password'], orderid=data['orderid'])
+                if not valid:
+                    print("Whitelist not valid")
+                    return None
                 else:
-                    sys.exit()
-
-            except Exception as e:
+                    return True
+        except Exception as e:
                 print("Couldn't validate whitelist", e)
-                sys.exit()
+                return None
+
     def validate_whitelist(self):
         while True:
             try:
@@ -170,9 +170,9 @@ class Doggo:
 
 
     def start_trader(self):
-        if not self.validate_whitelist():
-            print("Whitelist not valid")
-            return False
+        # if not self.validate_whitelist():
+        #     print("Whitelist not valid")
+        #     return False
         roblox_accounts = self.load_roblox_accounts()
         outbound_thread = threading.Thread(target=self.update_data_thread)
         outbound_thread.daemon = True
@@ -180,6 +180,13 @@ class Doggo:
 
         time.sleep(1)
         while True:
+            last_checked = time.time() - self.whitelist_checked
+            if last_checked >= 600:
+                self.whitelist_checked = time.time()
+                validate = self.whitelist_check()
+                if validate != True:
+                    return False
+
             threads = []
             if roblox_accounts == []:
                 input("No active accounts found!")
