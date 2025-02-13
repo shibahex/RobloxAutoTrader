@@ -6,4 +6,4 @@ venv/
 *txt*
 proxies.txt
 cookies*
-
+.*
