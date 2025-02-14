@@ -117,6 +117,8 @@ class Doggo:
                 pass
             case 3:
                 self.start_trader()
+            case 4:
+                self.whitelist_manager.main()
 
     def queue_traders(self, roblox_account: RobloxAPI()):
         try:
@@ -360,8 +362,6 @@ class Doggo:
 
 if __name__ == "__main__":
     doggo = Doggo()
-    whitelist_thread = threading.Thread(target=doggo.whitelist_thread)
-    whitelist_thread.start()
     if not Doggo().validate_whitelist():
         print("Whitelist not valid")
         time.sleep(1)
