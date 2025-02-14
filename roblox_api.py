@@ -57,7 +57,9 @@ class RobloxAPI():
 
             self.TradeMaker = TradeMaker(config=self.config)
 
+            print("getting self")
             self.account_inventory = self.fetch_inventory(self.account_id)
+            print("done getting self")
             self.account_robux = 0
             self.get_robux()
             
@@ -65,10 +67,28 @@ class RobloxAPI():
                 print("Failed to get userid for cookie", cookie)
                 raise ValueError("Invalid account or cookie.")
 
+            # if not self.check_premium(self.account_id):
+            #     print(f"Account: {self.username} is not premium")
+            #     raise ValueError(f"Account: {self.username} is not premium")
+            #
             self.check_completeds()
 
             self.request_handler.generate_csrf()
             #self.request_handler.headers.update({'X-CSRF-TOKEN': self.refresh_csrf()})
+
+    def check_premium(self, userid):
+        """
+        checks if the account is premium
+        """
+        premium_api = f"https://premiumfeatures.roblox.com/v1/users/{userid}/validate-membership"
+        response = self.request_handler.requestAPI(premium_api)
+        if response.status_code == 200:
+            if response.text == "true":
+                return True
+            else:
+                return False
+        else:
+            print("errored at premium", response.status_code, response.text)
 
     # refresh current inventory
     def refresh_self_inventory(self):
@@ -140,7 +160,11 @@ class RobloxAPI():
                     if itemId not in nft_list:
                         inventory[uaid] = {"item_id": itemId}
                 else:
-                    current_demand = self.rolimon.item_data[itemId]['demand']
+                    try:
+                        current_demand = self.rolimon.item_data[itemId]['demand']
+                    except:
+                        # bad item
+                        continue
                     if current_demand != None and int(current_demand) < self.config.trading['MinDemand']:
                         #print(current_demand, itemId, "skipped")
                         continue
@@ -472,7 +496,9 @@ class RobloxAPI():
         self.json.update_last_completed(self.cookies['.ROBLOSECURITY'], self.last_completed_scanned)
 
         if unlogged_trades != []:
+            print("getting self2")
             self.account_inventory = self.refresh_self_inventory()
+            print("done getting self2")
             for trade_id in unlogged_trades:
                 trade_info = self.request_handler.requestAPI(f"https://trades.roblox.com/v1/trades/{trade_id}")
 
@@ -506,7 +532,10 @@ class RobloxAPI():
         account_rap = 0
         account_value = 0
         account_algorithm_value = 0
-        projected_data = self.rolimon.projected_json.read_data()
+        try:
+            projected_data = self.rolimon.projected_json.read_data()
+        except Exception as e:
+            raise ValueError(e)
 
         account_total = 0
         for item in item_ids:
@@ -569,8 +598,12 @@ class RobloxAPI():
             trader_offer = data['offers'][1]
             trader_items = return_items(trader_offer['userAssets'])
 
-            self_rap, self_value, self_algorithm_value, self_total = self.calculate_gains(self_items)
-            trader_rap, trader_value, trader_algorithm_value, trader_total = self.calculate_gains(trader_items)
+            try:
+                self_rap, self_value, self_algorithm_value, self_total = self.calculate_gains(self_items)
+                trader_rap, trader_value, trader_algorithm_value, trader_total = self.calculate_gains(trader_items)
+            except:
+                return None
+                print("Couldnt calculate gains")
 
             # if trade is profitable in rap
             offset = self.config.trading['Outbound_Cancel_Offset']
@@ -741,7 +774,7 @@ class RobloxAPI():
         # TODO: Maybe add a date to recently scraped owners in projecteds.json to  avoid scraping the same item 
         next_page_cursor = ""
 
-        while len(owners) < 10:
+        while len(owners) < 20:
             if next_page_cursor == None:
                 break
             inventory_api = f"https://inventory.roblox.com/v2/assets/{item_id}/owners?sortOrder=Asc&cursor={next_page_cursor}&limit=100"
@@ -760,8 +793,8 @@ class RobloxAPI():
                 if int(asset['owner']['id']) in self.all_cached_traders:
                     print("Already in cached traders, scraping active traders")
                     continue
-                else:
-                    print("appending", asset['owner']['id'], "if date is good")
+                # else:
+                #     print("appending", asset['owner']['id'], "if date is good")
                 owner_since = asset['updated']
 
                 # Assuming owner_since is a string like "2024-11-15T12:00:00Z"
@@ -790,6 +823,3 @@ class RobloxAPI():
 #    else:
 #        print("Not projected")
     
-
-
-
