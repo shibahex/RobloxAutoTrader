@@ -11,6 +11,7 @@ class ConfigHandler:
         #self.prediction_algorithm = self.load_prediction_algorithm()
         self.trading = self.load_trading()
         self.projected_detection = self.load_projected_detection()
+        self.inbounds = self.load_inbounds()
         #self.mass_sender = self.load_mass_sender()
         # Check if config is filled out 
         self.validate_config()
@@ -118,6 +119,11 @@ class ConfigHandler:
             'MinimumSumOfTrade': self.get_float('Trading', 'MinimumSumOfTrade'),
             'MinDemand': self.get_int('Trading', 'MinDemand'),
             'Select_Trade_Using': self.get_string('Trading', 'Select Trade Using')
+        }
+    def load_inbounds(self):
+        return {
+            'Counter_Trades': self.get_boolean('Inbounds', 'Counter Trades'),
+
         }
 
     def load_projected_detection(self):

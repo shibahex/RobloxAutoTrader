@@ -2,6 +2,7 @@ from handler.handle_config import ConfigHandler
 from itertools import combinations, product
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 import math
+import random
 
 import time
 class TradeMaker():
@@ -95,6 +96,7 @@ class TradeMaker():
     def generate_trade(self, self_inventory, their_inventory, counter_trade=False, timeout=120):
         """
             Algorithm responsible for generating combinations and validating them..
+            if its a counter trade it will select random trade to send back
         """
         start_time = time.perf_counter()  # Use perf_counter for better precision
 

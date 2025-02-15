@@ -165,10 +165,12 @@ class Doggo:
             roblox_accounts = self.load_roblox_accounts()
 
             for account in roblox_accounts:
+                if account.config.inbounds['Counter_Trades'] == True:
+                    print("Counterint trades")
+                    account.counter_trades()
                 account.outbound_api_checker()
                 account.check_completeds()
-                # NOTE: off bc i have a good inbound
-                #account.counter_trades()
+
 
 
     def start_trader(self):

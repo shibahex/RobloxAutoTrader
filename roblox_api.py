@@ -266,8 +266,7 @@ class RobloxAPI():
             trade_id = trade_info['trade_id']
 
             trader_inventory = self.fetch_inventory(trader_id)
-
-            generated_trade = self.TradeMaker.generate_trade_with_timeout(self.account_inventory, trader_inventory, counter_trade=True)
+            generated_trade = self.TradeMaker.generate_trade(self_inventory=self.account_inventory, their_inventory=trader_inventory, counter_trade=True)
 
             if not generated_trade:
                 print("couldnt generate trade for counter")
