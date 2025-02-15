@@ -284,6 +284,7 @@ class RobloxAPI():
                 print("sent counter")
             else:
                 print("None counter erro")
+                continue
 
     def handle_auth_failed(self, response):
         """
