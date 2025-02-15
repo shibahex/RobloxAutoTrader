@@ -37,7 +37,7 @@ class Whitelist():
         try:
             self.server_pub_key = self.fetch_server_pub_key()
             self.client_pub, self.client_priv = self.client_generate_key_pair()
-        except Exception() as e:
+        except Exception as e:
             raise ValueError(f"Couldnt get whitelist keys: {e}")
         self.req.cookies['client_public_key'] = self.client_pub 
         
