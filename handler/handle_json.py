@@ -95,7 +95,7 @@ class JsonHandler:
             data['roblox_accounts'][index]['use_account'] = not toggle
 
             self.write_data(data)
-            self.cli.print_success(f"Cookie toggled to {toggle}")
+            self.cli.print_success(f"Cookie toggled to {not toggle}")
             time.sleep(1)
         else:
             self.cli.print_error("Invalid index. No cookie deleted.")
