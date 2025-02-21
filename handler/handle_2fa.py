@@ -39,7 +39,7 @@ class AuthHandler:
                 
 
                 print("2fa error, waiting 120 seconds")
-                print(request.json())
+                print(request.json(), "FOR USER:", user_Id)
                 time.sleep(120)
                 #input(request.json()["errors"][0]["message"])
                 return False
