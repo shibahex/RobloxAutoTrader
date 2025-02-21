@@ -90,6 +90,7 @@ class RolimonAPI():
         self.projected_json = JsonHandler('projected_checker.json')
 
         self.config = ConfigHandler('config.cfg')
+
         
         self.update_data()
         # ItemID: Timestamp
@@ -227,9 +228,8 @@ class RolimonAPI():
 
         for item in inventory:
             asset_id = inventory[item]['item_id']
+            collectibleItemId = inventory[item]['item_id']
             # total value reutns the RAP if theres no value
-            
-
             rap = self.item_data[asset_id]['rap']
 
             # Make rap independent from value
@@ -275,7 +275,7 @@ class RolimonAPI():
                 item_volume = data[asset_id]['volume']
 
             # TODO: PUT THIS IN CONFIG 
-            if is_projected or value == 0 and item_volume and float(item_volume) < 1.35:
+            if is_projected and not is_self or value == 0 and item_volume and float(item_volume) < 1.35 and not is_self:
                 continue
 
             filtered_inventory[item] = {
@@ -284,7 +284,7 @@ class RolimonAPI():
                 'rap': rap,
                 'demand': demand,
                 'rap_algorithm': rap_algo_value,
-                'total_value': total_value
+                'total_value': total_value,
             }
 
         # apply more usefull info about the item
