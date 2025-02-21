@@ -21,7 +21,7 @@ class AccountSettings():
                 ("5", "Check for missing settings (new settings in configs.cfg)"),
                 ("6", "Back to Main Menu"),
             )
-            self.cli.print_menu("Configs Manager", options)
+            self.cli.print_menu("Config Manager", options)
 
             try:
                 answer = int(self.cli.input_prompt("Enter Option"))

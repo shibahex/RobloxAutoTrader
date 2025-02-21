@@ -37,13 +37,14 @@ class ConfigHandler:
 
         return (gain / base_value) * 100 if is_percentage else gain
 
-    def check_gain(self, their_value, self_value, min_gain=None, max_gain=None):
+    def check_gain(self, their_value, self_value, min_gain=False, max_gain=False, max_offset=0):
         """
         Check if gain is within the specified range.
         """
+        
         gain = their_value - self_value
-        min_gain, is_min_percentage = self.convert_gain(min_gain) if min_gain is not None else (None, False)
-        max_gain, is_max_percentage = self.convert_gain(max_gain) if max_gain is not None else (None, False)
+        min_gain, is_min_percentage = self.convert_gain(min_gain) if min_gain is not False else (None, False)
+        max_gain, is_max_percentage = self.convert_gain(max_gain) if max_gain is not False else (None, False)
 
         # Only calculate gain as a percentage if min or max is marked as percentage
         gain = self.calculate_gain(gain, their_value, is_min_percentage or is_max_percentage)
@@ -53,11 +54,15 @@ class ConfigHandler:
         if max_gain is not None:
             max_gain = max_gain * 100 if is_max_percentage else max_gain
 
+        if max_gain is not None:
+            max_gain += max_offset
         # Debug output after calculations
         #print(f"Calculated Gain: {gain}, Min Gain: {min_gain}, Max Gain: {max_gain}")
 
         if min_gain is not None and max_gain is not None:
             return min_gain <= gain <= max_gain
+        elif max_gain is None and min_gain is None:
+            return True
         elif min_gain is not None:
             return gain >= min_gain
         elif max_gain is not None:
@@ -98,10 +103,15 @@ class ConfigHandler:
 
     def load_trading(self):
         return {
+            'Max_Seconds_Spent_on_One_User': self.get_float('Trading', 'Max Seconds Spent on One User'),
+            'Max_Seconds_Spent_on_Generating_Trades': self.get_float('Trading', 'Max Seconds Spent on Generating Trades'),
+            'Max_Valid_Trades': self.get_float('Trading', 'Max Valid Trades'),
             'Minimum_RAP_Gain': self.get_float('Trading', 'Minimum RAP Gain'),
             'Maximum_RAP_Gain': self.get_float('Trading', 'Maximum RAP Gain'),
             'Minimum_Value_Gain': self.get_float('Trading', 'Minimum Value Gain'),
             'Maximum_Value_Gain': self.get_float('Trading', 'Maximum Value Gain'),
+            'Minimum_Overall_Gain': self.get_float('Trading', 'Minimum Overall Value Gain'),
+            'Maximum_Overall_Gain': self.get_float('Trading', 'Maximum Overall Value Gain'),
             'Minimum_Algo_Gain': self.get_float('Trading', 'Minimum Rap Algorithm Gain'),
             'Maximum_Algo_Gain': self.get_float('Trading', 'Maximum Rap Algorithm Gain'),
             'NFT': self.get_string('Trading', 'NFT'),
@@ -116,7 +126,8 @@ class ConfigHandler:
             'MaximumItemsYourSide': self.get_int('Trading', 'MaximumItemsYourSide'),
             'MinimumItemsTheirSide': self.get_int('Trading', 'MinimumItemsTheirSide'),
             'MaximumItemsTheirSide': self.get_int('Trading', 'MaximumItemsTheirSide'),
-            'MinimumSumOfTrade': self.get_float('Trading', 'MinimumSumOfTrade'),
+            'MinimumValueOfTrade': self.get_float('Trading', 'Minimum Value Sum Of Trade'),
+            'MinimumRapOfTrade': self.get_float('Trading', 'Minimum Rap Sum Of Trade'),
             'MinDemand': self.get_int('Trading', 'MinDemand'),
             'Select_Trade_Using': self.get_string('Trading', 'Select Trade Using')
         }
@@ -153,7 +164,13 @@ class ConfigHandler:
         try:
             return self.config.getfloat(section, option) if self.config.has_option(section, option) else None
         except (ValueError, TypeError) as e:
-            print(f"Error retrieving float for [{section}] {option}: {e}")
+            #print(f"Error retrieving float for [{section}] {option}: {e}")
+            try:
+                string = self.get_string(section, option)
+                if string.lower() == "false" or string.lower() == "none":
+                    return False
+            except:
+                pass
             return None
 
     def get_string(self, section, option):
