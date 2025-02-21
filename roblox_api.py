@@ -53,13 +53,12 @@ class RobloxAPI():
             if user_config:
                 self.config.trading = user_config
             else:
-                print("no user config for", self.account_id)
-
+                pass
             self.TradeMaker = TradeMaker(config=self.config)
 
-            print("getting self")
+            # print("getting self")
             self.account_inventory = self.fetch_inventory(self.account_id)
-            print("done getting self")
+            # print("done getting self")
             self.account_robux = 0
             self.get_robux()
             
@@ -106,6 +105,7 @@ class RobloxAPI():
             returns CSRF token to validate next request
         """
         token_post = self.request_handler.requestAPI('https://catalog.roblox.com/v1/catalog/items/details', method="post")
+        print("csrf", token_post.headers, token_post.status_code)
 
         if 'x-csrf-token' in token_post.headers:
             #print("returning",token_post.headers['x-csrf-token'])
@@ -126,9 +126,13 @@ class RobloxAPI():
             raise ValueError(f"Couldnt login with cookie {self.cookies}")
 
     def fetch_inventory(self, userid):
+        # NOTE: switch to v2 when they add ishold to API
         cursor = ""
         inventory = {}
+        is_self = False
         while cursor != None:
+            # https://inventory.roblox.com/v2/users/6410566/inventory/8?cursor=&limit=100&sortOrder=Desc
+
             inventory_API = f"https://inventory.roblox.com/v1/users/{userid}/assets/collectibles?cursor={cursor}&limit=100"
 
             response = self.request_handler.requestAPI(inventory_API)
@@ -156,6 +160,7 @@ class RobloxAPI():
                 uaid = str(item['userAssetId'])
                 itemId = str(item['assetId'])
                 if userid == self.account_id:
+                    is_self = True
                     nft_list = self.config.trading['NFT']
                     if itemId not in nft_list:
                         inventory[uaid] = {"item_id": itemId}
@@ -179,7 +184,7 @@ class RobloxAPI():
 
 
 
-        return self.rolimon.add_data_to_inventory(inventory)
+        return self.rolimon.add_data_to_inventory(inventory, is_self=is_self)
 
 
 
@@ -254,6 +259,11 @@ class RobloxAPI():
                 trades.update(self.return_trade_details(response.json()['data']))
                 cursor = response.json()['nextPageCursor']
                 page_count += 1
+            elif response.status_code == 429:
+                print("get trades ratelimited")
+                time.sleep(30)
+            else:
+                print("getting trades for counter error", response.text, response.json())
 
         return trades  
 
@@ -264,16 +274,17 @@ class RobloxAPI():
         for trade_id, trade_info in trades.items():
             trader_id = trade_info['user_id']
             trade_id = trade_info['trade_id']
-
+        
             trader_inventory = self.fetch_inventory(trader_id)
-            generated_trade = self.TradeMaker.generate_trade(self_inventory=self.account_inventory, their_inventory=trader_inventory, counter_trade=True)
-
+        
+            generated_trade = self.TradeMaker.generate_trade(self.account_inventory, trader_inventory, counter_trade=True)
+        
             if not generated_trade:
                 print("couldnt generate trade for counter")
                 continue
-
+        
             their_side = generated_trade['their_side']
-
+        
             self_side = generated_trade['self_side']
             self_robux = generated_trade['self_robux']
 
@@ -284,7 +295,6 @@ class RobloxAPI():
                 print("sent counter")
             else:
                 print("None counter erro")
-                continue
 
     def handle_auth_failed(self, response):
         """
@@ -496,9 +506,9 @@ class RobloxAPI():
         self.json.update_last_completed(self.cookies['.ROBLOSECURITY'], self.last_completed_scanned)
 
         if unlogged_trades != []:
-            print("getting self2")
+            # print("getting self2")
             self.account_inventory = self.refresh_self_inventory()
-            print("done getting self2")
+            # print("done getting self2")
             for trade_id in unlogged_trades:
                 trade_info = self.request_handler.requestAPI(f"https://trades.roblox.com/v1/trades/{trade_id}")
 
@@ -611,7 +621,7 @@ class RobloxAPI():
             # NOTE: I dont think the trader should also get the offset
             #trader_rap += offset
 
-            valid_trade = self.TradeMaker.validate_trade(self_rap_offset, self_algorithm_value, self_value, trader_rap, trader_algorithm_value, trader_value, robux=self_robux, max_offset=50000)
+            valid_trade = self.TradeMaker.validate_trade(self_rap_offset, self_algorithm_value, self_value, trader_rap, trader_algorithm_value, trader_value, self_total, trader_total, robux=self_robux, max_offset=50000)
 
             if not valid_trade:
                 url = f"https://trades.roblox.com/v1/trades/{trade_id}/decline"
@@ -659,7 +669,29 @@ class RobloxAPI():
         return True
 
     
-    def is_projected_api(self, item_id):
+    def parse_date(self, date_str):
+        # Define the possible time formats
+        time_formats = [
+            "%Y-%m-%dT%H:%M:%SZ",       # Format with 'Z' (UTC indicator)
+            "%Y-%m-%dT%H:%M:%S.%fZ",    # Format with fractional seconds and 'Z'
+            "%Y-%m-%dT%H:%M:%S.%f",     # Format with fractional seconds, no 'Z'
+        ]
+        
+        # Check if there is a '.' to handle microsecond truncation
+        if '.' in date_str:
+            date_str = date_str.split('.')[0] + '.' + date_str.split('.')[1][:6]  # Ensure only 6 digits for microseconds
+        
+        # Try each format in sequence
+        for time_format in time_formats:
+            try:
+                return datetime.strptime(date_str, time_format)
+            except ValueError:
+                continue  # Try the next format if the current one fails
+
+        # Return None if all formats fail
+        return None
+
+    def is_projected_api(self, item_id, collectibleItemId=None):
         # TODO: GET the dates and see how much the item sells so we dont trade dead items or we can
         # see how active an item is
         # TODO: Delete all the value: "1" from data points
@@ -684,21 +716,48 @@ class RobloxAPI():
         #    print("projected due to price difference")
         #    return True
 
-        # Check graph for projecteds
-        resale_data = self.parse_handler.requestAPI(f"https://economy.roblox.com/v1/assets/{item_id}/resale-data?limit=100")
 
-        if resale_data.status_code == 429:
-            print("ratelimited resale data")
-            time.sleep(30)
-            self.is_projected_api(item_id)
+        is_projected = False
+
+
+        while True:
+            if collectibleItemId != None:
+                url = f"https://apis.roblox.com/marketplace-sales/v1/item/{collectibleItemId}/resale-data"
+            else:
+                url = f"https://economy.roblox.com/v1/assets/{item_id}/resale-data?limit=100"
+
+            resale_data = self.parse_handler.requestAPI(url)
+
+            if resale_data.status_code == 429:
+                print("ratelimited resale data")
+                time.sleep(30)
+            elif resale_data.status_code == 400:
+                print("reslate data 400 handling")
+                # Get new id
+                details_url = f"https://catalog.roblox.com/v1/catalog/items/{item_id}/details?itemType=asset"
+
+                detail_api = self.parse_handler.requestAPI(details_url)
+                if detail_api.status_code == 200:
+                    detail_data = detail_api.json()
+                    if "collectibleItemId" in detail_data:
+                        print(detail_data['collectibleItemId'], "resending back")
+                        collectibleItemId=detail_data['collectibleItemId']
+                    else:
+                        print("the frick collect")
+                elif detail_api.status_code == 429:
+                    print("Ratelimited detail api")
+                    time.sleep(30)
+                else:
+                    print("Couldn't get details on", item_id, "skipping item")
+                    break
+            else:
+                break
+
         if resale_data.status_code == 200:
-
-            is_projected = False
-
             def parse_api_data(data_points):
                 return sorted(
-                    [{"value": point["value"], "date": datetime.strptime(point["date"], "%Y-%m-%dT%H:%M:%SZ").timestamp()}
-                     for point in data_points],
+                    [{"value": point["value"], "date": self.parse_date(point["date"]).timestamp()}
+                        for point in data_points],
                     key=lambda x: x["date"],
                 )
 
@@ -730,7 +789,7 @@ class RobloxAPI():
 
             recent_data_points = [
                 point for point in data_points
-                if datetime.strptime(point['date'], "%Y-%m-%dT%H:%M:%SZ") > three_months_ago
+                if self.parse_date(point["date"]) > three_months_ago
             ]
 
             sum_of_price = 0
@@ -760,9 +819,10 @@ class RobloxAPI():
                 #is_projected = True
 
 
+
             return {f"{item_id}": {"is_projected": is_projected, "value": result_value, "volume": result_volume, "timestamp":result_timestamp, "last_price": self.rolimon.item_data[item_id]['best_price']}}
 
-        print("errored at resale data", resale_data.status_code, resale_data.text)
+        print("errored at resale data", resale_data.status_code, resale_data.text, "for", item_id, url)
         return None
 
 
@@ -811,7 +871,7 @@ class RobloxAPI():
 
                 # If the owner has had the item for less than 7 days and is not already in the owners or all_cached_traders list, add them
                 if time_diff < timedelta(days=7) and asset['owner']['id'] not in owners and int(asset['owner']['id']) not in self.all_cached_traders:
-                    print("appending")
+                    print("Scraping active traders.")
                     owners.append(asset['owner']['id'])
         print("owners", owners)
         return owners
@@ -823,3 +883,7 @@ class RobloxAPI():
 #    else:
 #        print("Not projected")
     
+
+
+
+
