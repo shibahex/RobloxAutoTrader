@@ -75,7 +75,7 @@ class AccountManager:
         auth_secret = self.cli.input_prompt("Enter the authorization key")
 
         if not AuthHandler().verify_auth_secret(auth_secret):
-            self.cli.print_error(f"{e}\nSkipping account...")
+            self.cli.print_error(f"Auth secret isn't right Skipping account...")
             return None
 
         acc_cookie = self.cli.input_prompt("Enter Cookie (include warning)")
@@ -98,7 +98,7 @@ class AccountManager:
 
         firefox = FirefoxLogin()
         if not AuthHandler().verify_auth_secret(auth_secret):
-            self.cli.print_error(f"{e}\nSkipping account...")
+            self.cli.print_error(f"AUTH CODE INVALID, skipping")
             return None
 
         try:
