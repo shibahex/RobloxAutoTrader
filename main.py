@@ -31,7 +31,11 @@ from handler.handle_whitelist import Whitelist
     Rolimon ads and discord ads for more counters!
 
     Trade send thread should be seprate from scanning inventories threads bc ratelimit on resale-data
+
+    dont keep countering trades from same person
+    also switch users if coulndt find trade in like 30 minutes
 """
+
 class Doggo:
     def __init__(self):
         self.user_queue = {}
@@ -50,6 +54,7 @@ class Doggo:
         self.whitelist = Whitelist()
         self.whitelist_manager = WhitelistManager()
         self.whitelist_checked = time.time()
+        self.counter_timer = time.time()
 
     def whitelist_check(self):
         try:
@@ -96,8 +101,8 @@ class Doggo:
         options = (
             (1, "Account Manager"),
             (2, "Config Manager"),
-            (3, "Execute Trader"),
-            (4, "Whitelist Menu")
+            (3, "Whitelist Manager"),
+            (4, "Execute Trader"),
         )
         self.cli.print_menu("Main Menu", options)
         try:
@@ -116,15 +121,15 @@ class Doggo:
                
                 pass
             case 3:
-                self.start_trader()
-            case 4:
                 self.whitelist_manager.main()
+            case 4:
+                self.start_trader()
 
     def queue_traders(self, roblox_account: RobloxAPI()):
         try:
             while not self.stop_event.is_set():
                 if len(self.user_queue) > 20:
-                    print("user queue is above 20")
+                    #print("user queue is above 20")
                     time.sleep(40)
                     continue
                 random_item = self.rolimons.return_item_to_scan()['item_id']
@@ -165,13 +170,10 @@ class Doggo:
             roblox_accounts = self.load_roblox_accounts()
 
             for account in roblox_accounts:
-                if account.config.inbounds['Counter_Trades'] == True:
-                    print("Counterint trades")
-                    account.counter_trades()
+
+
                 account.outbound_api_checker()
                 account.check_completeds()
-
-
 
     def start_trader(self):
         # if not self.validate_whitelist():
@@ -196,6 +198,7 @@ class Doggo:
                 input("No active accounts found!")
                 break
             for current_account in roblox_accounts:
+                current_account.last_sent_trade = time.time()
                 # Check if all accounts are rate-limited
                 # TODO: EDIT ratelimited function to not count disabled accounts
                 if self.json.is_all_ratelimited():
@@ -219,29 +222,33 @@ class Doggo:
                     time.sleep(5)
                     continue
 
+                print("Continuing on", current_account.username)
                 current_account.get_recent_traders()  
 
+                print("Got recent traders")
                 # TODO: add max days inactive in cfg and parse as arg
 
                 #print("trading with:", current_account.username, "auth code", current_account.auth_secret, current_account.account_id, "cookie=", current_account.request_handler.Session.cookies.get_dict())
 
                 # to make the threads run even after stop event is called and another thread starts
+                print("startign queue thread")
                 self.stop_event.clear()
                 queue_thread = threading.Thread(target=self.queue_traders, args=(current_account,))
                 queue_thread.daemon = True
                 queue_thread.start()
 
-                threads.append((queue_thread))
+                #threads.append((queue_thread))
 
+
+                print("started queue thread, now processing trades")
                 # After queuing, start processing trades for the account (is a while true)
                 self.process_trades_for_account(current_account)
 
+                #for thread in threads:
+                #    thread.join()
                 # Wait for all threads to finish before moving to next iteration
                 print("Stopping threads...")
                 self.stop_event.set()  # Signal all threads to stop
-
-                for thread in threads:
-                    thread.join()
             time.sleep(60)
 
 
@@ -256,7 +263,27 @@ class Doggo:
 
                 #current_user_queue = self.user_queue.copy()
                 
+                print("Started trading...")
+                account.counter_trades()
+
+                # if account.config.inbounds['counter_trades'] == true:
+                #     try:
+                #         last_checked = time.time() - self.counter_timer
+                #         if last_checked >= 600:
+                #             print("countering")
+                #             self.counter_timer = time.time()
+                #             account.counter_trades()
+                #     except exception as e:
+                #         print("starting countering error:",e )
+                #         pass
+
                 for trader in list(self.user_queue.keys()):  # Using list() creates a copy of the keys
+                    if time.time() - account.last_sent_trade > account.config.trading['Max_Seconds_Spent_on_One_User']:
+                        print("Couldnt find any trades for", account.username,  account.config.trading['Max_Seconds_Spent_on_One_User'], "Seconds")
+                        account.last_sent_trade = time.time()
+                        return None
+                    else:
+                        print(time.time() - account.last_sent_trade, "time spent trying to find trades with", account.username)
                     print("trading with", trader)
                     trader_inventory = self.user_queue[trader]
                     
@@ -312,15 +339,10 @@ class Doggo:
                             self.discord_webhook.send_webhook(embed, "https://discord.com/api/webhooks/1311127129731108944/RNlwYAMpLH1tJmwSTNDfuFOb9id2EmfC9AEvwSu5Gh-RNKcze35Pnp8asRBGt7dRsUaI")                    # Send trade request
                             pass
             except Exception as e:
-                print("Error in process_trades_for_account:", e)
-                #exc_type, exc_obj, exc_tb = sys.exc_info()
-                #fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-                #print(exc_type, fname, exc_tb.tb_lineno)
-                log_file = open("log.txt", "a")
-                log_file.write(f"Error in process_trades_for_account: {e}\n")
-                log_file.close()
-
-                input("error in process_trades_for_account")
+                tb = traceback.format_exc()  # Capture the full traceback
+                print(e, tb)
+                with open("log.txt", "a") as log_file:
+                    log_file.write(f"Error in process trades: {e}, {tb}\n")
 
 
 
@@ -346,7 +368,7 @@ class Doggo:
             if user_config:
                 roblox_account.config.trading = user_config
             else:
-                print("no config for", user_id)
+                pass
             roblox_accounts.append(roblox_account)
 
         return roblox_accounts
