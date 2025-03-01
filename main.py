@@ -307,7 +307,7 @@ class Doggo:
                     print('[Debug] process account inventory on hold breaking')
                     break
 
-                if account.config.inbounds['counter_trades'] == true:
+                if account.config.inbounds['CounterTrades'] == True:
                     try:
                         account.counter_trades()
                         last_checked = time.time() - self.counter_timer
