@@ -280,9 +280,8 @@ class Doggo:
 
                 print("started queue thread, now processing trades")
                 # After queuing, start processing trades for the account (is a while true)
-                #self.process_trades_for_account(current_account)
+                self.process_trades_for_account(current_account)
 
-                time.sleep(6000)
                 #for thread in threads:
                 #    thread.join()
                 # Wait for all threads to finish before moving to next iteration
