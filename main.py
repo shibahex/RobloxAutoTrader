@@ -355,8 +355,7 @@ class Doggo:
                         their_side = generated_trade['their_side']
                         self_robux = generated_trade['self_robux']
 
-                        #send_trade_response = account.send_trade(trader, self_side, their_side, self_robux=self_robux)
-                        send_trade_response = False
+                        send_trade_response = account.send_trade(trader, self_side, their_side, self_robux=self_robux)
 
                         if account.config.debug['ignore_limit'] == False:
                             if send_trade_response == False:  # Rate-limited
