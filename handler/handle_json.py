@@ -22,25 +22,49 @@ class JsonHandler:
         if not os.path.exists(self.filename):
             print("File doenst exist generating empty json.")
             self.write_data({})
+            #Hide it
+            if self.filename[0] == "." and os.name == 'nt':
+                os.system(f'attrib +h +s {self.filename}')  # Hide the file
+
 
     def read_data(self) -> dict:
         """Reads data from the JSON file."""
         with self.lock:
             try:
+                if self.filename[0] == "." and os.name == 'nt':
+                    os.system(f'attrib -h -s {self.filename}')
                 with open(self.filename, 'r') as file:
                     return json.load(file)
             except json.JSONDecodeError:
-                self.cli.print_error(f"Error decoding JSON, returning empty data. {self.filename}")
+                self.cli.print_error(f"Error decoding JSON, returning empty data. {self.filename} clearing file..")
+                time.sleep(3)
+                initial_data = {}
+                if self.filename == "cookies.json":
+                    initial_data = {
+                        "roblox_accounts": []
+                    }
+                self.write_data(initial_data)
+
+
                 return  None
+            finally:
+                if self.filename[0] == "." and os.name == 'nt':
+                    os.system(f'attrib +h +s {self.filename}')
 
     def write_data(self, data: dict) -> None:
         """Writes data to the JSON file."""
-        with self.lock:
-            with open(self.filename, 'w') as file:
-                json.dump(data, file, indent=4)
-
-        print(f"Data successfully written to {self.filename}")
-
+        # unHide the file
+        if self.filename[0] == "." and os.name == 'nt':
+            os.system(f'attrib -h -s {self.filename}') 
+        try:
+            with self.lock:
+                with open(self.filename, 'w') as file:
+                    json.dump(data, file, indent=4)
+            #print(f"Data successfully written to {self.filename}")
+        finally:
+            #ReHide
+            if self.filename[0] == "." and os.name == 'nt':
+                os.system(f'attrib +h +s {self.filename}')  
 
     def add_ratelimit_timestamp(self, cookie) -> None:
         data = self.read_data()
@@ -280,5 +304,6 @@ class JsonHandler:
             'last_price': current_price
         }
         self.write_data(data)
+
 
 
