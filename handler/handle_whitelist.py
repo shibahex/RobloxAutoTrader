@@ -34,16 +34,22 @@ class Whitelist():
         self.req = requests.Session()
 
         self.req.trust_env = False
-        try:
-            self.server_pub_key = self.fetch_server_pub_key()
-            self.client_pub, self.client_priv = self.client_generate_key_pair()
-        except Exception as e:
-            raise ValueError(f"Couldnt get whitelist keys: {e}")
-        self.req.cookies['client_public_key'] = self.client_pub 
+        self.server_pub_key = None
+        self.client_pub = None
+        self.client_priv = None
+
+        self.refresh_keys()
         
     def get_machine_uuid(self):
         return uuid.UUID(int=uuid.getnode())
 
+    def refresh_keys(self):
+        try:
+            self.server_pub_key = self.fetch_server_pub_key()
+            self.client_pub, self.client_priv = self.client_generate_key_pair()
+            self.req.cookies['client_public_key'] = self.client_pub 
+        except Exception as e:
+            raise ValueError(f"Couldnt get whitelist keys: {e}")
     def client_generate_key_pair(self):
         """
         Generates and returns an RSA key pair (public key and private key).
@@ -101,10 +107,8 @@ class Whitelist():
                 hashes.SHA256()
             )
             
-            print("VERIFIED")
             return True
         except Exception as e:
-            print("not verified")
             return False
 
 
@@ -115,10 +119,12 @@ class Whitelist():
         # Decode the private key from Base64
         try:
             encrypted_message_b64 = response.json()['encryptedData']
-        except Exception() as e:
-            print("Couldn't get data", e)
+        except Exception as e:
+            print("Couldn't get data", e, response.text, response.status_code, response.url)
+            response.text
             return False
 
+        print(encrypted_message_b64)
         private_key_bytes = base64.b64decode(self.client_priv)
         private_key = RSA.import_key(private_key_bytes)
 
@@ -187,60 +193,72 @@ class Whitelist():
             Hwid      string    `json:"hwid"`
         '''
 
-        hwid = self.get_machine_uuid()
-        send_data = f'{{"username": "{username}", "password": "{password}", "orderid": "{orderid}", "hwid": "{hwid}", "version": "{VERSION}"}}'.encode('utf-8')
+        try:
+            hwid = self.get_machine_uuid()
+            send_data = f'{{"username": "{username}", "password": "{password}", "orderid": "{orderid}", "hwid": "{hwid}", "version": "{VERSION}"}}'.encode('utf-8')
 
-        encrypted_data = self.encrypt_with_public_key(send_data)
-        signature_base64 = self.sign_with_private_key(self.client_priv, send_data)
+            encrypted_data = self.encrypt_with_public_key(send_data)
+            signature_base64 = self.sign_with_private_key(self.client_priv, send_data)
 
-        response = self.req.post("https://www.doggotradebot.xyz/register", json={'encryptedData': encrypted_data, 'sig': signature_base64}, verify=True)
+            response = self.req.post("https://www.doggotradebot.xyz/register", json={'encryptedData': encrypted_data, 'sig': signature_base64}, verify=True)
 
-        if response.status_code == 200:
-    
-            if response.json().get('sig') and response.json().get('trust'):
-                if not self.verify_signature(self.server_pub_key, send_data, response.json()['sig']):
-                    return False                # Verify hard coded keys
+            if response.status_code == 200:
+        
+                if response.json().get('sig') and response.json().get('trust'):
+                    if not self.verify_signature(self.server_pub_key, send_data, response.json()['sig']):
+                        return False                # Verify hard coded keys
 
-                try:
-                    pub_key_pem = base64.b64decode(TRUST_PUB_KEY)
-                    trust_public_key = serialization.load_pem_public_key(pub_key_pem, backend=default_backend())
-                except Exception as e:
-                    print("Couldnt get server public trust key", e )
-                    return False
-
-
-                if not self.verify_signature(trust_public_key, send_data, response.json()['trust']):
-                    return False
-
-
-                decrypted_response = self.decrypt_with_private_key(response)
-                decrypted_json = json.loads(decrypted_response)
-                if not decrypted_json.get("nonce"):
-                    print("invalid data non")
-                    return False
-
-
-                timestamp_str = decrypted_json["nonce"][:26]
-                timestamp = datetime.fromtimestamp(int(timestamp_str[:-1]), timezone.utc)  # Use timezone.utc for UTC
-                unix_timestamp = int(timestamp.timestamp())
-
-                if (abs(unix_timestamp) - time.time()) > 600:
-                    print("Nonce out of date")
-                    return False
-
-
-                if decrypted_json.get("registered"):
-                    if decrypted_json['registered'] == 'true':
-                        print("User Registered!")
-                        return True
-                    else: 
-                        print("User not Registered")
+                    try:
+                        pub_key_pem = base64.b64decode(TRUST_PUB_KEY)
+                        trust_public_key = serialization.load_pem_public_key(pub_key_pem, backend=default_backend())
+                    except Exception as e:
+                        print("Couldnt get server public trust key", e )
                         return False
-            pass
-        else:
-            print("Didn't get status code 200 for register API, orderid maybe already redeemed (or username taken)")
-            print(response.text)
-        return False
+
+
+                    if not self.verify_signature(trust_public_key, send_data, response.json()['trust']):
+                        return False
+
+
+                    decrypted_response = self.decrypt_with_private_key(response)
+                    decrypted_json = json.loads(decrypted_response)
+                    if not decrypted_json.get("nonce"):
+                        print("invalid data non")
+                        return False
+
+
+                    timestamp_str = decrypted_json["nonce"][:26]
+                    timestamp = datetime.fromtimestamp(int(timestamp_str[:-1]), timezone.utc)  # Use timezone.utc for UTC
+                    unix_timestamp = int(timestamp.timestamp())
+
+                    if (abs(unix_timestamp) - time.time()) > 600:
+                        print("Nonce out of date")
+                        return False
+
+
+                    if decrypted_json.get("registered"):
+                        if decrypted_json['registered'] == 'true':
+                            print("User Registered!")
+                            return True
+                        else: 
+                            print("User not Registered")
+                            return False
+                pass
+            else:
+                print("Didn't get status code 200 for register API, orderid maybe already redeemed (or username taken)")
+                print(response.text)
+            return False
+
+        except Exception as e:
+            tb = traceback.format_exc()  # Capture the full traceback
+            print(e, tb)
+            return False
+        finally:
+            try:
+                # NOTE: REFRESH KEYS AFTER POSTING THE API
+                self.refresh_keys()
+            except Exception as e:
+                raise ValueError(f"Couldnt get whitelist keys: {e}")
 
     def send_whitelist_post(self, username:str, password:str, orderid:str, url:str):
         """
@@ -274,7 +292,14 @@ class Whitelist():
         returns a bool wether or not the username and password got an ok from the server and then generates new keys
         """
         try:
-            response, message_sent = self.send_whitelist_post(username, password, orderid, "https://www.doggotradebot.xyz/login")
+            for i in range(0,3):
+                response, message_sent = self.send_whitelist_post(username, password, orderid, "https://www.doggotradebot.xyz/login")
+                if response.status_code != 500:
+                    break
+                self.refresh_keys()
+                time.sleep(10)
+                print("Whitelist failed API retrying in 10 seconds", i)
+
             if response == False:
                 print("Coudlnt contact whitelist API")
                 return False
@@ -341,48 +366,9 @@ class Whitelist():
         finally:
             try:
                 # NOTE: REFRESH KEYS AFTER POSTING THE API
-                self.server_pub_key = self.fetch_server_pub_key()
-                self.client_pub, self.client_priv = self.client_generate_key_pair()
-                self.req.cookies['client_public_key'] = self.client_pub 
+                self.refresh_keys()
             except Exception as e:
                 raise ValueError(f"Couldnt get whitelist keys: {e}")
 
 
-# Valid Whitelist: valid = whitelist_server.is_valid("flarieds", "flarieds", "YU4G4-7SZB4-H8VWQ-LBA2Z")
 
-import os
-menu = """
-1. Register OrderID
-2. Reset IP & HWID
-3. Verify Whitelist
-"""
-
-if __name__ == "__main__":
-    whitelist_server = Whitelist()
-
-    order_id = str(input("Enter OrderID: "))
-    username = str(input("Enter Username: "))
-    password = str(input("Enter Password: "))
-    while True:
-        os.system('cls' if os.name == 'nt' else 'clear')
-        print(menu)
-        answer = input("Please enter the option:")
-        
-        try:
-            if int(answer) == 1:
-                registered = whitelist_server.register_user(username=username, password=password, orderid=order_id)
-                if registered == False:
-                    print("Couldnt Register user")
-            if int(answer) == 2:
-                whitelist_server.reset_ip(username=username, password=password, orderid=order_id)
-            if int(answer) == 3:
-                if whitelist_server.is_valid(username=username, password=password, orderid=order_id):
-                    print("CORRECT WHITELIST")
-                else:
-                    print("INCORRECT WHITELIST")
-            time.sleep(3)
-        except Exception as e:
-            # error
-            tb = traceback.format_exc()
-            print(tb, e)
-#valid = whitelist_server.is_valid("flaried", "flaried", "HAAFS-ZLZN7-97DPG-ZU9SZ")
