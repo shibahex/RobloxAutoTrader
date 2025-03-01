@@ -38,6 +38,9 @@ from handler.handle_whitelist import Whitelist
 
 class Doggo:
     def __init__(self):
+        """
+            Store all the variables that will be used across doggo class
+        """
         self.user_queue = {}
         self.cli = Terminal()
         self.json = JsonHandler(filename="cookies.json")
@@ -46,34 +49,25 @@ class Doggo:
         # NOTE: use roblo accounts trademaker
         #self.trader = TradeMaker()
         self.account_configs = HandleConfigs()
-
         self.discord_webhook = DiscordHandler()
+        self.whitelist = Whitelist()
+        self.whitelist_manager = WhitelistManager()
 
         # Define a stop event that will be shared between threads
         self.stop_event = threading.Event()
-        self.whitelist = Whitelist()
-        self.whitelist_manager = WhitelistManager()
+
+
+        # Time Stamps for Routines
         self.whitelist_checked = time.time()
         self.counter_timer = time.time()
-
-    def whitelist_check(self):
-        try:
-            if not os.path.isfile(".whitelist"):
-                return None
-
-            data = self.whitelist_manager.json.read_data()
-            if data and data.get('username') and data.get('password') and data.get('orderid'):
-                valid = self.whitelist.is_valid(username=data['username'], password=data['password'], orderid=data['orderid'])
-                if not valid:
-                    print("Whitelist not valid")
-                    return None
-                else:
-                    return True
-        except Exception as e:
-                print("Couldn't validate whitelist", e)
-                return None
+        self.last_updated_rolimons = time.time()
+        self.last_checked_trades = time.time()
 
     def validate_whitelist(self):
+        """
+            Returns True or False weither the server could validate the credentials in .whitelist file
+            Will Return None if something went wrong
+        """
         while True:
             try:
                 if not os.path.isfile(".whitelist"):
@@ -86,18 +80,25 @@ class Doggo:
                     else:
                         return False
                 else:
+                    print("Please enter some login details.")
+                    time.sleep(1)
                     self.whitelist_manager.main()
             except Exception as e:
-                print(e)
-                pass
-
+                print("Couldn't validate whitelist", e)
+                raise ValueError("Couldn't validate Whitelist")
 
     def main(self):
+        """
+        A loop that runs the Menu and clears the console
+        """
         while True:
             self.cli.clear_console()
             self.display_main_menu()
     
     def display_main_menu(self):
+        """
+        CLI Menu that has a bunch of options and handles the selected answer
+        """
         options = (
             (1, "Account Manager"),
             (2, "Config Manager"),
@@ -112,13 +113,15 @@ class Doggo:
             self.cli.print_error(f"ERROR: {e}")
     
     def handle_menu_selection(self, selection):
+        """
+        Matches Selection to the function
+        """
         match selection:
             case 1:
                 AccountManager().main()
             case 2:
                 # Trade Manager functionality can be implemented here
                 config_manager.AccountSettings()
-               
                 pass
             case 3:
                 self.whitelist_manager.main()
@@ -126,6 +129,11 @@ class Doggo:
                 self.start_trader()
 
     def queue_traders(self, roblox_account: RobloxAPI()):
+        """
+            This Should be ran in a thread and can be called to stop at any time.
+            It uses the roblox account to scrape Roblox Owner API and checks if they arent in the cache
+            It also checks if you can trade  with them and adds them into self.user_queue
+        """
         try:
             while not self.stop_event.is_set():
                 if len(self.user_queue) > 20:
@@ -135,7 +143,9 @@ class Doggo:
                 random_item = self.rolimons.return_item_to_scan()['item_id']
 
                 owners=[]
-                roblox_account.get_active_traders(random_item, owners)
+                active_traders_response = roblox_account.get_active_traders(random_item, owners)
+                if active_traders_response == None:
+                    continue
                 print("fetched new owners", owners, "\n","*"*30)
 
 
@@ -149,6 +159,8 @@ class Doggo:
                     if roblox_account.check_can_trade(owner):
                         print("can trade with", owner, "checking invetory..")
                         inventory = roblox_account.fetch_inventory(owner)
+                        if inventory == False: 
+                            continue
                         print("fetched inventory for", owner)
                         self.user_queue[owner] = inventory
                     time.sleep(.15) 
@@ -164,33 +176,52 @@ class Doggo:
         return list(set(list1) | set(list2))
 
     def update_data_thread(self):
+        """
+        Updates the table self.rolimons.data whenever rolimons updates
+        """
+        self.rolimons.update_data()      
         while True:
-            time.sleep(1)
-            self.rolimons.update_data()      
-            roblox_accounts = self.load_roblox_accounts()
+            if time.time() - self.last_updated_rolimons >= 120:
+                self.last_updated_rolimons = time.time()
+                self.rolimons.update_data()      
 
+    def check_outbound_thread(self, roblox_accounts):
+        def check_oubounds():
             for account in roblox_accounts:
-
-
                 account.outbound_api_checker()
                 account.check_completeds()
 
+        check_oubounds()
+        self.last_checked_trades = time.time()
+
+        while True:
+            if time.time() - self.last_checked_trades >= 1800:
+                self.last_checked_trades = time.time()
+                check_oubounds()
+            time.sleep(5)
+
     def start_trader(self):
-        # if not self.validate_whitelist():
-        #     print("Whitelist not valid")
-        #     return False
+        if not self.validate_whitelist():
+            input("Whitelist not valid in starting")
+            return False
         roblox_accounts = self.load_roblox_accounts()
-        outbound_thread = threading.Thread(target=self.update_data_thread)
+        outbound_thread = threading.Thread(target=self.check_outbound_thread, args=(roblox_accounts,))
         outbound_thread.daemon = True
         outbound_thread.start()
 
+        rolimon_thread = threading.Thread(target=self.update_data_thread)
+        rolimon_thread.daemon = True
+        rolimon_thread.start()
         time.sleep(1)
         while True:
             last_checked = time.time() - self.whitelist_checked
             if last_checked >= 600:
+                print("checking whitelist..")
                 self.whitelist_checked = time.time()
-                validate = self.whitelist_check()
+                validate = self.validate_whitelist()
                 if validate != True:
+                    self.stop_event.set()  # Signal all threads to stop
+                    input("Whitelist check failed")
                     return False
 
             threads = []
@@ -198,17 +229,24 @@ class Doggo:
                 input("No active accounts found!")
                 break
             for current_account in roblox_accounts:
+                if time.time() - current_account.last_generated_csrf_timer >= 900:
+                    print("Refreshing csrf token")
+                    current_account.request_handler.generate_csrf()
+
                 current_account.last_sent_trade = time.time()
                 # Check if all accounts are rate-limited
-                # TODO: EDIT ratelimited function to not count disabled accounts
-                if self.json.is_all_ratelimited():
-                    print("All cookies are ratelimited. Waiting for 20 minutes...")
-                    time.sleep(20 * 60)
-                    break  # retry loop
+                # TODO: Make all accounts having no tradeable inventory as a check
+                
 
-                if self.json.check_ratelimit_cookie(current_account.cookies['.ROBLOSECURITY']):
-                    print(current_account.username, "ratelimited continuing to next acc")
-                    continue
+                if current_account.config.debug['ignore_limit'] == False:
+                    if self.json.is_all_ratelimited():
+                        print("All cookies sent out 100 daily trades. Rechecking in 20 minutes...")
+                        time.sleep(20 * 60)
+                        break  # retry loop
+
+                    if self.json.check_ratelimit_cookie(current_account.cookies['.ROBLOSECURITY']):
+                        print(current_account.username, "Hit 100 trade limit continuing to next acc")
+                        continue
 
                 # Get inventory
                 current_account.refresh_self_inventory()
@@ -242,8 +280,9 @@ class Doggo:
 
                 print("started queue thread, now processing trades")
                 # After queuing, start processing trades for the account (is a while true)
-                self.process_trades_for_account(current_account)
+                #self.process_trades_for_account(current_account)
 
+                time.sleep(6000)
                 #for thread in threads:
                 #    thread.join()
                 # Wait for all threads to finish before moving to next iteration
@@ -264,18 +303,22 @@ class Doggo:
                 #current_user_queue = self.user_queue.copy()
                 
                 print("Started trading...")
-                account.counter_trades()
 
-                # if account.config.inbounds['counter_trades'] == true:
-                #     try:
-                #         last_checked = time.time() - self.counter_timer
-                #         if last_checked >= 600:
-                #             print("countering")
-                #             self.counter_timer = time.time()
-                #             account.counter_trades()
-                #     except exception as e:
-                #         print("starting countering error:",e )
-                #         pass
+                if not account.account_inventory:
+                    print('[Debug] process account inventory on hold breaking')
+                    break
+
+                if account.config.inbounds['counter_trades'] == true:
+                    try:
+                        account.counter_trades()
+                        last_checked = time.time() - self.counter_timer
+                        if last_checked >= 1800:
+                            print("countering")
+                            self.counter_timer = time.time()
+                            account.counter_trades()
+                    except exception as e:
+                        print("starting countering error:",e )
+                        pass
 
                 for trader in list(self.user_queue.keys()):  # Using list() creates a copy of the keys
                     if time.time() - account.last_sent_trade > account.config.trading['Max_Seconds_Spent_on_One_User']:
@@ -295,11 +338,14 @@ class Doggo:
                     # Generate and send trade if there are items to trade
                     if account_inventory and trader_inventory:
                         print("generating trade for", account.username)
-                        generated_trade = account.TradeMaker.generate_trade(account_inventory, trader_inventory)
+                        generated_trade = account.trade_maker.generate_trade(account_inventory, trader_inventory)
 
 
                         if not generated_trade:
                             print("no generated trade for", account.username)
+                            if not account.account_inventory:
+                                print('[Debug] process account in trading inventory on hold returning')
+                                return None
                             break
 
                         print(f"Generated trade: {generated_trade}", account.username)
@@ -309,15 +355,18 @@ class Doggo:
                         their_side = generated_trade['their_side']
                         self_robux = generated_trade['self_robux']
 
-                        send_trade_response = account.send_trade(trader, self_side, their_side, self_robux=self_robux)
+                        #send_trade_response = account.send_trade(trader, self_side, their_side, self_robux=self_robux)
+                        send_trade_response = False
 
-                        if send_trade_response == 429:  # Rate-limited
-                            print("Roblox account limited")
-                            self.json.add_ratelimit_timestamp(account.cookies['.ROBLOSECURITY'])
-                            return False
+                        if account.config.debug['ignore_limit'] == False:
+                            if send_trade_response == False:  # Rate-limited
+                                print("Roblox account limited")
+                                self.json.add_ratelimit_timestamp(account.cookies['.ROBLOSECURITY'])
+                                return False
 
                         # Handle webhook
                         if send_trade_response:
+                            account.last_sent_trade = time.time()
                             def get_duplicate_items(side: tuple, inventory: dict) -> list:
                                 assetids = []
                                 for asset_id in side:
@@ -333,11 +382,16 @@ class Doggo:
                             generated_trade['self_side_item_ids'] = self_items
                             generated_trade['their_side_item_ids'] = trader_items
 
+
                             embed_fields, total_profit = self.discord_webhook.embed_fields_from_trade(generated_trade, self.rolimons.item_data, self.rolimons.projected_json.read_data())
 
                             embed = self.discord_webhook.setup_embed(title=f"Sent a trade with {total_profit} total profit", color=1, user_id=trader, embed_fields=embed_fields, footer="Frick shedletsky")
                             self.discord_webhook.send_webhook(embed, "https://discord.com/api/webhooks/1311127129731108944/RNlwYAMpLH1tJmwSTNDfuFOb9id2EmfC9AEvwSu5Gh-RNKcze35Pnp8asRBGt7dRsUaI")                    # Send trade request
                             pass
+                    else:
+                        if not account_inventory:
+                            print(account.username, "Doesn't have a tradeable inventory..")
+                            break
             except Exception as e:
                 tb = traceback.format_exc()  # Capture the full traceback
                 print(e, tb)
@@ -347,6 +401,7 @@ class Doggo:
 
 
     def load_roblox_accounts(self):
+        print("Loading roblox accounts...")
         cookie_json = self.json.read_data()
         roblox_accounts = []
 
@@ -355,6 +410,7 @@ class Doggo:
             if account['use_account'] == False:
                 continue
 
+            
             roblox_cookie = {'.ROBLOSECURITY': account['cookie']}
             auth_secret = account['auth_secret']
             last_completed = account['last_completed']
@@ -364,6 +420,8 @@ class Doggo:
                 
                 
             roblox_account = RobloxAPI(cookie=roblox_cookie, auth_secret=auth_secret)
+            roblox_account.request_handler.generate_csrf()
+
             user_config = self.account_configs.get_config(user_id)
             if user_config:
                 roblox_account.config.trading = user_config
@@ -385,12 +443,20 @@ class Doggo:
 # TODO: Check whitelist every 5 minutes
 
 if __name__ == "__main__":
-    doggo = Doggo()
-    if not Doggo().validate_whitelist():
-        print("Whitelist not valid")
-        time.sleep(1)
-        Doggo().whitelist_manager.main()
-    doggo.main()
+    try:
+        doggo = Doggo()
+        if not Doggo().validate_whitelist():
+            print("Whitelist not valid")
+            time.sleep(1)
+            Doggo().whitelist_manager.main()
+        doggo.main()
+    except Exception as e:
+        tb = traceback.format_exc()  # Capture the full traceback
+        print(e, tb)
+        with open("log.txt", "a") as log_file:
+            log_file.write(f"Error in process trades: {e}, {tb}\n")
+    finally:
+        exit()
 
 
 
