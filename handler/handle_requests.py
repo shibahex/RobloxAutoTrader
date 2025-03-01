@@ -2,11 +2,11 @@ import time
 
 import random
 import requests
+import re
 
 
 
 class RequestsHandler:
-
     def __init__(self, Session: requests.Session = requests.Session(), use_proxies=False, cookie:dict=None) -> None:
         self.use_proxies = use_proxies
         self.proxies = []
@@ -18,10 +18,10 @@ class RequestsHandler:
 
         self.Session = Session
 
-        if cookie:
-            self.Session.cookies.update(cookie)
-            #print("Updated cookie")
+        # URL = Consecutive Limits
+        self.ratelimit_urls = {}
 
+        self.cookie = cookie
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -30,8 +30,9 @@ class RequestsHandler:
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
             'Referer': 'https://www.google.com/',  # Mimicking a referer header
-            'Cache-Control': 'max-age=0'
-
+            'Cache-Control': 'max-age=0',
+            'Content-Type': 'application/json',
+            'x-csrf-token': None,
         }
 
     def rate_limit(self, proxy):
@@ -57,20 +58,14 @@ class RequestsHandler:
         proxy_dict = {"http": proxy, "https": proxy}
         return proxy_dict
 
-    def generate_csrf(self):
-        try:
-            token_post = self.Session.post('https://catalog.roblox.com/v1/catalog/items/details')
 
-            if 'x-csrf-token' in token_post.headers:
-                #print("returning",token_post.headers['x-csrf-token'])
-                self.Session.headers["x-csrf-token"] = token_post.headers['x-csrf-token']
-                return True
-            else:
-                print("Couldnt fetch x-csrf-token")
-                return False
-        except:
-            print("Couldnt fetch x-csrf-token")
-            return False
+    def generate_csrf(self):
+        response = self.Session.post('https://auth.roblox.com/v2/login', data={})
+        if 'x-csrf-token' in response.headers:
+            print("new token", response.headers['x-csrf-token'])
+            self.headers['x-csrf-token'] = response.headers['x-csrf-token']
+        else:
+            print(f'Invalidated cookie returned in generate_csrf; {response.headers}')
 
     def requestAPI(self, URL, method="get", payload=None, additional_headers=None) -> requests.Response:
         """
@@ -82,17 +77,19 @@ class RequestsHandler:
         Proxy Managment
         """
 
-        headers = self.headers.copy()  # Create a copy of the original headers
-        
-        if additional_headers:
-            headers.update(additional_headers)  # Add the additional headers temporarily
-        
         if not self.proxies:
             self.use_proxies = False
         
         consecutive_rate_limits = 0  
-        
+        refreshed_csrf = False
         while True:
+            headers = self.headers.copy()  # Create a copy of the original headers
+            if additional_headers:
+                headers.update(additional_headers)  # Add the additional headers temporarily
+
+            if self.cookie:
+                self.Session.cookies.update(self.cookie)
+
             proxy_dict = self.return_proxy() if self.use_proxies else None
 
             if proxy_dict is None and self.use_proxies:
@@ -108,11 +105,14 @@ class RequestsHandler:
                     Response = self.Session.post(
                         URL, headers=headers, json=payload, proxies=proxy_dict, timeout=30)
             except Exception as  e:  # except requests.exceptions.ProxyError:
-                if self.use_proxies:
+                if self.use_proxies != False:
                     print(f"Proxy  Error {proxy_dict['http']}.. blacklisting")
                     self.rate_limit(proxy_dict['http'])
                 else: 
                     print("Got Error getting/posting API", e)
+                    self.Session.close()
+                    time.sleep(10)
+                    self.Session = requests.Session()  # Recreate the session to avoid stale connections
                 continue
 
             """
@@ -121,24 +121,30 @@ class RequestsHandler:
 
             if Response.status_code == 429:
                 print("hit ratelimit on url", URL, Response.json())
-                if self.use_proxies:
+                if self.use_proxies != False:
                     self.rate_limit(proxy_dict['http'])
+                    time.sleep(5)
+                    return Response
                 else:
-                    wait_time = 60 * (2 ** consecutive_rate_limits)
-                    print(f"Rate limited without proxies, waiting {wait_time} secs.", URL)
+                    # If this API is hard ratelimited then return 429
+                    if "https://trades.roblox.com/v1/trades/send" == URL:
+                        if "you are sending too many trade requests" in Response.json()['errors'][0]['message'].lower():
+                            return Response
+
+                    if URL not in self.ratelimit_urls:
+                        self.ratelimit_urls[URL] = 1
+                    else:
+                        self.ratelimit_urls[URL] += 1
+
+                    consecutive_rate_limits = self.ratelimit_urls[URL]
+                    wait_time = 10 * (2 ** consecutive_rate_limits)
+                    print(f"Rate limited {URL} without proxies, waiting {wait_time} secs.", URL)
                     time.sleep(wait_time)
-                    consecutive_rate_limits += 1
+                    if consecutive_rate_limits > 4:
+                        del self.ratelimit_urls[URL]
+                        return Response
+                    continue
 
-                    # If this API isnt hard ratelimited then contiue to try, if it is return 429 after 5 tries
-                    if "errors" in Response.json():
-                        if "too many requests" in Response.json()['errors'][0]['message'].lower():
-                            print("Too many request continuing", Response.json())
-                            continue
-
-                    if consecutive_rate_limits > 5:
-                        return 429
-            else:
-                consecutive_rate_limits = 0
 
 
             if Response.status_code == 200:
@@ -151,39 +157,40 @@ class RequestsHandler:
                     pass
                 return Response
 
-            elif Response.status_code == 403:
-                new_token = self.generate_csrf()
-                if new_token:
-                    print("got new token for requests")
-                else:
-                    print("couldn't get token", URL, self.Session.cookies.get_dict())
+            elif Response.status_code == 403 or Response.status_code == 401 or Response.status_code == 500:
+                #print("Unathorized API, waiting 10 seconds then handling")
+                #time.sleep(10)
+
+                # This API doesn't work for some items
+                if 'inventory.roblox.com/v2' in Response.url:
                     return Response
-                continue
 
-                # TODO: FIX EDGE CASE
-                # <LeftMouse>
-                # debug purposes also items/details returns 403 on purpose
-                if URL != "https://catalog.roblox.com/v1/catalog/items/details":
-                    print("Error code 403: Authorization declined on url", URL)
-                    #print(proxy_dict)
-                try:
-                    if "errors" in Response.json():
-                        if "Token Validation Failed" in Response.json()['errors'][0]['message'].lower():
-                            print("Generating new token")
-                            self.headers['x-csrf-token'] = self.generate_csrf()
-                            continue
-                except:
-                    pass
+                print("[DEBUG] Request Auth Failed, seeing what to do for request", "\n[DEBUG]:", Response.text, Response.url)
+                #print(self.headers, "\nresponse headers:", Response.headers, "\n[Cookie]", self.Session.cookies, "\nPassed through cookies:", self.cookie)
 
-                return Response
-            elif Response.status_code == 500:
-                if "trade" not in Response.url:
-                    print("API failed to respond..", URL)
+                if "trade" not in Response.url and Response.status_code == 500:
+                    print("API failed to respond", URL)
 
-                return Response
+                # If x-csrf-token is invalid apparently the response will provide you with a new one
+                if 'x-csrf-token' in Response.headers:
+                    print("Sucessfully gotten new token from headers", Response.headers['x-csrf-token'], "Old token:", self.headers['x-csrf-token'])
+                    self.headers['x-csrf-token'] = Response.headers['x-csrf-token']
+                else:
+                    self.generate_csrf()
+                
+                # Retry with new csrf once IF there is no 2fa prompt
+                if 'rblx-challenge-id' not in Response.headers:
+                    refreshed_csrf = True
+                    continue
+                else:
+                    return Response
+
             elif Response.status_code == 400:
                 print("Requests payload error, returning", Response.text, payload)
                 return Response
+            elif Response.status_code == 429:
+                # NOTE: Handled above..
+                continue
             else:
                 print("Unknown Error Code on", URL, Response.status_code, Response.text)
                 return Response
