@@ -12,6 +12,7 @@ class ConfigHandler:
         self.trading = self.load_trading()
         self.projected_detection = self.load_projected_detection()
         self.inbounds = self.load_inbounds()
+        self.debug = self.load_debug()
         #self.mass_sender = self.load_mass_sender()
         # Check if config is filled out 
         self.validate_config()
@@ -43,8 +44,8 @@ class ConfigHandler:
         """
         
         gain = their_value - self_value
-        min_gain, is_min_percentage = self.convert_gain(min_gain) if min_gain is not False else (None, False)
-        max_gain, is_max_percentage = self.convert_gain(max_gain) if max_gain is not False else (None, False)
+        min_gain, is_min_percentage = self.convert_gain(min_gain) if min_gain  else (None, False)
+        max_gain, is_max_percentage = self.convert_gain(max_gain) if max_gain else (None, False)
 
         # Only calculate gain as a percentage if min or max is marked as percentage
         gain = self.calculate_gain(gain, their_value, is_min_percentage or is_max_percentage)
@@ -89,6 +90,11 @@ class ConfigHandler:
             'Minimum_Total_Value': self.get_int('Filter Users', 'Minimum Total Value'),
             'Minimum_Total_Items': self.get_int('Filter Users', 'Minimum Total Items'),
         }
+    def load_debug(self):
+        return {
+            'trading_debug': self.get_boolean('debug', 'print trade maker status'),
+            'ignore_limit': self.get_boolean('debug', 'ignore trade limit')
+        }
 
     #def load_prediction_algorithm(self):
     #    return {
@@ -112,23 +118,28 @@ class ConfigHandler:
             'Maximum_Value_Gain': self.get_float('Trading', 'Maximum Value Gain'),
             'Minimum_Overall_Gain': self.get_float('Trading', 'Minimum Overall Value Gain'),
             'Maximum_Overall_Gain': self.get_float('Trading', 'Maximum Overall Value Gain'),
+            'Rap_Algo_For_Valued': self.get_string('Trading', 'RAP Algorithm for Valued Items'),
             'Minimum_Algo_Gain': self.get_float('Trading', 'Minimum Rap Algorithm Gain'),
             'Maximum_Algo_Gain': self.get_float('Trading', 'Maximum Rap Algorithm Gain'),
             'NFT': self.get_string('Trading', 'NFT'),
             'NFR': self.get_string('Trading', 'NFR'),
-            'Outbound_Cancel_Offset': self.get_int('Trading', 'Outbound Cancel RAP Offset'),
-            'TradeRobux': self.get_boolean('Trading', 'TradeRobux'),
-            'RobuxDividePercentage': self.get_float('Trading', 'RobuxDividePercentage'),
-            'MaxRobux': self.get_float('Trading', 'MaxRobux'),
-            'MaxScorePercentage': self.get_float('Trading', 'MaxScorePercentage'),
-            'MinScorePercentage': self.get_float('Trading', 'MinScorePercentage'),
-            'MinimumItemsYourSide': self.get_int('Trading', 'MinimumItemsYourSide'),
-            'MaximumItemsYourSide': self.get_int('Trading', 'MaximumItemsYourSide'),
-            'MinimumItemsTheirSide': self.get_int('Trading', 'MinimumItemsTheirSide'),
-            'MaximumItemsTheirSide': self.get_int('Trading', 'MaximumItemsTheirSide'),
+            'Outbound_Cancel_Offset': self.get_int('Outbounds', 'Outbound Minimum Gain Offset to Cancel'),
+            'Algo_Cancel_Offset': self.get_int('Outbounds', 'RAP Algorithm Gain Offset to Cancel'),
+            'TradeRobux': self.get_boolean('Trading', 'Trade Robux'),
+            'RobuxDividePercentage': self.get_float('Trading', 'Robux Divide Percentage'),
+            'MaxRobux': self.get_float('Trading', 'Max Robux'),
+            'MinOverallValueScorePercentage': self.get_float('Trading', 'Min Overall Value Score Percentage'),
+            'MaxOverallValueScorePercentage': self.get_float('Trading', 'Max Overall Value Score Percentage'),
+            'MinRAPScorePercentage': self.get_float('Trading', 'Min RAP Score Percentage'),
+            'MaxRAPScorePercentage': self.get_float('Trading', 'Max RAP Score Percentage'),
+            'MinimumItemsYourSide': self.get_int('Trading', 'Minimum Items on Your Side'),
+            'MaximumItemsYourSide': self.get_int('Trading', 'Maximum Items on Your Side'),
+            'MinimumItemsTheirSide': self.get_int('Trading', 'Minimum Items on Their Side'),
+            'MaximumItemsTheirSide': self.get_int('Trading', 'Maximum Items on Their Side'),
             'MinimumValueOfTrade': self.get_float('Trading', 'Minimum Value Sum Of Trade'),
             'MinimumRapOfTrade': self.get_float('Trading', 'Minimum Rap Sum Of Trade'),
-            'MinDemand': self.get_int('Trading', 'MinDemand'),
+            'MinDemand': self.get_int('Trading', 'Minimum Valued Item Demand'),
+            'MinDailySales': self.get_float('Trading', 'Minimum Daily Sales of Item'),
             'Select_Trade_Using': self.get_string('Trading', 'Select Trade Using')
         }
     def load_inbounds(self):
