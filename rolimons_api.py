@@ -88,10 +88,7 @@ class RolimonAPI():
         self.rolimon_account = RequestsHandler(use_proxies=False, cookie=cookie)
         self.rolimon_parser = RequestsHandler()
         self.projected_json = JsonHandler('projected_checker.json')
-
         self.config = ConfigHandler('config.cfg')
-
-        
         self.update_data()
         # ItemID: Timestamp
         self.scanned_items_for_owners = {}
@@ -212,11 +209,13 @@ class RolimonAPI():
                 #print(f"recently scanned: {recently_scanned} (should be true) big price change (should be false): {price_change}")
                 
                 # Scan if not recently scanned or if there's a big price change
+                #print("recently scanned:", recently_scanned, "big price change:", price_change)
                 if not recently_scanned or price_change:
                     return True
                 else:
                     return False
             else:
+                #print("item not in projected data")
                 return True
 
                 # Commented out so value items can have rap algo value
@@ -225,7 +224,8 @@ class RolimonAPI():
 
 
 
-
+        minimum_daily_sales = self.config.trading['MinDailySales']
+        rap_algo_for_valued = self.config.trading['Rap_Algo_For_Valued']
         for item in inventory:
             asset_id = inventory[item]['item_id']
             collectibleItemId = inventory[item]['item_id']
@@ -249,12 +249,13 @@ class RolimonAPI():
             if need_to_scan(asset_id) == True:
                 data = self.projected_json.read_data()
 
+                print("Checking projected and data for", asset_id)
                 is_projected_api = roblox_api.RobloxAPI().is_projected_api(asset_id)
                 
                 # If it has no sale data 
                 if is_projected_api == None:
                     is_projected = True
-
+                    print(asset_id,"Has no sale api")
                 else:
                     is_projected = is_projected_api[str(asset_id)]['is_projected']
                     rap_algo_value = is_projected_api[str(asset_id)]['value']
@@ -275,8 +276,20 @@ class RolimonAPI():
                 item_volume = data[asset_id]['volume']
 
             # TODO: PUT THIS IN CONFIG 
-            if is_projected and not is_self or value == 0 and item_volume and float(item_volume) < 1.35 and not is_self:
-                continue
+            if not is_self:
+                if is_projected or value == 0 and item_volume and minimum_daily_sales != None and float(item_volume) < minimum_daily_sales:
+                    continue
+
+            if value != 0:
+                if rap_algo_for_valued.lower() == "rolimon_value":
+                    rap_algo_value = value
+                elif rap_algo_for_valued.lower() == "zero_value":
+                    rap_algo_value = 0
+                elif rap_algo_for_valued.lower() == "rap_algo":
+                    rap_algo_value = rap_algo_value
+                else:
+                    print("RAP Algorithm for Valued Items, isn't set right; using default of rap_algo")
+
 
             filtered_inventory[item] = {
                 'item_id': asset_id,
@@ -285,6 +298,7 @@ class RolimonAPI():
                 'demand': demand,
                 'rap_algorithm': rap_algo_value,
                 'total_value': total_value,
+                'item_volume': item_volume
             }
 
         # apply more usefull info about the item
