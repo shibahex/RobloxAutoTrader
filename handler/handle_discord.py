@@ -47,7 +47,7 @@ class DiscordHandler():
         their_rap = trade['their_rap']
         their_value = trade['their_value']
         their_algo = trade['their_rap_algo']
-        their_total = trade['their_total']
+        their_overall = trade['their_overall_value']
 
 
 
@@ -55,12 +55,11 @@ class DiscordHandler():
         self_rap = trade['self_rap']
         self_value = trade['self_value']
         self_algo = trade['self_rap_algo']
-        self_total = trade['self_total']
+        self_overall = trade['self_overall_value']
 
 
         # use to add algo to this but doesnt make sense because its like the RAP
-        total_profit = their_total - self_total
-        print(total_profit, "rahh", self_value, their_value, self_rap, their_rap, their_total, self_total)
+        total_profit = their_overall - self_overall
 
         algo_profit = round(their_algo - self_algo)
         rap_profit = their_rap - self_rap
@@ -119,7 +118,7 @@ class DiscordHandler():
         """
 
         embed = DiscordEmbed(title=title, description=description, color=STATUS_COLORS[color])
-        embed.set_footer(text=footer)
+        embed.set_footer(text=footer+f'• {user_id}')
         embed.set_timestamp()
 
         try:
