@@ -105,6 +105,7 @@ class Doggo:
             (3, "Whitelist Manager"),
             (4, "Execute Trader"),
         )
+        print("Version: 0.5 (BETA)")
         self.cli.print_menu("Main Menu", options)
         try:
             answer = int(self.cli.input_prompt("Enter Option"))
@@ -202,7 +203,8 @@ class Doggo:
 
     def start_trader(self):
         if not self.validate_whitelist():
-            input("Whitelist not valid in starting")
+            print("Whitelist not valid in starting")
+            exit()
             return False
         roblox_accounts = self.load_roblox_accounts()
         outbound_thread = threading.Thread(target=self.check_outbound_thread, args=(roblox_accounts,))
@@ -216,13 +218,14 @@ class Doggo:
         while True:
             last_checked = time.time() - self.whitelist_checked
             if last_checked >= 600:
-                print("checking whitelist..")
                 self.whitelist_checked = time.time()
                 validate = self.validate_whitelist()
                 if validate != True:
                     self.stop_event.set()  # Signal all threads to stop
                     input("Whitelist check failed")
+                    exit()
                     return False
+                
 
             threads = []
             if roblox_accounts == []:
@@ -290,6 +293,7 @@ class Doggo:
             time.sleep(60)
 
 
+            # min overall 300
     def process_trades_for_account(self, account):
         while True:
             try:
@@ -310,12 +314,12 @@ class Doggo:
                 if account.config.inbounds['CounterTrades'] == True:
                     try:
                         account.counter_trades()
-                        last_checked = time.time() - self.counter_timer
                         if last_checked >= 1800:
+                            last_checked = time.time() - self.counter_timer
                             print("countering")
                             self.counter_timer = time.time()
                             account.counter_trades()
-                    except exception as e:
+                    except Exception as e:
                         print("starting countering error:",e )
                         pass
 
@@ -447,6 +451,7 @@ if __name__ == "__main__":
             print("Whitelist not valid")
             time.sleep(1)
             Doggo().whitelist_manager.main()
+
         doggo.main()
     except Exception as e:
         tb = traceback.format_exc()  # Capture the full traceback

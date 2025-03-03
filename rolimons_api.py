@@ -247,38 +247,7 @@ class RolimonAPI():
             item_volume = None
 
             if need_to_scan(asset_id) == True:
-                data = self.projected_json.read_data()
-
-                print("Checking projected and data for", asset_id)
-                is_projected_api = roblox_api.RobloxAPI().is_projected_api(asset_id)
-                
-                # If it has no sale data 
-                if is_projected_api == None:
-                    is_projected = True
-                    print(asset_id,"Has no sale api")
-                else:
-                    is_projected = is_projected_api[str(asset_id)]['is_projected']
-                    rap_algo_value = is_projected_api[str(asset_id)]['value']
-                    item_volume = is_projected_api[str(asset_id)]['volume']
-
-                    data.update(is_projected_api)
-                    self.projected_json.write_data(data)
-
-            else: 
-                #if value != 0:
-                    # NOTE: this doens't apply the rap algorithm to value items, i can change this later
-                #    rap_algo_value = 0
-                #    is_projected = False
-                #else:
-                data = self.projected_json.read_data()
-                is_projected = data[asset_id]['is_projected']
-                rap_algo_value = data[asset_id]['value']
-                item_volume = data[asset_id]['volume']
-
-            # TODO: PUT THIS IN CONFIG 
-            if not is_self:
-                if is_projected or value == 0 and item_volume and minimum_daily_sales != None and float(item_volume) < minimum_daily_sales:
-                    continue
+                roblox_api.RobloxAPI().is_projected_api(asset_id)
 
             if value != 0:
                 if rap_algo_for_valued.lower() == "rolimon_value":
@@ -290,6 +259,19 @@ class RolimonAPI():
                 else:
                     print("RAP Algorithm for Valued Items, isn't set right; using default of rap_algo")
 
+
+            projected_data = self.projected_json.read_data()
+
+            if asset_id in projected_data.keys():
+                is_projected = projected_data[asset_id]['is_projected']
+                rap_algo_value = projected_data[asset_id]['value']
+                item_volume = projected_data[asset_id]['volume']
+
+
+
+            if not is_self:
+                if is_projected or value == 0 and item_volume and minimum_daily_sales != None and float(item_volume) < minimum_daily_sales:
+                    continue
 
             filtered_inventory[item] = {
                 'item_id': asset_id,

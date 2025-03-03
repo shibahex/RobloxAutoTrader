@@ -144,7 +144,7 @@ class ConfigHandler:
         }
     def load_inbounds(self):
         return {
-            'Counter_Trades': self.get_boolean('Inbounds', 'Counter Trades'),
+            'CounterTrades': self.get_boolean('Inbounds', 'Counter Trades'),
 
         }
 

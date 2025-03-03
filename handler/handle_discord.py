@@ -118,7 +118,7 @@ class DiscordHandler():
         """
 
         embed = DiscordEmbed(title=title, description=description, color=STATUS_COLORS[color])
-        embed.set_footer(text=footer+f'• {user_id}')
+        embed.set_footer(text=footer+f' • {user_id}')
         embed.set_timestamp()
 
         try:

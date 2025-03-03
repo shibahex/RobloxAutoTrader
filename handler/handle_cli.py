@@ -12,7 +12,7 @@ class Terminal:
 
     @staticmethod
     def print_menu(title, options):
-        print(f"\n---{magenta+title+reset}---")
+        print(f"---{magenta+title+reset}---")
         for index, option in enumerate(options, 1):
             print(f"[{colorama.Fore.MAGENTA}{index}{colorama.Style.RESET_ALL}] {option[1]}")
 

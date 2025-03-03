@@ -32,7 +32,6 @@ class RobloxAPI():
         self.account_configs = HandleConfigs()
 
         self.json = JsonHandler('cookies.json')
-
         # For rolimon Trade Ads
         self.last_outbound = None
         # TODO:
@@ -575,12 +574,10 @@ class RobloxAPI():
 
         account_total = 0
         for item in item_ids:
-            if str(item) in projected_data.keys():
-                account_algorithm_value += projected_data[str(item)]['value']
+            if str(item) not in projected_data:
+                account_algorithm_value += self.rolimon.item_data[str(item)]['rap']
             else:
-                account_algorithm_value += 0
-                #account_algorithm_value += self.rolimon.item_data[str(item)]['rap']
-
+                account_algorithm_value += projected_data[str(item)]['value']
             rap = self.rolimon.item_data[str(item)]['rap']
             value = self.rolimon.item_data[str(item)]['value']
             overall_value = self.rolimon.item_data[str(item)]['total_value']
@@ -653,16 +650,9 @@ class RobloxAPI():
                 url = f"https://trades.roblox.com/v1/trades/{trade_id}/decline"
 
                 print(f"Self RAP: {self_rap}, Trader RAP: {trader_rap} | Robux: {self_robux}")
-                print(f"Self Algo: {self_algorithm_value}, Their Algo: {trader_algorithm_value} | Robux: {self_robux}")
+                print(f"Self Algo: {self_algorithm_value}, Their Algo: {trader_algorithm_value}")
                 print(f"Values - Self: {self_value}, Trader: {trader_value}")
-                print(
-                    f"Settings:\n"
-                    f"  Outbound Cancel Offset: {self.config.trading['Outbound_Cancel_Offset']}\n"
-                    f"  Minimum RAP Gain: {self.config.trading['Minimum_RAP_Gain']}\n"
-                    f"  Maximum RAP Gain: {self.config.trading['Maximum_RAP_Gain']}\n"
-                    f"  Minimum Value Gain: {self.config.trading['Minimum_Value_Gain']}\n"
-                    f"  Maximum Value Gain: {self.config.trading['Maximum_Value_Gain']}"
-                )
+
                 cancel_request = self.request_handler.requestAPI(url, method="post")
                 time.sleep(1)
                 if cancel_request.status_code == 200 or cancel_request.status_code == 400:
@@ -725,6 +715,10 @@ class RobloxAPI():
         return None
 
     def is_projected_api(self, item_id, collectibleItemId=None):
+        """
+        Check rolimons projected API, scan the price chart and determain the value of an item and if its projected
+        then update all the data to the projected_checker.json
+        """
         # TODO: GET the dates and see how much the item sells so we dont trade dead items or we can
         # see how active an item is
         # TODO: Delete all the value: "1" from data points
@@ -856,7 +850,11 @@ class RobloxAPI():
                    # break
 
             volume_data_points = resale_data.json().get('volumeDataPoints', [])[:30]
-            return {f"{item_id}": {"is_projected": is_projected, "value": result_value, "volume": result_volume, "timestamp":result_timestamp, "last_price": self.rolimon.item_data[item_id]['best_price']}}
+            # If it has no sale data 
+
+            data = self.rolimon.projected_json.read_data()
+            data.update({f"{item_id}": {"is_projected": is_projected, "value": result_value, "volume": result_volume, "timestamp":result_timestamp, "last_price": self.rolimon.item_data[item_id]['best_price']}})
+            self.rolimon.projected_json.write_data(data)
 
 #           #if self.analyze_volume_data(volume_data_points) == False:
                 #is_projected = True
@@ -864,8 +862,6 @@ class RobloxAPI():
 
 
 
-        print("[FAILURE]errored at resale data", resale_data.status_code, resale_data.text, "for", item_id, url)
-        return None
 
 
     def get_active_traders(self, item_id, owners):
