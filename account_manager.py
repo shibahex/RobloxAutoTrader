@@ -14,7 +14,7 @@ class AccountManager:
         while True:
             self.cli.clear_console()
             options = (
-                ("1", "Add Account (Firefox)"),
+                ("1", "Add Account (Firefox Required)"),
                 ("2", "Add Account (Manual)"),
                 ("3", "Remove Accounts"),
                 ("4", "Toggle Accounts"),
@@ -96,10 +96,11 @@ class AccountManager:
     def add_account(self):
         auth_secret = self.cli.input_prompt("Enter the authorization key")
 
-        firefox = FirefoxLogin()
         if not AuthHandler().verify_auth_secret(auth_secret):
             self.cli.print_error(f"AUTH CODE INVALID, skipping")
             return None
+
+        firefox = FirefoxLogin()
 
         try:
             cookie, username, user_id = firefox.roblox_login(auth_secret)
