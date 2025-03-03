@@ -52,19 +52,25 @@ class JsonHandler:
                     os.system(f'attrib +h +s {self.filename}')
 
     def write_data(self, data: dict) -> None:
-        """Writes data to the JSON file."""
-        # unHide the file
+        """Safely Writes data to the JSON file."""
+        temp_file = self.filename + ".tmp"  # Temporary file for atomic writing
+
+        # Unhide the file if needed (Windows)
         if self.filename[0] == "." and os.name == 'nt':
-            os.system(f'attrib -h -s {self.filename}') 
+            os.system(f'attrib -h -s "{self.filename}"') 
+
         try:
             with self.lock:
-                with open(self.filename, 'w') as file:
+                with open(temp_file, 'w', encoding="utf-8") as file:
                     json.dump(data, file, indent=4)
-            #print(f"Data successfully written to {self.filename}")
+                    file.flush()
+                    os.fsync(file.fileno())  
+                    # Ensure data is written to disk
+                os.replace(temp_file, self.filename)  
         finally:
-            #ReHide
+            # Re-hide the file if needed (Windows)
             if self.filename[0] == "." and os.name == 'nt':
-                os.system(f'attrib +h +s {self.filename}')  
+                os.system(f'attrib +h +s "{self.filename}"')
 
     def add_ratelimit_timestamp(self, cookie) -> None:
         data = self.read_data()
