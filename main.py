@@ -201,6 +201,16 @@ class Doggo:
                 check_oubounds()
             time.sleep(5)
 
+    def check_whitelist_timer(self):
+        last_checked = time.time() - self.whitelist_checked
+        if last_checked >= 600:
+            self.whitelist_checked = time.time()
+            validate = self.validate_whitelist()
+            if validate != True:
+                self.stop_event.set()  # Signal all threads to stop
+                input("Whitelist check failed")
+                return False
+
     def start_trader(self):
         if not self.validate_whitelist():
             print("Whitelist not valid in starting")
@@ -216,22 +226,17 @@ class Doggo:
         rolimon_thread.start()
         time.sleep(1)
         while True:
-            last_checked = time.time() - self.whitelist_checked
-            if last_checked >= 600:
-                self.whitelist_checked = time.time()
-                validate = self.validate_whitelist()
-                if validate != True:
-                    self.stop_event.set()  # Signal all threads to stop
-                    input("Whitelist check failed")
-                    exit()
-                    return False
-                
+            if self.check_whitelist_timer() == False:
+                exit()
 
             threads = []
             if roblox_accounts == []:
                 input("No active accounts found!")
                 break
             for current_account in roblox_accounts:
+                if self.check_whitelist_timer() == False:
+                    exit()
+
                 if time.time() - current_account.last_generated_csrf_timer >= 900:
                     print("Refreshing csrf token")
                     current_account.request_handler.generate_csrf()
@@ -290,7 +295,7 @@ class Doggo:
                 # Wait for all threads to finish before moving to next iteration
                 print("Stopping threads...")
                 self.stop_event.set()  # Signal all threads to stop
-            time.sleep(60)
+            time.sleep(5)
 
 
             # min overall 300
@@ -314,8 +319,8 @@ class Doggo:
                 if account.config.inbounds['CounterTrades'] == True:
                     try:
                         account.counter_trades()
+                        last_checked = time.time() - self.counter_timer
                         if last_checked >= 1800:
-                            last_checked = time.time() - self.counter_timer
                             print("countering")
                             self.counter_timer = time.time()
                             account.counter_trades()
@@ -447,7 +452,7 @@ class Doggo:
 if __name__ == "__main__":
     try:
         doggo = Doggo()
-        if not Doggo().validate_whitelist():
+        if not doggo.validate_whitelist():
             print("Whitelist not valid")
             time.sleep(1)
             Doggo().whitelist_manager.main()
