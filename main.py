@@ -234,8 +234,7 @@ class Doggo:
                 input("No active accounts found!")
                 break
             for current_account in roblox_accounts:
-                if self.check_whitelist_timer() == False:
-                    exit()
+
 
                 if time.time() - current_account.last_generated_csrf_timer >= 900:
                     print("Refreshing csrf token")
@@ -304,6 +303,8 @@ class Doggo:
             try:
                 account_inventory = account.account_inventory
 
+                if self.check_whitelist_timer() == False:
+                    exit()
                 # Check if user queue is empty
                 while not self.user_queue:
                     time.sleep(10)
