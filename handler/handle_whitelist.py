@@ -37,8 +37,6 @@ class Whitelist():
         self.server_pub_key = None
         self.client_pub = None
         self.client_priv = None
-
-        self.refresh_keys()
         
     def get_machine_uuid(self):
         return uuid.UUID(int=uuid.getnode())
@@ -50,6 +48,7 @@ class Whitelist():
             self.req.cookies['client_public_key'] = self.client_pub 
         except Exception as e:
             raise ValueError(f"Couldnt get whitelist keys: {e}")
+
     def client_generate_key_pair(self):
         """
         Generates and returns an RSA key pair (public key and private key).
@@ -117,14 +116,9 @@ class Whitelist():
         Decrypts the encryptedData from a response and returns it decoded
         """
         # Decode the private key from Base64
-        try:
-            encrypted_message_b64 = response.json()['encryptedData']
-        except Exception as e:
-            print("Couldn't get data", e, response.text, response.status_code, response.url)
-            response.text
-            return False
+        encrypted_message_b64 = response.json()['encryptedData']
 
-        print(encrypted_message_b64)
+
         private_key_bytes = base64.b64decode(self.client_priv)
         private_key = RSA.import_key(private_key_bytes)
 
@@ -194,6 +188,8 @@ class Whitelist():
         '''
 
         try:
+            # NOTE: REFRESH KEYS AFTER POSTING THE API
+            self.refresh_keys()
             hwid = self.get_machine_uuid()
             send_data = f'{{"username": "{username}", "password": "{password}", "orderid": "{orderid}", "hwid": "{hwid}", "version": "{VERSION}"}}'.encode('utf-8')
 
@@ -243,27 +239,27 @@ class Whitelist():
                         else: 
                             print("User not Registered")
                             return False
-                pass
-            else:
-                print("Didn't get status code 200 for register API, orderid maybe already redeemed (or username taken)")
-                print(response.text)
+                else:
+                    if 'encryptedData' in response.text:
+                        print(f"Got error from whitelist: {self.decrypt_with_private_key(response)} URL: {response.url} Status Code: {response.status_code}")
+                    else:
+                        print(f"Got error from whitelist {response.text}, URL: {response.url} Status Code: {response.status_code}")
+                        print(response.text)
             return False
 
         except Exception as e:
             tb = traceback.format_exc()  # Capture the full traceback
             print(e, tb)
             return False
-        finally:
-            try:
-                # NOTE: REFRESH KEYS AFTER POSTING THE API
-                self.refresh_keys()
-            except Exception as e:
-                raise ValueError(f"Couldnt get whitelist keys: {e}")
+
 
     def send_whitelist_post(self, username:str, password:str, orderid:str, url:str):
         """
         Encrypts use data and sends the whitelist API and then returns the response
         """
+        # NOTE: REFRESH KEYS AFTER POSTING THE API
+        self.refresh_keys()
+            
         hwid = self.get_machine_uuid()
         message = f'{{"username": "{username}", "password": "{password}", "orderid": "{orderid}", "hwid": "{hwid}", "version": "{VERSION}"}}'.encode('utf-8')
 
@@ -272,41 +268,43 @@ class Whitelist():
 
         try:
             response = self.req.post(url, json={'encryptedData': encrypted_message_base64, 'sig': signature_base64})
+            if response.status_code != 200:
+                if 'encryptedData' in response.text:
+                    print(f"Got error from whitelist: {self.decrypt_with_private_key(response)} URL: {response.url} Status Code: {response.status_code}")
+                    return False
+                else:
+                    print(f"Got error from whitelist {response.text}, URL: {response.url} Status Code: {response.status_code}")
         except Exception as e:
-            print(e, "ERROR post whitelist")
+            print(e, "ERROR post whitelist", url)
             return False
 
         return response, message
 
     def reset_ip(self, username, password, orderid) -> bool:
         response, message_sent = self.send_whitelist_post(username, password, orderid, "https://www.doggotradebot.xyz/reset-ip")
+
+        if not response:
+            print("Couldn't fetch whitelist API")
+            return False
+
         if response.status_code == 200:
             print("Successfully resetIP")
             return True
-        else:
-            print("Got whitelist error resetting ip", response.text)
-            return False
 
     def is_valid(self, username, password, orderid) -> bool:
         """
         returns a bool wether or not the username and password got an ok from the server and then generates new keys
         """
         try:
-            for i in range(0,3):
-                response, message_sent = self.send_whitelist_post(username, password, orderid, "https://www.doggotradebot.xyz/login")
-                if response.status_code != 500:
-                    break
-                self.refresh_keys()
-                time.sleep(10)
-                print("Whitelist failed API retrying in 10 seconds", i)
+            response, message_sent = self.send_whitelist_post(username, password, orderid, "https://www.doggotradebot.xyz/login")
 
             if response == False:
                 print("Coudlnt contact whitelist API")
                 return False
 
-            decrtyped_response = self.decrypt_with_private_key(response)
 
             if response.status_code == 200:
+                decrtyped_response = self.decrypt_with_private_key(response)
                 response_json = response.json()
                 signature_base64 = response_json.get('sig')
                 trusted_sig = response_json.get('trust')
@@ -354,21 +352,10 @@ class Whitelist():
                     if decrypted_json['success'] == "ok":
                         return True
 
-            else:
-                print(f"Failed to authenticate. Status Code {response.status_code}")
-                return False
         except Exception as e:
             tb = traceback.format_exc()  # Capture the full traceback
 
             print(e, tb)
             return False
-
-        finally:
-            try:
-                # NOTE: REFRESH KEYS AFTER POSTING THE API
-                self.refresh_keys()
-            except Exception as e:
-                raise ValueError(f"Couldnt get whitelist keys: {e}")
-
 
 
