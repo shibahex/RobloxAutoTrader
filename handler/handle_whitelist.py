@@ -261,6 +261,9 @@ class Whitelist():
                     else:
                         print(f"Got error from whitelist {response.text}, URL: {response.url} Status Code: {response.status_code}")
                         print(response.text)
+
+                    # let people read
+                    time.sleep(3)
             return False
 
         except Exception as e:
@@ -286,12 +289,14 @@ class Whitelist():
             if response.status_code != 200:
                 if 'encryptedData' in response.text:
                     print(f"Got error from whitelist: {self.decrypt_with_private_key(response)} URL: {response.url} Status Code: {response.status_code}")
-                    return False
+                    return False, False
                 else:
                     print(f"Got error from whitelist {response.text}, URL: {response.url} Status Code: {response.status_code}")
+                # let people read
+                time.sleep(3)
         except Exception as e:
             print(e, "ERROR post whitelist", url)
-            return False
+            return False, False
 
         return response, message
 
