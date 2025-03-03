@@ -33,19 +33,26 @@ class Whitelist():
     def __init__(self):
         self.req = requests.Session()
 
+        self.RSAGenerator = RSA
         self.req.trust_env = False
         self.server_pub_key = None
         self.client_pub = None
         self.client_priv = None
-        
+        self.last_generated_keys: time
+
     def get_machine_uuid(self):
         return uuid.UUID(int=uuid.getnode())
 
     def refresh_keys(self):
         try:
+            self.last_generated_keys = time.time()
+            print("Trying to get keys,")
             self.server_pub_key = self.fetch_server_pub_key()
+            print("got server pub key", time.time() - self.last_generated_keys)
             self.client_pub, self.client_priv = self.client_generate_key_pair()
+            print("got server clients keys", time.time() - self.last_generated_keys)
             self.req.cookies['client_public_key'] = self.client_pub 
+            print("done", time.time() - self.last_generated_keys)
         except Exception as e:
             raise ValueError(f"Couldnt get whitelist keys: {e}")
 
@@ -54,13 +61,29 @@ class Whitelist():
         Generates and returns an RSA key pair (public key and private key).
         Encodes the public key in Base64 for safe transport.
         """
-        key_pair = RSA.generate(2048)
-        public_key = key_pair.publickey().export_key()  # Public key as bytes
-        private_key = key_pair.export_key()            # Private key as bytes
+                # Generate RSA key pair
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+        )
 
-        # Encode public key in Base64 (safe for cookies/HTTP headers)
-        public_key_b64 = base64.b64encode(public_key).decode()
-        private_key_b64 = base64.b64encode(private_key).decode()
+        # Get private key in PEM format
+        private_key_pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption()
+        )
+
+        # Get public key in PEM format
+        public_key = private_key.public_key()
+        public_key_pem = public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+
+        # Base64 encode both keys
+        public_key_b64 = base64.b64encode(public_key_pem).decode()
+        private_key_b64 = base64.b64encode(private_key_pem).decode()
 
         return public_key_b64, private_key_b64
 
@@ -158,7 +181,6 @@ class Whitelist():
         """
         # TODO: VERIFY VERSION
         publicKeyAPI = "http://www.doggotradebot.xyz/public-key"
-
         response = self.req.get(publicKeyAPI)
 
         if 'server_public_key' not in self.req.cookies.keys():
@@ -198,6 +220,7 @@ class Whitelist():
 
             response = self.req.post("https://www.doggotradebot.xyz/register", json={'encryptedData': encrypted_data, 'sig': signature_base64}, verify=True)
 
+            print(time.time() - self.last_generated_keys, "lifetime on generated keys")
             if response.status_code == 200:
         
                 if response.json().get('sig') and response.json().get('trust'):
@@ -259,15 +282,18 @@ class Whitelist():
         """
         # NOTE: REFRESH KEYS AFTER POSTING THE API
         self.refresh_keys()
-            
+        print(time.time() - self.last_generated_keys, "getting uuid machine")
         hwid = self.get_machine_uuid()
         message = f'{{"username": "{username}", "password": "{password}", "orderid": "{orderid}", "hwid": "{hwid}", "version": "{VERSION}"}}'.encode('utf-8')
 
+        print(time.time() - self.last_generated_keys, "encrypting message")
         signature_base64 = self.sign_with_private_key(self.client_priv, message)
         encrypted_message_base64 = self.encrypt_with_public_key(message)
 
+        print(time.time() - self.last_generated_keys, "done encrypting message")
         try:
             response = self.req.post(url, json={'encryptedData': encrypted_message_base64, 'sig': signature_base64})
+            print(time.time() - self.last_generated_keys, "lifetime on generated keys")
             if response.status_code != 200:
                 if 'encryptedData' in response.text:
                     print(f"Got error from whitelist: {self.decrypt_with_private_key(response)} URL: {response.url} Status Code: {response.status_code}")
