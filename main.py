@@ -214,7 +214,8 @@ class Doggo:
     def start_trader(self):
         if not self.validate_whitelist():
             print("Whitelist not valid in starting")
-            exit()
+            sys.exit()
+            quit()
             return False
         roblox_accounts = self.load_roblox_accounts()
         outbound_thread = threading.Thread(target=self.check_outbound_thread, args=(roblox_accounts,))
@@ -227,7 +228,9 @@ class Doggo:
         time.sleep(1)
         while True:
             if self.check_whitelist_timer() == False:
-                exit()
+                sys.exit()
+                quit()
+                return False
 
             threads = []
             if roblox_accounts == []:
@@ -304,7 +307,8 @@ class Doggo:
                 account_inventory = account.account_inventory
 
                 if self.check_whitelist_timer() == False:
-                    exit()
+                    sys.exit()
+                    quit()
                 # Check if user queue is empty
                 while not self.user_queue:
                     time.sleep(10)
@@ -465,7 +469,8 @@ if __name__ == "__main__":
         with open("log.txt", "a") as log_file:
             log_file.write(f"Error in process trades: {e}, {tb}\n")
     finally:
-        exit()
+        sys.exit()
+        quit()
 
 
 
