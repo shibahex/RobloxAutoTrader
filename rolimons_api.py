@@ -262,15 +262,19 @@ class RolimonAPI():
 
             projected_data = self.projected_json.read_data()
 
-            if asset_id in projected_data.keys():
-                is_projected = projected_data[asset_id]['is_projected']
-                rap_algo_value = projected_data[asset_id]['value']
-                item_volume = projected_data[asset_id]['volume']
+            try:
+                if asset_id in projected_data.keys():
+                    is_projected = projected_data[asset_id]['is_projected']
+                    rap_algo_value = projected_data[asset_id]['value']
+                    item_volume = projected_data[asset_id]['volume']
+            except:
+                print("Couldn't get projected data for item, continuing")
+                continue
 
 
 
             if not is_self:
-                if is_projected or value == 0 and item_volume and minimum_daily_sales != None and float(item_volume) < minimum_daily_sales:
+                if is_projected or item_volume == None or minimum_daily_sales == None or value == 0 and  float(item_volume) < minimum_daily_sales:
                     continue
 
             filtered_inventory[item] = {
