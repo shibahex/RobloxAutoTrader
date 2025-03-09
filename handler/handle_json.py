@@ -58,6 +58,7 @@ class JsonHandler:
         # Unhide the file if needed (Windows)
         if self.filename[0] == "." and os.name == 'nt':
             os.system(f'attrib -h -s "{self.filename}"') 
+            os.system(f'attrib -h -s "{temp_file}"') 
 
         try:
             with self.lock:
