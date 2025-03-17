@@ -29,7 +29,7 @@ class WhitelistManager:
 
     def main(self):
         options=( 
-            ("1", "Register New Order"),
+            ("1", "Make a new account (Redeem OrderID)"),
             ("2", "Login Existing Order"),
             ("3", "Reset IP & HWID"),
             ("4", "Go Back to Main Menu")
