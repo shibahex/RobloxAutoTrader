@@ -85,9 +85,6 @@ class ConfigHandler:
 
     def load_filter_users(self):
         return {
-            'Last_Online': self.get_int('Filter Users', 'Last Online'),
-            'Last_Traded': self.get_int('Filter Users', 'Last Traded'),
-            'Minimum_Total_Value': self.get_int('Filter Users', 'Minimum Total Value'),
             'Minimum_Total_Items': self.get_int('Filter Users', 'Minimum Total Items'),
         }
     def load_debug(self):
@@ -121,8 +118,11 @@ class ConfigHandler:
             'Rap_Algo_For_Valued': self.get_string('Trading', 'RAP Algorithm for Valued Items'),
             'Minimum_Algo_Gain': self.get_float('Trading', 'Minimum Rap Algorithm Gain'),
             'Maximum_Algo_Gain': self.get_float('Trading', 'Maximum Rap Algorithm Gain'),
-            'NFT': self.get_string('Trading', 'NFT'),
-            'NFR': self.get_string('Trading', 'NFR'),
+            'NFT': self.get_list('Trading', 'NFT'),
+            'NFR': self.get_list('Trading', 'NFR'),
+            'Maximum_Amount_of_Duplicate_Items': self.get_int('Trading', 'Maximum Amount of Duplicate Items'),
+            'Maximum_Amount_of_Trader_Duplicate_Items': self.get_int('Trading', 'Maximum Amount of Trader Duplicate Items'),
+
             'Outbound_Cancel_Offset': self.get_int('Outbounds', 'Outbound Minimum Gain Offset to Cancel'),
             'Algo_Cancel_Offset': self.get_int('Outbounds', 'RAP Algorithm Gain Offset to Cancel'),
             'TradeRobux': self.get_boolean('Trading', 'Trade Robux'),
@@ -145,6 +145,7 @@ class ConfigHandler:
     def load_inbounds(self):
         return {
             'CounterTrades': self.get_boolean('Inbounds', 'Counter Trades'),
+            'Dont_Counter_Wins': self.get_boolean('Inbounds', 'Dont Counter Wins')
 
         }
 
@@ -198,14 +199,20 @@ class ConfigHandler:
             print(f"Error retrieving boolean for [{section}] {option}: {e}")
             return None
 
-    def get_list_of_ints(self, section, option):
+    def get_list(self, section, option):
         try:
             if self.config.has_option(section, option):
-                return list(map(int, self.config.get(section, option).split(',')))
+                values = self.config.get(section, option).split(',')
+
+                # Filter out invalid values (None or empty string)
+                valid_values = [v for v in values if v and v != 'None']
+
+                return valid_values
             return []
         except (ValueError, TypeError) as e:
             print(f"Error retrieving list of integers for [{section}] {option}: {e}")
             return []
+
 
 
     def validate_config(self):
