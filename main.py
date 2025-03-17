@@ -59,7 +59,6 @@ class Doggo:
 
         # Time Stamps for Routines
         self.whitelist_checked = time.time()
-        self.counter_timer = time.time()
         self.last_updated_rolimons = time.time()
         self.last_checked_trades = time.time()
 
@@ -238,6 +237,17 @@ class Doggo:
                 break
             for current_account in roblox_accounts:
 
+                if current_account.config.inbounds['CounterTrades'] == True:
+                    try:
+                        current_account.counter_trades()
+                        last_checked = time.time() - current_account.counter_timer
+                        if last_checked >= 1800:
+                            print("countering")
+                            current_account.counter_timer = time.time()
+                            current_account.counter_trades()
+                    except Exception as e:
+                        print("starting countering error:",e )
+                        pass
 
                 if time.time() - current_account.last_generated_csrf_timer >= 900:
                     print("Refreshing csrf token")
@@ -321,18 +331,6 @@ class Doggo:
                     print('[Debug] process account inventory on hold breaking')
                     break
 
-                if account.config.inbounds['CounterTrades'] == True:
-                    try:
-                        account.counter_trades()
-                        last_checked = time.time() - self.counter_timer
-                        if last_checked >= 1800:
-                            print("countering")
-                            self.counter_timer = time.time()
-                            account.counter_trades()
-                    except Exception as e:
-                        print("starting countering error:",e )
-                        pass
-
                 for trader in list(self.user_queue.keys()):  # Using list() creates a copy of the keys
                     if time.time() - account.last_sent_trade > account.config.trading['Max_Seconds_Spent_on_One_User']:
                         print("Couldnt find any trades for", account.username,  account.config.trading['Max_Seconds_Spent_on_One_User'], "Seconds")
@@ -347,7 +345,6 @@ class Doggo:
                     # Delete the key from the dictionary
                     self.user_queue.pop(trader, None)  # Safely remove the key using pop
                     
-                    print("popped trader")
                     # Generate and send trade if there are items to trade
                     if account_inventory and trader_inventory:
                         print("generating trade for", account.username)
