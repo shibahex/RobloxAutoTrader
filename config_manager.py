@@ -18,7 +18,7 @@ class AccountSettings():
                 ("2", "Add Account Configs"),
                 ("3", "Edit Account Configs"),
                 ("4", "Remove Account Configs"),
-                ("5", "Check for missing settings (new settings in configs.cfg)"),
+                ("5", "Check for missing settings for user configs"),
                 ("6", "Back to Main Menu"),
             )
             self.cli.print_menu("Config Manager", options)
