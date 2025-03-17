@@ -263,7 +263,7 @@ class Whitelist():
                         print(response.text)
 
                     # let people read
-                    time.sleep(3)
+                    time.sleep(6)
             return False
 
         except Exception as e:
@@ -286,14 +286,19 @@ class Whitelist():
 
         try:
             response = self.req.post(url, json={'encryptedData': encrypted_message_base64, 'sig': signature_base64})
+            
             if response.status_code != 200:
                 if 'encryptedData' in response.text:
-                    print(f"Got error from whitelist: {self.decrypt_with_private_key(response)} URL: {response.url} Status Code: {response.status_code}")
+                    decrypted = self.decrypt_with_private_key(response)
+                    print(f"Got error from whitelist: {decrypted} URL: {response.url} Status Code: {response.status_code}")
+                    if "expired" in  decrypted:
+                        print("Retrying")
+                        self.send_whitelist_post(username, password, orderid, url)
                     return False, False
                 else:
                     print(f"Got error from whitelist {response.text}, URL: {response.url} Status Code: {response.status_code}")
                 # let people read
-                time.sleep(3)
+                time.sleep(6)
         except Exception as e:
             print(e, "ERROR post whitelist", url)
             return False, False
@@ -304,7 +309,6 @@ class Whitelist():
         response, message_sent = self.send_whitelist_post(username, password, orderid, "https://www.doggotradebot.xyz/reset-ip")
 
         if not response:
-            print("Couldn't fetch whitelist API")
             return False
 
         if response.status_code == 200:
