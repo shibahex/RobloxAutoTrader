@@ -88,7 +88,6 @@ class DiscordHandler():
 
         their_item_ids = generated_trade['their_side_item_ids']
         self_item_ids = generated_trade['self_side_item_ids']
-        print(their_item_ids, self_item_ids, "discord debug")
 
         send_string = str_from_item_ids(self_item_ids)
 
