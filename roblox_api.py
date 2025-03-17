@@ -28,6 +28,7 @@ class RobloxAPI():
     def __init__(self, cookie:dict=None, auth_secret=None, Proxies=False):
         self.all_cached_traders = set()
         self.auth_secret = auth_secret
+        self.counter_timer = time.time()
 
         self.account_configs = HandleConfigs()
 
@@ -53,8 +54,8 @@ class RobloxAPI():
             self.authenticator = pyotp.TOTP(self.auth_secret)
             self.request_handler = RequestsHandler(cookie=self.cookies, use_proxies=False, Session=requests.Session())
             self.auth_handler = AuthHandler()
-
             self.account_id, self.username = self.fetch_userid_and_name()
+
             user_config = self.account_configs.get_config(str(self.account_id))
             if user_config:
                 self.config.trading = user_config
@@ -64,6 +65,7 @@ class RobloxAPI():
             self.outbound_trader = TradeMaker(config=self.config, is_outbound_checker=True)
 
             # print("getting self")
+            self.self_duplicates = {}
             self.refresh_self_inventory()
             # print("done getting self")
 
@@ -101,6 +103,7 @@ class RobloxAPI():
         """
             Gets inventory of current .ROBLOSECURITY used on class
         """
+        self.self_duplicates = {}
         self.account_inventory = self.fetch_inventory(self.account_id)
         #self.account_inventory = self.fetch_inventory(121642019)
         #NOTE: False = no tradeable inventory
@@ -124,13 +127,26 @@ class RobloxAPI():
             raise ValueError(f"Couldnt login with cookie {self.cookies}")
 
     def fetch_inventory(self, userid):
+
+        def add_to_duplicates(duplicates: dict):
+            if itemId not in duplicates:
+                duplicates[itemId] = 0
+            else:
+                duplicates[itemId] += 1
+            return duplicates
+
         # NOTE: switch to v2 when they add ishold to API
+
         cursor = ""
         inventory = {}
+        
+        trader_duplicates = {}
+        # for ['Trade_for_Duplicate_Items']
+        trader_ids = []
+
         is_self = False
         while cursor != None:
             # https://inventory.roblox.com/v2/users/6410566/inventory/8?cursor=&limit=100&sortOrder=Desc
-
             inventory_API = f"https://inventory.roblox.com/v1/users/{userid}/assets/collectibles?cursor={cursor}&limit=100"
 
             response = self.request_handler.requestAPI(inventory_API)
@@ -159,9 +175,13 @@ class RobloxAPI():
                 if str(userid) == str(self.account_id):
                     is_self = True
                     nft_list = self.config.trading['NFT']
+
+                    self.self_duplicates = add_to_duplicates(self.self_duplicates)
                     if nft_list and itemId in nft_list:
                         continue
+
                     inventory[uaid] = {"item_id": itemId}
+
                 else:
                     try:
                         current_demand = self.rolimon.item_data[itemId]['demand']
@@ -172,6 +192,18 @@ class RobloxAPI():
                         #print(current_demand, itemId, "skipped")
                         continue
 
+                    trader_duplicates = add_to_duplicates(trader_duplicates)
+
+                    
+                    # NOTE: Dont trade for items you already have
+                    if itemId in self.self_duplicates and self.self_duplicates[itemId] > self.config.trading['Maximum_Amount_of_Duplicate_Items']:
+                        continue
+
+                    #NOTE: Dont allow trade to have multiple duplicates of items (OWNED OR NOT)
+                    if itemId in trader_duplicates and trader_duplicates[itemId] > self.config.trading['Maximum_Amount_of_Trader_Duplicate_Items']:
+                        continue
+
+                    # NOTE: Dont trade for items in NFR and dont let the end trade have duplicate items
                     nfr_list = self.config.trading['NFR']
                     if itemId not in nfr_list:
                         inventory[uaid] = {"item_id": itemId}
@@ -291,8 +323,19 @@ class RobloxAPI():
             trade_id = trade_info['trade_id']
             trader_inventory = self.fetch_inventory(trader_id)
         
+
             if not self.check_can_trade(trader_id):
                 continue
+
+            if self.config.inbounds['Dont_Counter_Wins'] == True:
+                # If its a win then continue and dont counter
+                trade_info = self.request_handler.requestAPI(f"https://trades.roblox.com/v1/trades/{trade_id}")
+                if trade_info.status_code == 200:
+                    trade_json = trade_info.json()
+                    formatted_trade = self.format_trade_api(trade_json)
+                    if formatted_trade['self_overall_value'] - formatted_trade['their_overall_value'] < 0:
+                        continue
+
             if not self.account_inventory:
                 print(f"[DEBUG] In counter, {self.username} has no tradeable inv refreshing inventory")
                 self.refresh_self_inventory()
@@ -395,10 +438,8 @@ class RobloxAPI():
 
                 if error_code == 12:
                     # Check if its our inventory erroring
-                    if self.handle_invalid_ids(error_data=trade_response.json()):
-                        continue
-                    else:
-                        break
+                    self.check_completeds()
+                    break
                 elif error_code == 17:
                     self.get_robux()
                     continue
@@ -410,6 +451,13 @@ class RobloxAPI():
                 #print(trade_response.text)
                 break
 
+    # NOTE: this func isnt doing what its suppose to, test it
+    # EXAMPLE RESPONSE PAYLOAD
+    """
+    Requests payload error, returning Already in cached traders, scraping active traders{"errors":[{"code":12,"message":"One or more userAssets
+    are invalid. See fieldData for details.","userFacingMessage":"Something went wrong","field":"userAssetIds","fieldData":[{"userAssetId":334790336,"reason":"NotOwned"}]}]}
+     {'offers': [{'userId': 1335379174, 'userAssetIds': ('13124557550',), 'robux': None}, {'userId': 1283171278, 'userAssetIds': ('334790336', '378058412', '3790416539', '166680335625'), 'robux': 186}]}
+    """
     def handle_invalid_ids(self, error_data):
         missing_asset_ids = [entry["userAssetId"] for entry in error_data["errors"][0]["fieldData"]]
 
@@ -442,6 +490,7 @@ class RobloxAPI():
 
         check_urls = ["https://trades.roblox.com/v1/trades/inactive?limit=100&sortOrder=Desc", "https://trades.roblox.com/v1/trades/outbound?limit=100&sortOrder=Desc", "https://trades.roblox.com/v1/trades/inbound?cursor=&limit=100&sortOrder=Desc"]
 
+        self.all_cached_traders = set()
         for url in check_urls:
             trades = self.get_trades(url, limit_pages=6)
 
@@ -457,7 +506,7 @@ class RobloxAPI():
                 time_difference = current_time - timestamp_format
                 
 
-                if time_difference < timedelta(days=max_days_since):
+                if time_difference < timedelta(days=max_days_since) and trader_id not in self.all_cached_traders:
                     self.all_cached_traders.add(trader_id)
 
 
@@ -607,8 +656,6 @@ class RobloxAPI():
             return asset_ids
             
 
-
-
         # Loop through outbounds
         for trade_id, trade_info in trades.items():
             trader_id = trade_info['user_id']
@@ -617,8 +664,8 @@ class RobloxAPI():
 
             trade_id = trade_info['trade_id']
             
-            #print("scanning outbound")
             trade_info_req = self.request_handler.requestAPI(f"https://trades.roblox.com/v1/trades/{trade_id}")
+            # Handle error
             if trade_info_req.status_code != 200:
                 print("trade info api", trade_info_req.status_code, trade_info_req.text, "response headerS:", trade_info_req.headers, "try to go on", trade_info_req.url, "with the session cookie and headers:", self.request_handler.Session.cookies, self.request_handler.Session.headers, "account:", self.username)
                 #self.request_handler.generate_csrf()
@@ -628,22 +675,19 @@ class RobloxAPI():
                 continue
 
             data = trade_info_req.json() 
+            formatted_trade = self.format_trade_api(data)
 
-            self_offer = data['offers'][0]
-            self_robux = self_offer['robux']
-            self_items = return_items(self_offer['userAssets'])
-
-            trader_offer = data['offers'][1]
-            trader_items = return_items(trader_offer['userAssets'])
-
-            try:
-                self_rap, self_value, self_algorithm_value, self_overall = self.calculate_gains(self_items)
-                trader_rap, trader_value, trader_algorithm_value, trader_overall = self.calculate_gains(trader_items)
-            except Exception as e:
-                print("Couldnt calculate gains", e)
-                return None
-
-            valid_trade, reason = self.outbound_trader.validate_trade(self_rap, self_algorithm_value, self_value, trader_rap, trader_algorithm_value, trader_value, self_overall, trader_overall, robux=self_robux)
+            valid_trade, reason = self.outbound_trader.validate_trade(
+                self_rap=formatted_trade['self_rap'], 
+                self_rap_algo=formatted_trade['self_rap_algo'], 
+                self_value=formatted_trade['self_value'],
+                self_overall_value=formatted_trade['self_overall_value'],
+                their_rap=formatted_trade['their_rap'],
+                their_rap_algo=formatted_trade['their_rap_algo'],
+                their_value=formatted_trade['their_value'],
+                their_overall_value=formatted_trade['their_overall_value'],
+                robux=formatted_trade['self_robux']
+            )
 
             if not valid_trade:
                 print("Canceling Outbound trade for reason:", reason)
@@ -911,7 +955,7 @@ class RobloxAPI():
 
                 # If the owner has had the item for less than 7 days and is not already in the owners or all_cached_traders list, add them
                 if time_diff < timedelta(days=7) and asset['owner']['id'] not in owners and int(asset['owner']['id']) not in self.all_cached_traders:
-                    print("Scraping active traders.")
+                    print("Appending Active User")
                     owners.append(asset['owner']['id'])
         print("owners", owners)
         return owners
