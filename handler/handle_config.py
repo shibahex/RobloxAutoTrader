@@ -10,12 +10,15 @@ class ConfigHandler:
         self.filter_users = self.load_filter_users()
         #self.prediction_algorithm = self.load_prediction_algorithm()
         self.trading = self.load_trading()
+        self.filter_items = self.load_filter_items()
+        self.filter_generated = self.load_filter_generated()
         self.projected_detection = self.load_projected_detection()
         self.inbounds = self.load_inbounds()
         self.debug = self.load_debug()
         #self.mass_sender = self.load_mass_sender()
         # Check if config is filled out 
         self.validate_config()
+
     def convert_gain(self, gain):
         """
         Convert gain to a float or int.
@@ -23,6 +26,10 @@ class ConfigHandler:
         """
         try:
             gain = float(gain) if '.' in str(gain) else int(gain)
+
+            if gain == 0.0:
+                return gain, False
+
             return gain, abs(gain) < 1  # True if between -1 and 1 (percentage)
         except ValueError:
             raise ValueError(f"Invalid gain value: {gain}")
@@ -42,50 +49,50 @@ class ConfigHandler:
         """
         Check if gain is within the specified range.
         """
-        
         gain = their_value - self_value
-        min_gain, is_min_percentage = self.convert_gain(min_gain) if min_gain  else (None, False)
-        max_gain, is_max_percentage = self.convert_gain(max_gain) if max_gain else (None, False)
 
-        # Only calculate gain as a percentage if min or max is marked as percentage
-        gain = self.calculate_gain(gain, their_value, is_min_percentage or is_max_percentage)
+        min_gain, is_min_percentage = self.convert_gain(min_gain) if min_gain != None else (None, False)
+        max_gain, is_max_percentage = self.convert_gain(max_gain) if max_gain != None else (None, False)
+
 
         if min_gain is not None:
             min_gain = min_gain * 100 if is_min_percentage else min_gain
+
         if max_gain is not None:
             max_gain = max_gain * 100 if is_max_percentage else max_gain
 
         if max_gain is not None:
             max_gain += max_offset
-        # Debug output after calculations
-        #print(f"Calculated Gain: {gain}, Min Gain: {min_gain}, Max Gain: {max_gain}")
+
+        min_profit = self.calculate_gain(gain, self_value, is_min_percentage)
+        max_profit = self.calculate_gain(gain, self_value, is_max_percentage)
 
         if min_gain is not None and max_gain is not None:
-            return min_gain <= gain <= max_gain
+            return min_gain <= min_profit and max_gain >= max_profit
         elif max_gain is None and min_gain is None:
             return True
         elif min_gain is not None:
-            return gain >= min_gain
+            return min_profit >= min_gain
         elif max_gain is not None:
-            return gain <= max_gain
+            return max_profit <= max_gain
         return True
 
 
     def load_scan_items(self):
         return {
-            'Minimum_Value_of_Item': self.get_int('Scan Items', 'Minimum Value of Item'),
-            'Minimum_Rap_of_Item': self.get_int('Scan Items', 'Minimum Rap of Item'),
-            'Minimum_Owners_of_Item': self.get_int('Scan Items', 'Minimum Owners of Item'),
-            'Minimum_Demand_of_Item': self.get_int('Scan Items', 'Minimum Demand of Item'),
-            'Minimum_Trend_of_Item': self.get_int('Scan Items', 'Minimum Trend of Item'),
-            'Scan_Rares': self.get_boolean('Scan Items', 'Scan Rares'),
-            'Scan_Type': self.get_string('Scan Items', 'Scan Type'),
-            'Scrape_Rolimon_Ads': self.get_boolean('Scan Items', 'Scrape Rolimon Ads')
+            'Minimum_Value_of_Item': self.get_int('Getting Owners of Items', 'Minimum Value of Item'),
+            'Minimum_Rap_of_Item': self.get_int('Getting Owners of Items', 'Minimum Rap of Item'),
+            'Minimum_Owners_of_Item': self.get_int('Getting Owners of Items', 'Minimum Owners of Item'),
+            'Minimum_Demand_of_Item': self.get_int('Getting Owners of Items', 'Minimum Demand of Item'),
+            'Minimum_Trend_of_Item': self.get_int('Getting Owners of Items', 'Minimum Trend of Item'),
+            'Scan_Rares': self.get_boolean('Getting Owners of Items', 'Scan Rares'),
+            'Scan_Type': self.get_string('Getting Owners of Items', 'Scan Type'),
+            'Scrape_Rolimon_Ads': self.get_boolean('Getting Owners of Items', 'Scrape Rolimon Ads')
         }
 
     def load_filter_users(self):
         return {
-            'Minimum_Total_Items': self.get_int('Filter Users', 'Minimum Total Items'),
+            'Minimum_Total_Items': self.get_int('Filtering Users', 'Minimum Total Items'),
         }
     def load_debug(self):
         return {
@@ -104,48 +111,54 @@ class ConfigHandler:
     #        'Maximum_Value_to_predict': self.get_int('Prediction Algorithm', 'Maximum Value to predict')
     #    }
 
+    def load_filter_items(self):
+        return {
+            'NFT': self.get_list('Filtering Items', 'NFT'),
+            'NFR': self.get_list('Filtering Items', 'NFR'),
+            'Maximum_Amount_of_Duplicate_Items': self.get_int('Filtering Items', 'Maximum Amount of Duplicate Items'),
+            'Maximum_Amount_of_Trader_Duplicate_Items': self.get_int('Filtering Items', 'Maximum Amount of Trader Duplicate Items'),
+            'MinDemand': self.get_int('Filtering Items', 'Minimum Valued Item Demand'),
+            'MinDailySales': self.get_float('Filtering Items', 'Minimum Daily Sales of Item'),
+            'MaxSalesGap': self.get_float('Filtering Items', 'Maximum Average Gaps in Sales'),
+        }
+    def load_filter_generated(self):
+        return {
+            'Max_Seconds_Spent_on_One_User': self.get_float('Filtering Generated Trades', 'Max Seconds Spent on One User'),
+            'Max_Seconds_Spent_on_Generating_Trades': self.get_float('Filtering Generated Trades', 'Max Seconds Spent on Generating Trades'),
+            'Max_Valid_Trades': self.get_float('Filtering Generated Trades', 'Max Valid Trades'),
+            'Select_Trade_Using': self.get_string('Filtering Generated Trades', 'Select Trade Using')
+        }
     def load_trading(self):
         return {
-            'Max_Seconds_Spent_on_One_User': self.get_float('Trading', 'Max Seconds Spent on One User'),
-            'Max_Seconds_Spent_on_Generating_Trades': self.get_float('Trading', 'Max Seconds Spent on Generating Trades'),
-            'Max_Valid_Trades': self.get_float('Trading', 'Max Valid Trades'),
-            'Minimum_RAP_Gain': self.get_float('Trading', 'Minimum RAP Gain'),
-            'Maximum_RAP_Gain': self.get_float('Trading', 'Maximum RAP Gain'),
-            'Minimum_Value_Gain': self.get_float('Trading', 'Minimum Value Gain'),
-            'Maximum_Value_Gain': self.get_float('Trading', 'Maximum Value Gain'),
-            'Minimum_Overall_Gain': self.get_float('Trading', 'Minimum Overall Value Gain'),
-            'Maximum_Overall_Gain': self.get_float('Trading', 'Maximum Overall Value Gain'),
-            'Rap_Algo_For_Valued': self.get_string('Trading', 'RAP Algorithm for Valued Items'),
-            'Minimum_Algo_Gain': self.get_float('Trading', 'Minimum Rap Algorithm Gain'),
-            'Maximum_Algo_Gain': self.get_float('Trading', 'Maximum Rap Algorithm Gain'),
-            'NFT': self.get_list('Trading', 'NFT'),
-            'NFR': self.get_list('Trading', 'NFR'),
-            'Maximum_Amount_of_Duplicate_Items': self.get_int('Trading', 'Maximum Amount of Duplicate Items'),
-            'Maximum_Amount_of_Trader_Duplicate_Items': self.get_int('Trading', 'Maximum Amount of Trader Duplicate Items'),
-
-            'Outbound_Cancel_Offset': self.get_int('Outbounds', 'Outbound Minimum Gain Offset to Cancel'),
-            'Algo_Cancel_Offset': self.get_int('Outbounds', 'RAP Algorithm Gain Offset to Cancel'),
-            'TradeRobux': self.get_boolean('Trading', 'Trade Robux'),
-            'RobuxDividePercentage': self.get_float('Trading', 'Robux Divide Percentage'),
-            'MaxRobux': self.get_float('Trading', 'Max Robux'),
-            'MinOverallValueScorePercentage': self.get_float('Trading', 'Min Overall Value Score Percentage'),
-            'MaxOverallValueScorePercentage': self.get_float('Trading', 'Max Overall Value Score Percentage'),
-            'MinRAPScorePercentage': self.get_float('Trading', 'Min RAP Score Percentage'),
-            'MaxRAPScorePercentage': self.get_float('Trading', 'Max RAP Score Percentage'),
-            'MinimumItemsYourSide': self.get_int('Trading', 'Minimum Items on Your Side'),
-            'MaximumItemsYourSide': self.get_int('Trading', 'Maximum Items on Your Side'),
-            'MinimumItemsTheirSide': self.get_int('Trading', 'Minimum Items on Their Side'),
-            'MaximumItemsTheirSide': self.get_int('Trading', 'Maximum Items on Their Side'),
-            'MinimumValueOfTrade': self.get_float('Trading', 'Minimum Value Sum Of Trade'),
-            'MinimumRapOfTrade': self.get_float('Trading', 'Minimum Rap Sum Of Trade'),
-            'MinDemand': self.get_int('Trading', 'Minimum Valued Item Demand'),
-            'MinDailySales': self.get_float('Trading', 'Minimum Daily Sales of Item'),
-            'Select_Trade_Using': self.get_string('Trading', 'Select Trade Using')
+            'Outbound_Cancel_Offset': self.get_int('Outbound Settings', 'Outbound Minimum Gain Offset to Cancel'),
+            'Algo_Cancel_Offset': self.get_int('Outbound Settings', 'RAP Algorithm Gain Offset to Cancel'),
+            'Minimum_RAP_Gain': self.get_float('Trading Settings', 'Minimum RAP Gain'),
+            'Maximum_RAP_Gain': self.get_float('Trading Settings', 'Maximum RAP Gain'),
+            'Minimum_Value_Gain': self.get_float('Trading Settings', 'Minimum Value Gain'),
+            'Maximum_Value_Gain': self.get_float('Trading Settings', 'Maximum Value Gain'),
+            'Minimum_Overall_Gain': self.get_float('Trading Settings', 'Minimum Overall Value Gain'),
+            'Maximum_Overall_Gain': self.get_float('Trading Settings', 'Maximum Overall Value Gain'),
+            'Rap_Algo_For_Valued': self.get_string('Trading Settings', 'RAP Algorithm for Valued Items'),
+            'Minimum_Algo_Gain': self.get_float('Trading Settings', 'Minimum Rap Algorithm Gain'),
+            'Maximum_Algo_Gain': self.get_float('Trading Settings', 'Maximum Rap Algorithm Gain'),
+            'TradeRobux': self.get_boolean('Trading Settings', 'Trade Robux'),
+            'RobuxDividePercentage': self.get_float('Trading Settings', 'Robux Divide Percentage'),
+            'MaxRobux': self.get_float('Trading Settings', 'Max Robux'),
+            'MinOverallValueScorePercentage': self.get_float('Trading Settings', 'Min Overall Value Score Percentage'),
+            'MaxOverallValueScorePercentage': self.get_float('Trading Settings', 'Max Overall Value Score Percentage'),
+            'MinRAPScorePercentage': self.get_float('Trading Settings', 'Min RAP Score Percentage'),
+            'MaxRAPScorePercentage': self.get_float('Trading Settings', 'Max RAP Score Percentage'),
+            'MinimumItemsYourSide': self.get_int('Trading Settings', 'Minimum Items on Your Side'),
+            'MaximumItemsYourSide': self.get_int('Trading Settings', 'Maximum Items on Your Side'),
+            'MinimumItemsTheirSide': self.get_int('Trading Settings', 'Minimum Items on Their Side'),
+            'MaximumItemsTheirSide': self.get_int('Trading Settings', 'Maximum Items on Their Side'),
+            'MinimumValueOfTrade': self.get_float('Trading Settings', 'Minimum Value Sum Of Trade'),
+            'MinimumRapOfTrade': self.get_float('Trading Settings', 'Minimum Rap Sum Of Trade'),
         }
     def load_inbounds(self):
         return {
-            'CounterTrades': self.get_boolean('Inbounds', 'Counter Trades'),
-            'Dont_Counter_Wins': self.get_boolean('Inbounds', 'Dont Counter Wins')
+            'CounterTrades': self.get_boolean('Inbound Settings', 'Counter Trades'),
+            'Dont_Counter_Wins': self.get_boolean('Inbound Settings', 'Dont Counter Wins')
 
         }
 
@@ -155,7 +168,6 @@ class ConfigHandler:
             'MaximumGraphDifference': self.get_float('Projected Detection', 'Maximum Graph Difference'),
             'MinimumGraphDifference': self.get_float('Projected Detection', 'Minimum Graph Difference'),
             'MinPriceDifference': self.get_float('Projected Detection', 'MinPriceDifference'),
-            'AmountofSalestoScan': self.get_int('Projected Detection', 'Amount of sales to scan')
         }
 
     def load_mass_sender(self):
@@ -170,7 +182,7 @@ class ConfigHandler:
             return self.config.getint(section, option) if self.config.has_option(section, option) else None
         except (ValueError, TypeError) as e:
             print(f"Error retrieving integer for [{section}] {option}: {e}")
-            return None
+            return "Not Set"
 
     def get_float(self, section, option):
         try:
@@ -180,24 +192,24 @@ class ConfigHandler:
             try:
                 string = self.get_string(section, option)
                 if string.lower() == "false" or string.lower() == "none":
-                    return False
+                    return None
             except:
                 pass
-            return None
+            return "Not Set"
 
     def get_string(self, section, option):
         try:
             return self.config.get(section, option) if self.config.has_option(section, option) else None
         except (ValueError, TypeError) as e:
             print(f"Error retrieving string for [{section}] {option}: {e}")
-            return None
+            return "Not Set"
 
     def get_boolean(self, section, option):
         try:
             return self.config.getboolean(section, option) if self.config.has_option(section, option) else None
         except (ValueError, TypeError) as e:
             print(f"Error retrieving boolean for [{section}] {option}: {e}")
-            return None
+            return "Not Set"
 
     def get_list(self, section, option):
         try:
@@ -219,6 +231,6 @@ class ConfigHandler:
         # Check if any required values are None and raise an error
         for section in [self.scan_items, self.filter_users, self.trading, self.projected_detection]:
             for key, value in section.items():
-                if value is None:
+                if value == "Not Set":
                     raise ValueError(f"Configuration error: '{key}' is missing or invalid.")
 

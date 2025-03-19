@@ -14,12 +14,13 @@ class AccountSettings():
         while True:
             self.cli.clear_console()
             options = (
-                ("1", "Show Account Configs"),
-                ("2", "Add Account Configs"),
-                ("3", "Edit Account Configs"),
-                ("4", "Remove Account Configs"),
-                ("5", "Check for missing settings for user configs"),
-                ("6", "Back to Main Menu"),
+                ("1", "Change Config"),
+                ("2", "Show Account Configs"),
+                ("3", "Add Account Configs"),
+                ("4", "Edit Account Configs"),
+                ("5", "Remove Account Configs"),
+                ("6", "Check for missing settings for user configs"),
+                ("7", "Back to Main Menu"),
             )
             self.cli.print_menu("Config Manager", options)
 
@@ -31,17 +32,21 @@ class AccountSettings():
 
             match answer:
                 case 1:
+                    self.cli.clear_console()
+                    self.account_settings.show_presets()
+                case 2:
                     self.account_settings.show_config()
                     input("Press enter to continue..")
-                case 2:
-                    self.account_settings.create_config()
                 case 3:
-                    self.account_settings.edit_config()
+
+                    self.account_settings.create_config()
                 case 4:
-                    self.account_settings.delete_config()
+                    self.account_settings.edit_config()
                 case 5:
-                    self.account_settings.check_for_updates()
+                    self.account_settings.delete_config()
                 case 6:
+                    self.account_settings.check_for_updates()
+                case 7:
                     break
             
 
