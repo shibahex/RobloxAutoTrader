@@ -332,8 +332,8 @@ class Doggo:
                     break
 
                 for trader in list(self.user_queue.keys()):  # Using list() creates a copy of the keys
-                    if time.time() - account.last_sent_trade > account.config.trading['Max_Seconds_Spent_on_One_User']:
-                        print("Couldnt find any trades for", account.username,  account.config.trading['Max_Seconds_Spent_on_One_User'], "Seconds")
+                    if time.time() - account.last_sent_trade > account.config.filter_generated['Max_Seconds_Spent_on_One_User']:
+                        print("Couldnt find any trades for", account.username,  account.config.filter_generated['Max_Seconds_Spent_on_One_User'], "Seconds")
                         account.last_sent_trade = time.time()
                         return None
                     else:
@@ -458,8 +458,8 @@ if __name__ == "__main__":
             print("Whitelist not valid")
             time.sleep(1)
             Doggo().whitelist_manager.main()
-
         doggo.main()
+
     except Exception as e:
         tb = traceback.format_exc()  # Capture the full traceback
         print(e, tb)

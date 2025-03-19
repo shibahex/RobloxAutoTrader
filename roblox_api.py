@@ -14,11 +14,7 @@ from trade_algorithm import TradeMaker
 from handler.account_settings import HandleConfigs
 
 from handler.price_algorithm import SalesVolumeAnalyzer
-"""
-Fix the internal error code like 400 or 500 for getting trades:
-hint it might be csxrf token?
-
-"""
+SECONDS_IN_DAY = 86400
 
 class RobloxAPI():
     """
@@ -174,7 +170,7 @@ class RobloxAPI():
                 itemId = str(item['assetId'])
                 if str(userid) == str(self.account_id):
                     is_self = True
-                    nft_list = self.config.trading['NFT']
+                    nft_list = self.config.filter_items['NFT']
 
                     self.self_duplicates = add_to_duplicates(self.self_duplicates)
                     if nft_list and itemId in nft_list:
@@ -188,7 +184,7 @@ class RobloxAPI():
                     except:
                         # bad item
                         continue
-                    if current_demand != None and int(current_demand) < self.config.trading['MinDemand']:
+                    if current_demand != None and int(current_demand) < self.config.filter_items['MinDemand']:
                         #print(current_demand, itemId, "skipped")
                         continue
 
@@ -196,15 +192,15 @@ class RobloxAPI():
 
                     
                     # NOTE: Dont trade for items you already have
-                    if itemId in self.self_duplicates and self.self_duplicates[itemId] > self.config.trading['Maximum_Amount_of_Duplicate_Items']:
+                    if itemId in self.self_duplicates and self.self_duplicates[itemId] > self.config.filter_items['Maximum_Amount_of_Duplicate_Items']:
                         continue
 
                     #NOTE: Dont allow trade to have multiple duplicates of items (OWNED OR NOT)
-                    if itemId in trader_duplicates and trader_duplicates[itemId] > self.config.trading['Maximum_Amount_of_Trader_Duplicate_Items']:
+                    if itemId in trader_duplicates and trader_duplicates[itemId] > self.config.filter_items['Maximum_Amount_of_Trader_Duplicate_Items']:
                         continue
 
                     # NOTE: Dont trade for items in NFR and dont let the end trade have duplicate items
-                    nfr_list = self.config.trading['NFR']
+                    nfr_list = self.config.filter_items['NFR']
                     if itemId not in nfr_list:
                         inventory[uaid] = {"item_id": itemId}
 
@@ -693,9 +689,10 @@ class RobloxAPI():
                 print("Canceling Outbound trade for reason:", reason)
                 url = f"https://trades.roblox.com/v1/trades/{trade_id}/decline"
 
-                print(f"Self RAP: {self_rap}, Trader RAP: {trader_rap} | Robux: {self_robux}")
-                print(f"Self Algo: {self_algorithm_value}, Their Algo: {trader_algorithm_value}")
-                print(f"Values - Self: {self_value}, Trader: {trader_value}")
+                print(f"Self RAP: {formatted_trade['self_rap']}, Trader RAP: {formatted_trade['their_rap']} | Robux: {formatted_trade['self_robux']}")
+                print(f"Self Algo: {formatted_trade['self_rap_algo']}, Their Algo: {formatted_trade['their_rap_algo']}")
+                print(f"Values - Self: {formatted_trade['self_value']}, Trader: {formatted_trade['their_value']}")
+                print(f"Overall Values - Self: {formatted_trade['self_overall_value']}, Trader: {formatted_trade['their_overall_value']}")
 
                 cancel_request = self.request_handler.requestAPI(url, method="post")
                 time.sleep(1)
@@ -834,9 +831,10 @@ class RobloxAPI():
         if resale_data.status_code == 200:
             def parse_api_data(data_points):
                 return sorted(
-                    [{"value": point["value"], "date": self.parse_date(point["date"]).timestamp()}
+                    [{"value": point["value"], "date": self.parse_date(point["date"]).timestamp(), "date_string": point['date']}
                         for point in data_points],
                     key=lambda x: x["date"],
+                    reverse=True
                 )
 
             sales_data = parse_api_data(resale_data.json()["priceDataPoints"])
@@ -849,26 +847,25 @@ class RobloxAPI():
             result_volume = result['volume']
             result_timestamp = result['timestamp']
             #{'value': 558.2293577981651, 'volume': 84.825, 'timestamp': 1732423848.2720559, 'age': 63157848.272055864} 1609402609
+            if len(volume_data) > 1:
+                timestamp_gaps = [
+                    volume_data[i]["date"] - volume_data[i + 1]["date"]
+                    for i in range(len(volume_data) - 1)
+                ]
+                # Calculate the average gap
+                average_gap = (sum(timestamp_gaps) / len(timestamp_gaps)) / SECONDS_IN_DAY
+                largest_gap = max(timestamp_gaps) if timestamp_gaps else 0
+            else:
+                average_gap = 0
+                largest_gap = 0 
 
-
-            data_points = resale_data.json()['priceDataPoints']
-            # for data in data_points:
-            #     if data['value'] < 5:
-            #         data_points.remove(data)
-            #
-            # if len(data_points) < 50:
-            #     print("Item has les than 50")
-            #     is_projected = True
-            #
             today = datetime.utcnow()
             three_months_ago = today - timedelta(days=90)
-            
-            current_price = int(data_points[0]['value'])
-            amount_of_sales = config_projected['AmountofSalestoScan']
+            current_price = int(sales_data[0]['value'])
 
             recent_data_points = [
-                point for point in data_points
-                if self.parse_date(point["date"]) > three_months_ago
+                point for point in sales_data
+                if self.parse_date(point["date_string"]) > three_months_ago
             ]
 
             sum_of_price = 0
@@ -880,33 +877,10 @@ class RobloxAPI():
                     is_projected = True
 
 
-            #for data_point in range(1, amount_of_sales+1):
-                # TODO: THIS IS BROKEN 
-            
-            #   rap_data_point = int(data_points[data_point]['value'])
-              #  print(rap_data_point, current_data)
-               # is_in_range = self.config.check_gain(rap_data_point, current_data, min_gain=min_graph_difference, max_gain=max_graph_difference) 
-                #print(rap_data_point - current_data,  ": minimum", min_graph_difference, "max", max_graph_difference, is_in_range)
-
-                #if is_in_range == False:
-                 #   print("is projected")
-                  #  is_projected = True
-                   # break
-
-            volume_data_points = resale_data.json().get('volumeDataPoints', [])[:30]
-            # If it has no sale data 
 
             data = self.rolimon.projected_json.read_data()
-            data.update({f"{item_id}": {"is_projected": is_projected, "value": result_value, "volume": result_volume, "timestamp":result_timestamp, "last_price": self.rolimon.item_data[item_id]['best_price']}})
+            data.update({f"{item_id}": {"is_projected": is_projected, "value": result_value, "volume": result_volume, "timestamp":result_timestamp, "last_price": self.rolimon.item_data[item_id]['best_price'], "average_gap": average_gap}})
             self.rolimon.projected_json.write_data(data)
-
-#           #if self.analyze_volume_data(volume_data_points) == False:
-                #is_projected = True
-
-
-
-
-
 
     def get_active_traders(self, item_id, owners):
         """

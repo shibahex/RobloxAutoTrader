@@ -31,9 +31,10 @@ class TradeMaker():
         self.min_items_self = self.config.trading['MinimumItemsYourSide']
         self.max_items_self = self.config.trading['MaximumItemsYourSide']
 
+
         self.min_items_their = self.config.trading['MinimumItemsTheirSide']
         self.max_items_their = self.config.trading['MaximumItemsTheirSide']
-        self.select_by = self.config.trading['Select_Trade_Using']
+        self.select_by = self.config.filter_generated['Select_Trade_Using']
 
         self.max_robux = self.config.trading['MaxRobux']
         self.robux_divide = self.config.trading['RobuxDividePercentage']
@@ -42,13 +43,13 @@ class TradeMaker():
         self.min_value_of_trade = self.config.trading['MinimumValueOfTrade']
         self.min_rap_of_trade = self.config.trading['MinimumRapOfTrade']
 
-        self.max_valid_trades = self.config.trading['Max_Valid_Trades']
-        self.trade_timeout = self.config.trading['Max_Seconds_Spent_on_Generating_Trades']
+        self.max_valid_trades = self.config.filter_generated['Max_Valid_Trades']
+        self.trade_timeout = self.config.filter_generated['Max_Seconds_Spent_on_Generating_Trades']
 
         self.debug_print = self.config.debug['trading_debug']
         self.outbound_cancel_offset = self.config.trading['Outbound_Cancel_Offset']
         self.algo_outbound_offset = self.config.trading['Algo_Cancel_Offset']
-        if is_outbound_checker:
+        if is_outbound_checker == True:
 
             if self.min_rap_gain is not None:
                 self.min_rap_gain = max(0, self.min_rap_gain - self.outbound_cancel_offset) if self.min_rap_gain >= 0 else self.min_rap_gain - self.outbound_cancel_offset
@@ -64,16 +65,16 @@ class TradeMaker():
             print(f"Cancel trades that go below: [min algo gain: {self.min_algo_gain}, min overall gain: {self.min_overall_gain}, min rap gain: {self.min_rap_gain}]")
 
 
-            self.max_rap_gain = False
-            self.max_algo_gain = False
-            self.max_value_gain = False
-            self.max_overall_gain = False
+            self.max_rap_gain = None
+            self.max_algo_gain = None
+            self.max_value_gain = None
+            self.max_overall_gain = None
 
-            self.min_rap_score_percentage = False
-            self.max_rap_score_percentage = False
+            self.min_rap_score_percentage = None
+            self.max_rap_score_percentage = None
 
-            self.min_overall_score_percentage = False
-            self.max_overall_score_percentage = False
+            self.min_overall_score_percentage = None
+            self.max_overall_score_percentage = None
 
 
     def select_trade(self, valid_trades, select_by='lowest_rap_gain'):
@@ -289,7 +290,17 @@ class TradeMaker():
 
                         send_robux = calc_robux
 
-                    validate_trade, reason = self.validate_trade(self_rap, self_rap_algo, self_value, their_rap, their_rap_algo, their_value, self_overall_value, their_overall_value, robux=send_robux)
+                    validate_trade, reason = self.validate_trade(
+                        self_rap=self_rap, 
+                        self_rap_algo=self_rap_algo, 
+                        self_value=self_value,
+                        self_overall_value=self_overall_value,
+                        their_rap=their_rap,
+                        their_rap_algo=their_rap_algo,
+                        their_value=their_value,
+                        their_overall_value=their_overall_value,
+                        robux=send_robux,
+                    )
                     if validate_trade:
                         if self.debug_print:
                            print("Trade algorithm: validated trade", len(valid_trades))
@@ -422,7 +433,6 @@ class TradeMaker():
             return False, "rap_close_percentage"
 
         if not self.check_overall_gain(their_overall_value, self_overall_value):
-            # print("overall gain false their, self", their_rap, self_rap)
             return False, "overall_gain"
         # Check if RAP gain passes the criteria
         if not self.check_rap_gain(their_rap, self_rap):

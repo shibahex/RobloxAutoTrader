@@ -224,7 +224,8 @@ class RolimonAPI():
 
 
 
-        minimum_daily_sales = self.config.trading['MinDailySales']
+        minimum_daily_sales = self.config.filter_items['MinDailySales']
+        max_sales_gap = self.config.filter_items['MaxSalesGap']
         rap_algo_for_valued = self.config.trading['Rap_Algo_For_Valued']
         for item in inventory:
             asset_id = inventory[item]['item_id']
@@ -267,6 +268,7 @@ class RolimonAPI():
                     is_projected = projected_data[asset_id]['is_projected']
                     rap_algo_value = projected_data[asset_id]['value']
                     item_volume = projected_data[asset_id]['volume']
+                    sale_gap = projected_data[asset_id]['average_gap']
             except:
                 print("Couldn't get projected data for item, continuing")
                 continue
@@ -274,7 +276,7 @@ class RolimonAPI():
 
 
             if not is_self:
-                if is_projected or item_volume == None or minimum_daily_sales == None or value == 0 and  float(item_volume) < minimum_daily_sales:
+                if is_projected or item_volume == None or minimum_daily_sales == None or value == 0 and float(item_volume) < minimum_daily_sales or value == 0 and float(sale_gap) > max_sales_gap:
                     continue
 
             filtered_inventory[item] = {
