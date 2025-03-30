@@ -201,6 +201,9 @@ class Doggo:
             time.sleep(5)
 
     def check_whitelist_timer(self):
+        """
+        Checks the whitelist in intervals
+        """
         last_checked = time.time() - self.whitelist_checked
         if last_checked >= 600:
             self.whitelist_checked = time.time()
@@ -210,20 +213,23 @@ class Doggo:
                 input("Whitelist check failed")
                 return False
 
+    def start_thread(self, thread:threading.Thread):
+        thread.daemon = True
+        thread.start()
+
     def start_trader(self):
+        """
+            Main Loop function that loops through all the accounts and run the traders
+        """
         if not self.validate_whitelist():
             print("Whitelist not valid in starting")
             sys.exit()
             quit()
             return False
         roblox_accounts = self.load_roblox_accounts()
-        outbound_thread = threading.Thread(target=self.check_outbound_thread, args=(roblox_accounts,))
-        outbound_thread.daemon = True
-        outbound_thread.start()
+        self.start_thread(threading.Thread(target=self.check_outbound_thread, args=(roblox_accounts,)))
+        self.start_thread(threading.Thread(target=self.update_data_thread))
 
-        rolimon_thread = threading.Thread(target=self.update_data_thread)
-        rolimon_thread.daemon = True
-        rolimon_thread.start()
         time.sleep(1)
         while True:
             if self.check_whitelist_timer() == False:
@@ -286,8 +292,6 @@ class Doggo:
                 print("Got recent traders")
                 # TODO: add max days inactive in cfg and parse as arg
 
-                #print("trading with:", current_account.username, "auth code", current_account.auth_secret, current_account.account_id, "cookie=", current_account.request_handler.Session.cookies.get_dict())
-
                 # to make the threads run even after stop event is called and another thread starts
                 print("startign queue thread")
                 self.stop_event.clear()
@@ -312,6 +316,9 @@ class Doggo:
 
             # min overall 300
     def process_trades_for_account(self, account):
+        """
+            Generates and Starts trading for the given account
+        """
         while True:
             try:
                 account_inventory = account.account_inventory
@@ -410,6 +417,9 @@ class Doggo:
 
 
     def load_roblox_accounts(self):
+        """
+        Returns a list of Roblox Classes that were made from the cookie json
+        """
         print("Loading roblox accounts...")
         cookie_json = self.json.read_data()
         roblox_accounts = []
@@ -437,19 +447,8 @@ class Doggo:
             else:
                 pass
             roblox_accounts.append(roblox_account)
-
         return roblox_accounts
     
-    def trade_ad_thread(self):
-        trade_ad_API = "https://api.rolimons.com/tradeads/v1/createad"
-        #{"player_id":1283171278,"offer_item_ids":[138844851,9255011,1609402609,111776247],"request_item_ids":[],"request_tags":["robux","upgrade","downgrade"]}
-
-        data={"player_id":1283171278,"offer_item_ids":[138844851,9255011,1609402609,111776247],"request_item_ids":[],"request_tags":[]}
-
-        #self.rolimon_account.requestAPI(trade_ad_API, method='post', data=)
-
-
-# TODO: Check whitelist every 5 minutes
 
 if __name__ == "__main__":
     try:
