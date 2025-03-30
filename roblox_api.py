@@ -20,7 +20,6 @@ class RobloxAPI():
     """
         Pass in Cookie if you want it to be an account
     """
-
     def __init__(self, cookie:dict=None, auth_secret=None, Proxies=False):
         self.all_cached_traders = set()
         self.auth_secret = auth_secret
@@ -95,7 +94,6 @@ class RobloxAPI():
 
     # refresh current inventory
     def refresh_self_inventory(self):
-        # TODO: make this refresh if a trade gets completed
         """
             Gets inventory of current .ROBLOSECURITY used on class
         """
@@ -123,8 +121,10 @@ class RobloxAPI():
             raise ValueError(f"Couldnt login with cookie {self.cookies}")
 
     def fetch_inventory(self, userid):
-
-        def add_to_duplicates(duplicates: dict):
+        """
+        Returns a dict of items from the user, will return False if there no scrapable items.
+        """
+        def add_to_duplicates(duplicates: dict, itemId: str):
             if itemId not in duplicates:
                 duplicates[itemId] = 0
             else:
@@ -161,24 +161,26 @@ class RobloxAPI():
                 break
 
             for item in response.json()['data']:
+                itemId = str(item['assetId'])
+                # NOTE: Always add to duplicates first
+                self.self_duplicates = add_to_duplicates(self.self_duplicates, itemId)
                 if item['isOnHold'] == True:
                     continue
+
                 # TODO: APPLY NFT
                 # TODO: IF USERID = SELF.USERID THEN DONT APPLY NFT
-                    
                 uaid = str(item['userAssetId'])
-                itemId = str(item['assetId'])
                 if str(userid) == str(self.account_id):
                     is_self = True
                     nft_list = self.config.filter_items['NFT']
 
-                    self.self_duplicates = add_to_duplicates(self.self_duplicates)
                     if nft_list and itemId in nft_list:
                         continue
 
                     inventory[uaid] = {"item_id": itemId}
-
                 else:
+                    trader_duplicates = add_to_duplicates(trader_duplicates, itemId)
+
                     try:
                         current_demand = self.rolimon.item_data[itemId]['demand']
                     except:
@@ -188,11 +190,11 @@ class RobloxAPI():
                         #print(current_demand, itemId, "skipped")
                         continue
 
-                    trader_duplicates = add_to_duplicates(trader_duplicates)
 
                     
                     # NOTE: Dont trade for items you already have
                     if itemId in self.self_duplicates and self.self_duplicates[itemId] > self.config.filter_items['Maximum_Amount_of_Duplicate_Items']:
+                        print("Continuing for", itemId, "because its a duplicate")
                         continue
 
                     #NOTE: Dont allow trade to have multiple duplicates of items (OWNED OR NOT)
@@ -225,6 +227,9 @@ class RobloxAPI():
     # NOTE: Payload:
     # {"offers":[{"userId":4486142832,"userAssetIds":[672469540],"robux":null},{"userId":1283171278,"userAssetIds":[1310053014],"robux":null}]}
     def validate_2fa(self, response):
+        """
+        This function takes a 401 error response and then returns the 2fa response if there is one
+        """
         cookie_json = self.json.read_data()
         
         challengeid = response.headers["rblx-challenge-id"]
@@ -311,6 +316,10 @@ class RobloxAPI():
         return trades  
 
     def counter_trades(self):
+        """
+        Gets the recent inbound trades and will generate a response trade and the function will send the trade,
+        Returns Nothing
+        """
         # TODO: make the counter kind of like the original trade
         # Get info about trade
         trades = self.get_trades("https://trades.roblox.com/v1/trades/inbound?limit=100&sortOrder=Desc")
