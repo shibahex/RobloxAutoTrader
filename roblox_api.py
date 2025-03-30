@@ -162,8 +162,13 @@ class RobloxAPI():
 
             for item in response.json()['data']:
                 itemId = str(item['assetId'])
-                # NOTE: Always add to duplicates first
-                self.self_duplicates = add_to_duplicates(self.self_duplicates, itemId)
+
+                # Check for duplicates
+                if str(userid) == str(self.account_id):
+                    self.self_duplicates = add_to_duplicates(self.self_duplicates, itemId)
+                else:
+                    trader_duplicates = add_to_duplicates(trader_duplicates, itemId)
+
                 if item['isOnHold'] == True:
                     continue
 
@@ -179,7 +184,6 @@ class RobloxAPI():
 
                     inventory[uaid] = {"item_id": itemId}
                 else:
-                    trader_duplicates = add_to_duplicates(trader_duplicates, itemId)
 
                     try:
                         current_demand = self.rolimon.item_data[itemId]['demand']
@@ -194,7 +198,7 @@ class RobloxAPI():
                     
                     # NOTE: Dont trade for items you already have
                     if itemId in self.self_duplicates and self.self_duplicates[itemId] > self.config.filter_items['Maximum_Amount_of_Duplicate_Items']:
-                        print("Continuing for", itemId, "because its a duplicate")
+                        print("Not trading for", itemId, "because its a duplicate")
                         continue
 
                     #NOTE: Dont allow trade to have multiple duplicates of items (OWNED OR NOT)
@@ -681,6 +685,13 @@ class RobloxAPI():
 
             data = trade_info_req.json() 
             formatted_trade = self.format_trade_api(data)
+
+            # NOTE: Check for duplicates
+            for itemId in formatted_trade['their_side_item_ids']:
+                if itemId in self.self_duplicates and self.self_duplicates[itemId] > self.config.filter_items['Maximum_Amount_of_Duplicate_Items']:
+                    print("[OUTBOUND] Cancel trade for", itemId, "because duplicates")
+                    continue
+
 
             valid_trade, reason = self.outbound_trader.validate_trade(
                 self_rap=formatted_trade['self_rap'], 
