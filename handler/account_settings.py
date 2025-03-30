@@ -1,6 +1,9 @@
 import json
 from handler.handle_json import JsonHandler
 from handler.handle_config import ConfigHandler
+import configparser
+import os
+import time
 #from handle_confing import ConfigHandler
 class HandleConfigs:
     def __init__(self):
@@ -39,6 +42,45 @@ class HandleConfigs:
             print("Invalid input. Exiting.")
             return None
 
+    def show_presets(self):
+        directory = "./configs"
+        file_names = os.listdir(directory)
+        for enum, file in enumerate(os.listdir(directory)):
+            if file.endswith(".cfg"):
+                file_path = os.path.join(directory, file)
+                config = configparser.ConfigParser()
+
+                try:
+                    config.read(file_path)
+                except Exception as e:
+                    print("Couldn't read config", e)
+                    continue
+
+                if 'Info' in config and 'Description' in config['Info']:
+                    print(f"({enum+1})", file, "|", config['Info']['Description'])
+                else:
+                    print(f"({enum+1})", file, "|", "Config Doesn't have descriptions")
+
+        try:
+            chosen = int(input("\nPlease Enter the Number of the Config you want to use > ")) - 1 
+            if chosen <= len(file_names):
+                chosen_config = file_names[chosen]
+                with open(f"{directory}/{chosen_config}", "r") as f:
+                    config_contents = f.read()
+
+                with open("./config.cfg", "w") as f:
+                    f.write(config_contents)
+
+                print(f"\nReplaced './config.cfg' with the contents of '{file_names[chosen]}'")
+                time.sleep(1)
+        except Exception as e:
+            print("Invalid Choice", e)
+            time.sleep(3)
+            return
+
+
+        
+        
     def show_config(self, user_id=None):
         """List grouped and single keys in a user's configuration."""
         if user_id is None:
