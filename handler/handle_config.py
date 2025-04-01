@@ -21,7 +21,7 @@ class ConfigHandler:
 
     def convert_gain(self, gain):
         """
-        Convert gain to a float or int.
+        Convert gain to a float or int
         Treat gains < 1 and > -1 as percentages.
         """
         try:
@@ -96,8 +96,12 @@ class ConfigHandler:
         }
     def load_debug(self):
         return {
-            'trading_debug': self.get_boolean('debug', 'print trade maker status'),
-            'ignore_limit': self.get_boolean('debug', 'ignore trade limit')
+            'trading_debug': self.get_boolean('debug', 'Show Trade Debug'),
+            'ignore_limit': self.get_boolean('debug', 'Ignore trade limit'),
+            'dont_send_trade': self.get_boolean('debug', 'Dont Send Trades'),
+            'dont_check_outbounds': self.get_boolean('debug', 'Dont Check Outbounds'),
+            'show_scanning_users': self.get_boolean('debug', 'Show Scanning Users'),
+            'show_scanning_inventory': self.get_boolean('debug', 'Show Scanning Inventory')
         }
 
     #def load_prediction_algorithm(self):
@@ -233,4 +237,5 @@ class ConfigHandler:
             for key, value in section.items():
                 if value == "Not Set":
                     raise ValueError(f"Configuration error: '{key}' is missing or invalid.")
+
 
