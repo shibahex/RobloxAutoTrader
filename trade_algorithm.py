@@ -47,10 +47,10 @@ class TradeMaker():
         self.trade_timeout = self.config.filter_generated['Max_Seconds_Spent_on_Generating_Trades']
 
         self.debug_print = self.config.debug['trading_debug']
+
         self.outbound_cancel_offset = self.config.trading['Outbound_Cancel_Offset']
         self.algo_outbound_offset = self.config.trading['Algo_Cancel_Offset']
         if is_outbound_checker == True:
-
             if self.min_rap_gain is not None:
                 self.min_rap_gain = max(0, self.min_rap_gain - self.outbound_cancel_offset) if self.min_rap_gain >= 0 else self.min_rap_gain - self.outbound_cancel_offset
 
@@ -188,22 +188,17 @@ class TradeMaker():
         start_time = time.perf_counter()  # Use perf_counter for better precision
 
 
-        print("trade algorithm: getting keys")
+        if self.debug_print == True:
+            print("trade algorithm: getting keys")
+
         if not self_inventory or not their_inventory:
             print('[Debug] in generating trade invalid inventory, returning None')
             return None
 
         self_keys = list(self_inventory.keys())
         their_keys = list(their_inventory.keys())
-        print("Trade algorithm got keys")
-
-        # Generate combinations for both inventories
-        print("Trade algorithm: generating combinations")
-        # self_combinations = self.generate_combinations(self_keys, self.min_items_self, self.max_items_self)
-        # their_combinations = self.generate_combinations(their_keys, self.min_items_their, self.max_items_their)
-
-
-        print("Trade algorithm: generated combinations")
+        if self.debug_print == True:
+            print("Trade algorithm got keys")
 
         def get_total_values(items, inventory):
             """
@@ -235,7 +230,8 @@ class TradeMaker():
 
 
 
-        print("Trade algorithm: starting trade generation")
+        if self.debug_print == True:
+            print("Trade algorithm: starting trade generation")
         # NOTE: have like: out of 30000 trades, 4 valid: 400 failed sum of trade blah
 
         pre_checks = [self.min_rap_gain, self.min_value_gain, self.min_overall_gain, self.min_algo_gain]
@@ -303,7 +299,7 @@ class TradeMaker():
                     )
                     if validate_trade:
                         if self.debug_print:
-                           print("Trade algorithm: validated trade", len(valid_trades))
+                           print("[DEBUG] Trade algorithm: validated trade", len(valid_trades))
 
                         # Calculate the trade sum (RAP and value)
                         total_value = self_value + their_value
@@ -381,12 +377,15 @@ class TradeMaker():
         return None
 
     def check_rap_gain(self, their_rap, self_rap):
+        return True
         return self.config.check_gain(their_rap, self_rap, self.min_rap_gain, self.max_rap_gain)
 
     def check_value_gain(self, their_value, self_value):
+        return True
         return self.config.check_gain(their_value, self_value, self.min_value_gain, self.max_value_gain)
 
     def check_algo_gain(self, their_algo, self_algo):
+        return True
         return self.config.check_gain(their_algo, self_algo, self.min_algo_gain, self.max_algo_gain)
 
     def check_overall_gain(self, their_overall, self_overall):
