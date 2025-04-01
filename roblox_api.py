@@ -180,6 +180,8 @@ class RobloxAPI():
                     nft_list = self.config.filter_items['NFT']
 
                     if nft_list and itemId in nft_list:
+                        if self.config.debug['show_scanning_inventory'] == True:
+                            print(itemId, "in NFT list, skipping it")
                         continue
 
                     inventory[uaid] = {"item_id": itemId}
@@ -197,18 +199,25 @@ class RobloxAPI():
 
                     
                     # NOTE: Dont trade for items you already have
-                    if itemId in self.self_duplicates and self.self_duplicates[itemId] > self.config.filter_items['Maximum_Amount_of_Duplicate_Items']:
-                        print("Not trading for", itemId, "because its a duplicate")
+                    if str(itemId) in self.self_duplicates and self.self_duplicates[str(itemId)] >= self.config.filter_items['Maximum_Amount_of_Duplicate_Items']:
+                        if self.config.debug['show_scanning_inventory'] == True:
+                            print(f"[Inventory {userid}] Not trading for", itemId, "because duplicates setting")
                         continue
 
                     #NOTE: Dont allow trade to have multiple duplicates of items (OWNED OR NOT)
-                    if itemId in trader_duplicates and trader_duplicates[itemId] > self.config.filter_items['Maximum_Amount_of_Trader_Duplicate_Items']:
+                    #print(itemId, trader_duplicates, userid)
+                    if str(itemId) in trader_duplicates and trader_duplicates[str(itemId)] > self.config.filter_items['Maximum_Amount_of_Trader_Duplicate_Items']:
+                        if self.config.debug['show_scanning_inventory'] == True:
+                            print(f"[Inventory {userid}] Not allowing to trade for another {itemId}")
                         continue
 
                     # NOTE: Dont trade for items in NFR and dont let the end trade have duplicate items
                     nfr_list = self.config.filter_items['NFR']
                     if itemId not in nfr_list:
                         inventory[uaid] = {"item_id": itemId}
+                    else:
+                        if self.config.debug['show_scanning_inventory'] == True:
+                            print(itemId, "in NFR list, skipping it")
 
 
 
@@ -217,6 +226,8 @@ class RobloxAPI():
         minimum_items = self.config.filter_users['Minimum_Total_Items']
         if not is_self:
             if len(inventory.keys()) < minimum_items:
+                if self.config.debug['show_scanning_inventory'] == True:
+                    print(f"[Inventory {userid}] User doesn't match minimum items")
                 return False
 
         if inventory == {}:
@@ -416,7 +427,7 @@ class RobloxAPI():
             time.sleep(1)
             
             if trade_response.status_code == 200:
-                print("Trade sent!", trade_response.text)
+                print("Trade sent!")#, trade_response.text)
                 return trade_response.json()['id']
             elif trade_response.status_code == 429:
                 if "errors" in trade_response.json():
@@ -685,12 +696,18 @@ class RobloxAPI():
 
             data = trade_info_req.json() 
             formatted_trade = self.format_trade_api(data)
+            url = f"https://trades.roblox.com/v1/trades/{trade_id}/decline"
 
             # NOTE: Check for duplicates
             for itemId in formatted_trade['their_side_item_ids']:
-                if itemId in self.self_duplicates and self.self_duplicates[itemId] > self.config.filter_items['Maximum_Amount_of_Duplicate_Items']:
+                if str(itemId) in self.self_duplicates and self.self_duplicates[str(itemId)] >= self.config.filter_items['Maximum_Amount_of_Duplicate_Items']:
                     print("[OUTBOUND] Cancel trade for", itemId, "because duplicates")
-                    continue
+                    cancel_request = self.request_handler.requestAPI(url, method="post")
+                    time.sleep(1.5)
+                    if cancel_request.status_code == 200 or cancel_request.status_code == 400:
+                        print("Cleared outbound...")
+
+
 
 
             valid_trade, reason = self.outbound_trader.validate_trade(
@@ -707,13 +724,12 @@ class RobloxAPI():
 
             if not valid_trade:
                 print("Canceling Outbound trade for reason:", reason)
-                url = f"https://trades.roblox.com/v1/trades/{trade_id}/decline"
-
+            
                 print(f"Self RAP: {formatted_trade['self_rap']}, Trader RAP: {formatted_trade['their_rap']} | Robux: {formatted_trade['self_robux']}")
                 print(f"Self Algo: {formatted_trade['self_rap_algo']}, Their Algo: {formatted_trade['their_rap_algo']}")
                 print(f"Values - Self: {formatted_trade['self_value']}, Trader: {formatted_trade['their_value']}")
                 print(f"Overall Values - Self: {formatted_trade['self_overall_value']}, Trader: {formatted_trade['their_overall_value']}")
-
+            
                 cancel_request = self.request_handler.requestAPI(url, method="post")
                 time.sleep(1)
                 if cancel_request.status_code == 200 or cancel_request.status_code == 400:
@@ -929,7 +945,8 @@ class RobloxAPI():
                     continue
                 #print(asset['owner'])
                 if int(asset['owner']['id']) in self.all_cached_traders:
-                    print("Already in cached traders, scraping active traders")
+                    if self.config.debug['show_scanning_users'] == True:
+                        print("Already Traded with User, skipping.")
                     continue
                 # else:
                 #     print("appending", asset['owner']['id'], "if date is good")
@@ -949,9 +966,10 @@ class RobloxAPI():
 
                 # If the owner has had the item for less than 7 days and is not already in the owners or all_cached_traders list, add them
                 if time_diff < timedelta(days=7) and asset['owner']['id'] not in owners and int(asset['owner']['id']) not in self.all_cached_traders:
-                    print("Appending Active User")
+                    # print("Appending Active User")
                     owners.append(asset['owner']['id'])
-        print("owners", owners)
+        if self.config.debug['show_scanning_users'] == True:
+            print("owners", owners)
         return owners
     
 #while True:
