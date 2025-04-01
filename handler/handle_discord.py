@@ -72,8 +72,9 @@ class DiscordHandler():
         """
             Takes all the item ids from generated trade and formats their names in a string that have linebreaks
         """
-        def str_from_item_ids(item_ids):
+        def str_from_item_ids(item_ids, is_self=False):
             string = ""
+            total_sum = 0
             for item in item_ids:
                 item_name = rolimon_data[str(item)]['item_name']
                 item_total_value = rolimon_data[str(item)]['total_value']
@@ -83,16 +84,20 @@ class DiscordHandler():
                     item_algo_value = 0
 
                 string += item_name + f" ({item_total_value}) Algorithm: ({item_algo_value})" + "\n"
+                total_sum += item_total_value
+            if is_self and generated_trade['self_robux'] != 0:
+                string += f"Robux: {generated_trade['self_robux']}\n"
+
+            string += f"Total: {total_sum}"
+
 
             return string
 
         their_item_ids = generated_trade['their_side_item_ids']
         self_item_ids = generated_trade['self_side_item_ids']
 
-        send_string = str_from_item_ids(self_item_ids)
+        send_string = str_from_item_ids(self_item_ids, is_self=True)
 
-        if generated_trade['self_robux'] != 0:
-            send_string += f"Robux: {generated_trade['self_robux']}"
 
         receive_string = str_from_item_ids(their_item_ids)
 

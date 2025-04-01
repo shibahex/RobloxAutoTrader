@@ -66,10 +66,10 @@ class RequestsHandler:
         """
         response = self.Session.post('https://auth.roblox.com/v2/login', data={})
         if 'x-csrf-token' in response.headers:
-            print("new token", response.headers['x-csrf-token'])
+            print("[INFO] new token", response.headers['x-csrf-token'])
             self.headers['x-csrf-token'] = response.headers['x-csrf-token']
         else:
-            print(f'Invalidated cookie returned in generate_csrf; {response.headers}')
+            print(f'[ERROR] Invalidated cookie returned in generate_csrf; {response.headers}')
 
     def requestAPI(self, URL, method="get", payload=None, additional_headers=None) -> requests.Response:
         """
@@ -124,7 +124,7 @@ class RequestsHandler:
             """
 
             if Response.status_code == 429:
-                print("hit ratelimit on url", URL, Response.json())
+                print("[INFO] hit ratelimit on url", URL, Response.json())
                 if self.use_proxies != False:
                     self.rate_limit(proxy_dict['http'])
                     time.sleep(5)
@@ -142,7 +142,7 @@ class RequestsHandler:
 
                     consecutive_rate_limits = self.ratelimit_urls[URL]
                     wait_time = 10 * (2 ** consecutive_rate_limits)
-                    print(f"Rate limited {URL} without proxies, waiting {wait_time} secs.", URL)
+                    print(f"[INFO] Rate limited {URL} without proxies, waiting {wait_time} secs.", URL)
                     time.sleep(wait_time)
                     if consecutive_rate_limits > 4:
                         del self.ratelimit_urls[URL]
