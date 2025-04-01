@@ -126,7 +126,9 @@ class RolimonAPI():
                 (item['trend'] is None or item['trend'] >= minimum_trend)
             )
         ]
-        print("[DOGGO] Picking random item from list size:", len(filtered_items))
+
+        if self.config.debug['show_scanning_users'] == True:
+            print("[DOGGO] Picking random item from list size:", len(filtered_items))
         
         #TODO: add into table with timestamp and if we get the same item check if the time has been 30 minutes and if it has remove and return it 
         return random.choice(filtered_items)
