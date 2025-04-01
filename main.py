@@ -146,22 +146,32 @@ class Doggo:
                 active_traders_response = roblox_account.get_active_traders(random_item, owners)
                 if active_traders_response == None:
                     continue
-                print("fetched new owners", owners, "\n","*"*30)
+
+                if roblox_account.config.debug['show_scanning_users'] == True:
+                    print("fetched new owners", owners, "\n","*"*30)
 
 
                 for owner in owners:
                     if int(owner) in roblox_account.all_cached_traders:
+                        if roblox_account.config.debug['show_scanning_users'] == True:
                             print("already traded with player, skipping")
-                            continue
+                        continue
 
-                    print("checking if can trade")
+                    #print("checking if can trade")
                     roblox_account.all_cached_traders.add(owner)
                     if roblox_account.check_can_trade(owner):
-                        print("can trade with", owner, "checking invetory..")
+
+                        if roblox_account.config.debug['show_scanning_users'] == True:
+                            print("User:", owner, "has trades on, checking invetory..")
+
                         inventory = roblox_account.fetch_inventory(owner)
                         if inventory == False: 
+                            print(owner, "has no inventory skipping")
                             continue
-                        print("fetched inventory for", owner)
+
+                        if roblox_account.config.debug['show_scanning_users'] == True:
+                            print("fetched inventory for", owner)
+
                         self.user_queue[owner] = inventory
                     time.sleep(.15) 
         except Exception as e:
@@ -188,7 +198,8 @@ class Doggo:
     def check_outbound_thread(self, roblox_accounts):
         def check_oubounds():
             for account in roblox_accounts:
-                account.outbound_api_checker()
+                if account.config.debug['dont_check_outbounds'] == False:
+                    account.outbound_api_checker()
                 account.check_completeds()
 
         check_oubounds()
@@ -242,8 +253,7 @@ class Doggo:
                 input("No active accounts found!")
                 break
             for current_account in roblox_accounts:
-
-                if current_account.config.inbounds['CounterTrades'] == True:
+                if current_account.config.inbounds['CounterTrades'] == True and current_account.config.debug['dont_send_trade'] == False:
                     try:
                         current_account.counter_trades()
                         last_checked = time.time() - current_account.counter_timer
@@ -293,28 +303,20 @@ class Doggo:
                 # TODO: add max days inactive in cfg and parse as arg
 
                 # to make the threads run even after stop event is called and another thread starts
-                print("startign queue thread")
+                print("starting queue thread")
                 self.stop_event.clear()
-                queue_thread = threading.Thread(target=self.queue_traders, args=(current_account,))
-                queue_thread.daemon = True
-                queue_thread.start()
+                self.start_thread(threading.Thread(target=self.queue_traders, args=(current_account,)))
 
-                #threads.append((queue_thread))
 
 
                 print("started queue thread, now processing trades")
                 # After queuing, start processing trades for the account (is a while true)
                 self.process_trades_for_account(current_account)
-
-                #for thread in threads:
-                #    thread.join()
-                # Wait for all threads to finish before moving to next iteration
                 print("Stopping threads...")
                 self.stop_event.set()  # Signal all threads to stop
             time.sleep(5)
 
 
-            # min overall 300
     def process_trades_for_account(self, account):
         """
             Generates and Starts trading for the given account
@@ -324,6 +326,7 @@ class Doggo:
                 account_inventory = account.account_inventory
 
                 if self.check_whitelist_timer() == False:
+                    print("quitting")
                     sys.exit()
                     quit()
                 # Check if user queue is empty
@@ -333,7 +336,6 @@ class Doggo:
                 #current_user_queue = self.user_queue.copy()
                 
                 print("Started trading...")
-
                 if not account.account_inventory:
                     print('[Debug] process account inventory on hold breaking')
                     break
@@ -365,14 +367,18 @@ class Doggo:
                                 return None
                             break
 
-                        print(f"Generated trade: {generated_trade}", account.username)
+                        if account.config.debug['trading_debug'] == True:
+                            print(f"Generated trade: {generated_trade}", account.username)
 
                         # Extract trade details
                         self_side = generated_trade['self_side']
                         their_side = generated_trade['their_side']
                         self_robux = generated_trade['self_robux']
 
-                        send_trade_response = account.send_trade(trader, self_side, their_side, self_robux=self_robux)
+                        if account.config.debug['dont_send_trade'] == True:
+                            send_trade_response = True
+                        else:
+                            send_trade_response = account.send_trade(trader, self_side, their_side, self_robux=self_robux)
 
                         if account.config.debug['ignore_limit'] == False:
                             if send_trade_response == False:  # Rate-limited
@@ -400,9 +406,29 @@ class Doggo:
 
 
                             embed_fields, total_profit = self.discord_webhook.embed_fields_from_trade(generated_trade, self.rolimons.item_data, self.rolimons.projected_json.read_data())
-
                             embed = self.discord_webhook.setup_embed(title=f"Sent a trade with {total_profit} total profit", color=1, user_id=trader, embed_fields=embed_fields, footer="Frick shedletsky")
-                            self.discord_webhook.send_webhook(embed, "https://discord.com/api/webhooks/1311127129731108944/RNlwYAMpLH1tJmwSTNDfuFOb9id2EmfC9AEvwSu5Gh-RNKcze35Pnp8asRBGt7dRsUaI")                    # Send trade request
+                            self.discord_webhook.send_webhook(embed, "https://discord.com/api/webhooks/1311127129731108944/RNlwYAMpLH1tJmwSTNDfuFOb9id2EmfC9AEvwSu5Gh-RNKcze35Pnp8asRBGt7dRsUaI")                    
+
+                            # PRINT THE TRADE
+                            send_items = embed_fields['Send'][0]
+                            receive_items = embed_fields['Receive'][0]
+                            if isinstance(send_items, tuple):
+                                send_items = '\n'.join(map(str, send_items))
+                            if isinstance(receive_items, tuple):
+                                receive_items = '\n'.join(map(str, receive_items)) 
+
+
+                            breakdown = embed_fields['Trade Breakdown']
+
+                            divider = "=" * 40  
+
+                            print(f"\n{divider}")
+                            print("[TRADE INFO]".center(40, "="))
+                            print(f"Total Profit: {total_profit}\n")
+                            print(f"Sending: \n{send_items}")
+                            print(f"\nRecieve: \n{receive_items}")
+                            print(f"\n*** BREAKDOWN ***\n{breakdown}")
+                            print(f"\n{divider}\n")
                             pass
                     else:
                         if not account_inventory:
