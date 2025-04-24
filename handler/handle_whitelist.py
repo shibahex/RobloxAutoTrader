@@ -212,7 +212,13 @@ class Whitelist():
             encrypted_data = self.encrypt_with_public_key(send_data)
             signature_base64 = self.sign_with_private_key(self.client_priv, send_data)
 
-            response = self.req.post("https://www.doggotradebot.xyz/register", json={'encryptedData': encrypted_data, 'sig': signature_base64}, verify=True)
+            while True:
+                try:
+                    response = self.req.post("https://www.doggotradebot.xyz/register", json={'encryptedData': encrypted_data, 'sig': signature_base64}, verify=True)
+                    break
+                except: 
+                    print("Failed to contact whitelist API retrying")
+                    time.sleep(1)
 
             if response.status_code == 200:
         
@@ -285,7 +291,14 @@ class Whitelist():
         encrypted_message_base64 = self.encrypt_with_public_key(message)
 
         try:
-            response = self.req.post(url, json={'encryptedData': encrypted_message_base64, 'sig': signature_base64})
+            while True:
+                try:
+                    response = self.req.post(url, json={'encryptedData': encrypted_message_base64, 'sig': signature_base64})
+                    break
+                except: 
+                    print("Whitelist API not responding retrying")
+                    time.sleep(1)
+
             
             if response.status_code != 200:
                 if 'encryptedData' in response.text:

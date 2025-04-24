@@ -64,7 +64,12 @@ class RequestsHandler:
         Posts the auth API and grabs the csrf and sets the Class headers as the csrf
         The API response has a failure status code, but we still get the token.
         """
-        response = self.Session.post('https://auth.roblox.com/v2/login', data={})
+        try:
+            response = self.Session.post('https://auth.roblox.com/v2/login', data={})
+        except:
+            print("Failed to post csrf token. returning none")
+            return None
+
         if 'x-csrf-token' in response.headers:
             print("[INFO] new token", response.headers['x-csrf-token'])
             self.headers['x-csrf-token'] = response.headers['x-csrf-token']

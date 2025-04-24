@@ -199,6 +199,7 @@ class Doggo:
         def check_oubounds():
             for account in roblox_accounts:
                 if account.config.debug['dont_check_outbounds'] == False:
+                    print("Checking outbounds")
                     account.outbound_api_checker()
                 account.check_completeds()
 
@@ -289,10 +290,12 @@ class Doggo:
 
                 if not current_account.account_inventory:
                     print(current_account.username, "has no tradeable inventory")
+                    self.json.add_ratelimit_timestamp(account.cookies['.ROBLOSECURITY'])
                     time.sleep(5)
                     continue
                 if current_account.check_premium(current_account.account_id) == False:
                     print(current_account.username, "is not premium")
+                    self.json.add_ratelimit_timestamp(account.cookies['.ROBLOSECURITY'])
                     time.sleep(5)
                     continue
 
@@ -484,7 +487,7 @@ if __name__ == "__main__":
             time.sleep(1)
             Doggo().whitelist_manager.main()
         doggo.main()
-
+        
     except Exception as e:
         tb = traceback.format_exc()  # Capture the full traceback
         print(e, tb)

@@ -359,7 +359,7 @@ class RobloxAPI():
             if not self.account_inventory:
                 print(f"[DEBUG] In counter, {self.username} has no tradeable inv refreshing inventory")
                 self.refresh_self_inventory()
-                break
+                return False
 
             if not trader_inventory:
                 continue
@@ -829,7 +829,7 @@ class RobloxAPI():
         while True:
             if collectibleItemId != None:
                 url = f"https://apis.roblox.com/marketplace-sales/v1/item/{collectibleItemId}/resale-data"
-                "/marketplace-sales/v1/item/5060a9f2-cae0-4123-88c6-0eab5e2e2b59/resale-data"
+                #"/marketplace-sales/v1/item/5060a9f2-cae0-4123-88c6-0eab5e2e2b59/resale-data"
             else:
                 url = f"https://economy.roblox.com/v1/assets/{item_id}/resale-data?limit=100"
 

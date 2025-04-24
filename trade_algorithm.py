@@ -406,7 +406,7 @@ class TradeMaker():
         if robux != None and robux != 0:
             # see if value is losing because of robux
             # TODO: test to make sure this is a valid method of doing this
-            if (value_gain + robux) < self.min_value_gain:
+            if self.min_value_gain and (value_gain + robux) < self.min_value_gain:
                 # print("robux false")
                 return False, "value_gain"
 
@@ -462,7 +462,8 @@ class TradeMaker():
         
         if len(keys) < min_items:
             print(f"Error: Not enough keys to generate combinations. Keys: {keys}, Min items: {min_items}")
-            return
+            print("Ignoring to send trades")
+            # return
 
         # Adjust bounds for min_items and max_items
         min_items = max(1, min_items)
