@@ -322,6 +322,13 @@ class Whitelist():
         response, message_sent = self.send_whitelist_post(username, password, orderid, "https://www.doggotradebot.xyz/reset-ip")
 
         if not response:
+            try:
+                decrtyped_response = self.decrypt_with_private_key(response)
+                print(decrtyped_response)
+            except:
+                print(response.text)
+                pass
+                
             return False
 
         if response.status_code == 200:
