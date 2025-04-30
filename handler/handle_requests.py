@@ -5,9 +5,8 @@ import requests
 import re
 
 
-
 class RequestsHandler:
-    def __init__(self, Session: requests.Session = requests.Session(), use_proxies=False, cookie:dict=None) -> None:
+    def __init__(self, Session: requests.Session = requests.Session(), use_proxies=False, cookie: dict = None) -> None:
         self.use_proxies = use_proxies
         self.proxies = []
         self.proxy_timeout = {}
@@ -25,7 +24,8 @@ class RequestsHandler:
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',  # Can be adjusted based on your preferred language
+            # Can be adjusted based on your preferred language
+            'Accept-Language': 'en-US,en;q=0.5',
             'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
@@ -58,14 +58,14 @@ class RequestsHandler:
         proxy_dict = {"http": proxy, "https": proxy}
         return proxy_dict
 
-
     def generate_csrf(self):
         """
         Posts the auth API and grabs the csrf and sets the Class headers as the csrf
         The API response has a failure status code, but we still get the token.
         """
         try:
-            response = self.Session.post('https://auth.roblox.com/v2/login', data={})
+            response = self.Session.post(
+                'https://auth.roblox.com/v2/login', data={})
         except:
             print("Failed to post csrf token. returning none")
             return None
@@ -74,7 +74,8 @@ class RequestsHandler:
             print("[INFO] new token", response.headers['x-csrf-token'])
             self.headers['x-csrf-token'] = response.headers['x-csrf-token']
         else:
-            print(f'[ERROR] Invalidated cookie returned in generate_csrf; {response.headers}')
+            print(f'[ERROR] Invalidated cookie returned in generate_csrf; {
+                  response.headers}')
 
     def requestAPI(self, URL, method="get", payload=None, additional_headers=None) -> requests.Response:
         """
@@ -88,13 +89,16 @@ class RequestsHandler:
 
         if not self.proxies:
             self.use_proxies = False
-        
-        consecutive_rate_limits = 0  
+
+        consecutive_rate_limits = 0
+        retries = 0
         refreshed_csrf = False
         while True:
+
             headers = self.headers.copy()  # Create a copy of the original headers
             if additional_headers:
-                headers.update(additional_headers)  # Add the additional headers temporarily
+                # Add the additional headers temporarily
+                headers.update(additional_headers)
 
             if self.cookie:
                 self.Session.cookies.update(self.cookie)
@@ -107,26 +111,31 @@ class RequestsHandler:
                 continue
             try:
                 if method.lower() == "get":
-                    #print(URL)
+                    # print(URL)
                     Response = self.Session.get(
                         URL, headers=headers, proxies=proxy_dict, timeout=30)
                 elif method.lower() == "post":
                     Response = self.Session.post(
                         URL, headers=headers, json=payload, proxies=proxy_dict, timeout=30)
-            except Exception as  e:  # except requests.exceptions.ProxyError:
+            except Exception as e:  # except requests.exceptions.ProxyError:
                 if self.use_proxies != False:
                     print(f"Proxy  Error {proxy_dict['http']}.. blacklisting")
                     self.rate_limit(proxy_dict['http'])
-                else: 
+                else:
                     print("Got Error getting/posting API", e)
                     self.Session.close()
                     time.sleep(10)
-                    self.Session = requests.Session()  # Recreate the session to avoid stale connections
+                    # Recreate the session to avoid stale connections
+                    self.Session = requests.Session()
                 continue
 
             """
             Status Code Managment
             """
+            if Response.status_code != 429:
+                retries += 1
+            if retries > 3:
+                return Response
 
             if Response.status_code == 429:
                 print("[INFO] hit ratelimit on url", URL, Response.json())
@@ -147,14 +156,13 @@ class RequestsHandler:
 
                     consecutive_rate_limits = self.ratelimit_urls[URL]
                     wait_time = 10 * (2 ** consecutive_rate_limits)
-                    print(f"[INFO] Rate limited {URL} without proxies, waiting {wait_time} secs.", URL)
+                    print(f"[INFO] Rate limited {
+                          URL} without proxies, waiting {wait_time} secs.", URL)
                     time.sleep(wait_time)
                     if consecutive_rate_limits > 4:
                         del self.ratelimit_urls[URL]
                         return Response
                     continue
-
-
 
             if Response.status_code == 200:
                 # Because roblox API is weird and sometimes returns 200 with errors
@@ -167,26 +175,28 @@ class RequestsHandler:
                 return Response
 
             elif Response.status_code == 403 or Response.status_code == 401 or Response.status_code == 500:
-                #print("Unathorized API, waiting 10 seconds then handling")
-                #time.sleep(10)
+                # print("Unathorized API, waiting 10 seconds then handling")
+                # time.sleep(10)
 
                 # This API doesn't work for some items
                 if 'inventory.roblox.com/v2' in Response.url:
                     return Response
 
-                print("[DEBUG] Request Auth Failed, seeing what to do for request", "\n[DEBUG]:", Response.text, Response.url)
-                #print(self.headers, "\nresponse headers:", Response.headers, "\n[Cookie]", self.Session.cookies, "\nPassed through cookies:", self.cookie)
+                print("[DEBUG] Request Auth Failed, seeing what to do for request",
+                      "\n[DEBUG]:", Response.text, Response.url, Response.status_code)
+                # print(self.headers, "\nresponse headers:", Response.headers, "\n[Cookie]", self.Session.cookies, "\nPassed through cookies:", self.cookie)
 
                 if "trade" not in Response.url and Response.status_code == 500:
                     print("API failed to respond", URL)
 
                 # If x-csrf-token is invalid apparently the response will provide you with a new one
                 if 'x-csrf-token' in Response.headers:
-                    print("Sucessfully gotten new token from headers", Response.headers['x-csrf-token'], "Old token:", self.headers['x-csrf-token'])
+                    print("Sucessfully gotten new token from headers",
+                          Response.headers['x-csrf-token'], "Old token:", self.headers['x-csrf-token'])
                     self.headers['x-csrf-token'] = Response.headers['x-csrf-token']
                 else:
                     self.generate_csrf()
-                
+
                 # Retry with new csrf once IF there is no 2fa prompt
                 if 'rblx-challenge-id' not in Response.headers:
                     refreshed_csrf = True
@@ -195,25 +205,26 @@ class RequestsHandler:
                     return Response
 
             elif Response.status_code == 400:
-                print("Requests payload error, returning", Response.text, payload)
+                print("Requests payload error, returning",
+                      Response.text, payload)
                 return Response
             elif Response.status_code == 429:
                 # NOTE: Handled above..
                 continue
             else:
-                print("Unknown Error Code on", URL, Response.status_code, Response.text)
+                print("Unknown Error Code on", URL,
+                      Response.status_code, Response.text)
                 return Response
 
             # return None
 
-
     def load_proxies(self, file_path='proxies.txt'):
         try:
             with open(file_path, 'r') as file:
-                self.proxies = ["http://" + line.strip() for line in file if line.strip()]
+                self.proxies = ["http://" + line.strip()
+                                for line in file if line.strip()]
         except Exception as e:
             print("No proxy file, returning None.", e)
 
     def refresh_proxies(self, file_path='proxies.txt'):
         self.load_proxies(file_path)
-
