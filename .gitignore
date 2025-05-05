@@ -7,3 +7,5 @@ venv/
 proxies.txt
 cookies*
 .*
+*.crt
+logs/
