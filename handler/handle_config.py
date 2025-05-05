@@ -1,22 +1,26 @@
+from handler.handle_logs import log
+
 import configparser
+
 
 class ConfigHandler:
     def __init__(self, filename="config.cfg"):
         self.config = configparser.ConfigParser()
         self.config.read(filename)
-        
+
         # Load configuration values into attributes
         self.scan_items = self.load_scan_items()
         self.filter_users = self.load_filter_users()
-        #self.prediction_algorithm = self.load_prediction_algorithm()
+        # self.prediction_algorithm = self.load_prediction_algorithm()
         self.trading = self.load_trading()
         self.filter_items = self.load_filter_items()
         self.filter_generated = self.load_filter_generated()
         self.projected_detection = self.load_projected_detection()
         self.inbounds = self.load_inbounds()
         self.debug = self.load_debug()
-        #self.mass_sender = self.load_mass_sender()
-        # Check if config is filled out 
+        self.discord_settings = self.load_discord()
+        # self.mass_sender = self.load_mass_sender()
+        # Check if config is filled out
         self.validate_config()
 
     def convert_gain(self, gain):
@@ -41,7 +45,8 @@ class ConfigHandler:
         """
 
         if base_value == 0:
-            return 0 if is_percentage else gain  # Adjust fallback behavior as needed.
+            # Adjust fallback behavior as needed.
+            return 0 if is_percentage else gain
 
         return (gain / base_value) * 100 if is_percentage else gain
 
@@ -51,9 +56,10 @@ class ConfigHandler:
         """
         gain = their_value - self_value
 
-        min_gain, is_min_percentage = self.convert_gain(min_gain) if min_gain != None else (None, False)
-        max_gain, is_max_percentage = self.convert_gain(max_gain) if max_gain != None else (None, False)
-
+        min_gain, is_min_percentage = self.convert_gain(
+            min_gain) if min_gain != None else (None, False)
+        max_gain, is_max_percentage = self.convert_gain(
+            max_gain) if max_gain != None else (None, False)
 
         if min_gain is not None:
             min_gain = min_gain * 100 if is_min_percentage else min_gain
@@ -77,6 +83,11 @@ class ConfigHandler:
             return max_profit <= max_gain
         return True
 
+    def load_discord(self):
+        return {
+            "Send_Webhook": self.get_string("Discord", "Send Webhook"),
+            "Completed_Webhook": self.get_string("Discord", "Completed Webhook"),
+        }
 
     def load_scan_items(self):
         return {
@@ -94,6 +105,7 @@ class ConfigHandler:
         return {
             'Minimum_Total_Items': self.get_int('Filtering Users', 'Minimum Total Items'),
         }
+
     def load_debug(self):
         return {
             'trading_debug': self.get_boolean('debug', 'Show Trade Debug'),
@@ -104,7 +116,7 @@ class ConfigHandler:
             'show_scanning_inventory': self.get_boolean('debug', 'Show Scanning Inventory')
         }
 
-    #def load_prediction_algorithm(self):
+    # def load_prediction_algorithm(self):
     #    return {
     #        'Predict_Values_of_Your_Inventory': self.get_string('Prediction Algorithm', 'Predict Values of your Inventory'),
     #        'Predict_Values_of_Their_Inventory': self.get_string('Prediction Algorithm', 'Predict Values of their Inventory'),
@@ -125,6 +137,7 @@ class ConfigHandler:
             'MinDailySales': self.get_float('Filtering Items', 'Minimum Daily Sales of Item'),
             'MaxSalesGap': self.get_float('Filtering Items', 'Maximum Average Gaps in Sales'),
         }
+
     def load_filter_generated(self):
         return {
             'Max_Seconds_Spent_on_One_User': self.get_float('Filtering Generated Trades', 'Max Seconds Spent on One User'),
@@ -132,6 +145,7 @@ class ConfigHandler:
             'Max_Valid_Trades': self.get_float('Filtering Generated Trades', 'Max Valid Trades'),
             'Select_Trade_Using': self.get_string('Filtering Generated Trades', 'Select Trade Using')
         }
+
     def load_trading(self):
         return {
             'Outbound_Cancel_Offset': self.get_int('Outbound Settings', 'Outbound Minimum Gain Offset to Cancel'),
@@ -159,6 +173,7 @@ class ConfigHandler:
             'MinimumValueOfTrade': self.get_float('Trading Settings', 'Minimum Value Sum Of Trade'),
             'MinimumRapOfTrade': self.get_float('Trading Settings', 'Minimum Rap Sum Of Trade'),
         }
+
     def load_inbounds(self):
         return {
             'CounterTrades': self.get_boolean('Inbound Settings', 'Counter Trades'),
@@ -185,14 +200,14 @@ class ConfigHandler:
         try:
             return self.config.getint(section, option) if self.config.has_option(section, option) else None
         except (ValueError, TypeError) as e:
-            print(f"Error retrieving integer for [{section}] {option}: {e}")
+            log(f"Error retrieving integer for [{section}] {option}: {e}")
             return "Not Set"
 
     def get_float(self, section, option):
         try:
             return self.config.getfloat(section, option) if self.config.has_option(section, option) else None
         except (ValueError, TypeError) as e:
-            #print(f"Error retrieving float for [{section}] {option}: {e}")
+            # log(f"Error retrieving float for [{section}] {option}: {e}")
             try:
                 string = self.get_string(section, option)
                 if string.lower() == "false" or string.lower() == "none":
@@ -205,14 +220,14 @@ class ConfigHandler:
         try:
             return self.config.get(section, option) if self.config.has_option(section, option) else None
         except (ValueError, TypeError) as e:
-            print(f"Error retrieving string for [{section}] {option}: {e}")
+            log(f"Error retrieving string for [{section}] {option}: {e}")
             return "Not Set"
 
     def get_boolean(self, section, option):
         try:
             return self.config.getboolean(section, option) if self.config.has_option(section, option) else None
         except (ValueError, TypeError) as e:
-            print(f"Error retrieving boolean for [{section}] {option}: {e}")
+            log(f"Error retrieving boolean for [{section}] {option}: {e}")
             return "Not Set"
 
     def get_list(self, section, option):
@@ -226,16 +241,14 @@ class ConfigHandler:
                 return valid_values
             return []
         except (ValueError, TypeError) as e:
-            print(f"Error retrieving list of integers for [{section}] {option}: {e}")
+            log(f"Error retrieving list of integers for [{
+                section}] {option}: {e}")
             return []
-
-
 
     def validate_config(self):
         # Check if any required values are None and raise an error
         for section in [self.scan_items, self.filter_users, self.trading, self.projected_detection]:
             for key, value in section.items():
                 if value == "Not Set":
-                    raise ValueError(f"Configuration error: '{key}' is missing or invalid.")
-
-
+                    raise ValueError(f"Configuration error: '{
+                                     key}' is missing or invalid.")

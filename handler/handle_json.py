@@ -2,11 +2,14 @@ import json
 import threading
 import os
 import handler.handle_cli as handle_cli
-#import handler.handle_cli
+# import handler.handle_cli
 import time
 from datetime import datetime, timedelta
+from handler.handle_logs import log
+
 # NOTE: I can optimize json reading and stuff by not having cookies.json a list of dicts
 # rather it could be dicts with the keys as the userids
+
 
 class JsonHandler:
     def __init__(self, filename):
@@ -20,12 +23,11 @@ class JsonHandler:
             self.write_data(initial_data)
 
         if not os.path.exists(self.filename):
-            print("File doenst exist generating empty json.")
+            log("File doenst exist generating empty json.")
             self.write_data({})
-            #Hide it
+            # Hide it
             if self.filename[0] == "." and os.name == 'nt':
                 os.system(f'attrib +h +s {self.filename}')  # Hide the file
-
 
     def read_data(self) -> dict:
         """Reads data from the JSON file."""
@@ -36,7 +38,8 @@ class JsonHandler:
                 with open(self.filename, 'r') as file:
                     return json.load(file)
             except json.JSONDecodeError:
-                self.cli.print_error(f"Error decoding JSON, returning empty data. {self.filename} clearing file..")
+                log(f"Error decoding JSON, returning empty data. {
+                    self.filename} clearing file..", severityNum=4)
                 time.sleep(3)
                 initial_data = {}
                 if self.filename == "cookies.json":
@@ -45,8 +48,7 @@ class JsonHandler:
                     }
                 self.write_data(initial_data)
 
-
-                return  None
+                return None
             finally:
                 if self.filename[0] == "." and os.name == 'nt':
                     os.system(f'attrib +h +s {self.filename}')
@@ -57,17 +59,17 @@ class JsonHandler:
 
         # Unhide the file if needed (Windows)
         if self.filename[0] == "." and os.name == 'nt':
-            os.system(f'attrib -h -s "{self.filename}"') 
-            os.system(f'attrib -h -s "{temp_file}"') 
+            os.system(f'attrib -h -s "{self.filename}"')
+            os.system(f'attrib -h -s "{temp_file}"')
 
         try:
             with self.lock:
                 with open(temp_file, 'w', encoding="utf-8") as file:
                     json.dump(data, file, indent=4)
                     file.flush()
-                    os.fsync(file.fileno())  
+                    os.fsync(file.fileno())
                     # Ensure data is written to disk
-                os.replace(temp_file, self.filename)  
+                os.replace(temp_file, self.filename)
         finally:
             # Re-hide the file if needed (Windows)
             if self.filename[0] == "." and os.name == 'nt':
@@ -85,18 +87,17 @@ class JsonHandler:
 
     def return_name_from_id(self, user_id):
         data = self.read_data()
-        
+
         for account in data['roblox_accounts']:
             if str(account.get('user_id')) == str(user_id):
                 return account.get("username")
-        
-        return "Couldn't find username."
 
+        return "Couldn't find username."
 
     def return_userid_from_index(self, index: int, check_config=False):
         index = int(index) - 1
         data = self.read_data()
-        
+
         # Filter accounts based on `check_config`
         if check_config:
             with open("account_configs.jsonc", 'r') as file:
@@ -117,8 +118,7 @@ class JsonHandler:
         else:
             return False
 
-
-    def toggle_cookie(self, index:int) -> None:
+    def toggle_cookie(self, index: int) -> None:
         data = self.read_data()
         if 0 <= index < len(data['roblox_accounts']):
             toggle = data['roblox_accounts'][index]['use_account']
@@ -141,7 +141,7 @@ class JsonHandler:
         return False
 
     def is_all_ratelimited(self):
-        
+
         data = self.read_data()
         for account in data['roblox_accounts']:
             if account['use_account'] == True:
@@ -150,18 +150,18 @@ class JsonHandler:
                 ratelimit_timestamp = account['ratelimit_timestamp']
                 # Parse the timestamp string into a datetime object
                 try:
-                    timestamp_date = datetime.fromisoformat(ratelimit_timestamp)
+                    timestamp_date = datetime.fromisoformat(
+                        ratelimit_timestamp)
                 except:
                     # Handle invalid timestamp format if needed
                     return False
-                
-
 
                 if current_date - timestamp_date >= timedelta(hours=6):
                     # greater than 6 hours
                     account['ratelimit_timestamp'] = None
                     self.write_data(data)
-                    print("wrote data for timestamp", current_date, "minus", timestamp_date, ">=", timedelta(hours=6))
+                    print("wrote data for timestamp", current_date,
+                          "minus", timestamp_date, ">=", timedelta(hours=6))
                     return False
 
         return True
@@ -180,8 +180,6 @@ class JsonHandler:
             if account.get('cookie') == cookie:
                 return account['last_completed']
 
-
-
     def check_ratelimit_cookie(self, cookie) -> None:
         """
             Checks if the cookie is ratelimited or not
@@ -194,11 +192,11 @@ class JsonHandler:
                 if ratelimit_timestamp == None:
                     return False
 
-                
                 timestamp = account['ratelimit_timestamp']
                 # Parse the timestamp string into a datetime object
                 try:
-                    timestamp_date = datetime.fromisoformat(ratelimit_timestamp)
+                    timestamp_date = datetime.fromisoformat(
+                        ratelimit_timestamp)
                 except:
                     # Handle invalid timestamp format if needed
                     return False
@@ -210,15 +208,16 @@ class JsonHandler:
                     account['ratelimit_timestamp'] = None
                     self.write_data(data)
                     return False
-                
+
                 return True
 
     def add_cookie(self, cookie, username, user_id, auth) -> None:
         data = self.read_data()
-        
+
         # Check for duplicate cookies
         if not any(account['cookie'] == cookie for account in data['roblox_accounts']):
-            data['roblox_accounts'].append({'username': username, "user_id": user_id, 'use_account': True, 'last_completed': None,'cookie': cookie, 'auth_secret': auth, 'ratelimit_timestamp': None})
+            data['roblox_accounts'].append({'username': username, "user_id": user_id, 'use_account': True,
+                                           'last_completed': None, 'cookie': cookie, 'auth_secret': auth, 'ratelimit_timestamp': None})
 
             self.write_data(data)
             self.cli.print_success("Cookie added suscessfully")
@@ -227,7 +226,7 @@ class JsonHandler:
             print("Cookie already exists.")
             time.sleep(1)
 
-    def delete_cookie(self, index:int) -> None:
+    def delete_cookie(self, index: int) -> None:
         data = self.read_data()
         if 0 <= index < len(data['roblox_accounts']):
             del data['roblox_accounts'][index]
@@ -237,7 +236,6 @@ class JsonHandler:
         else:
             self.cli.print_error("Invalid index. No cookie deleted.")
 
-    
     def list_cookies(self, check_config=False) -> None:
         def ordinal(num):
             special_ordinals = {1: "first", 2: "second", 3: "third"}
@@ -261,14 +259,16 @@ class JsonHandler:
                     if account['user_id'] in settings_data.keys():
                         continue
 
-                cookie_count +=1
-                title = f"{handle_cli.magenta}[{handle_cli.reset+str(cookie_count)+handle_cli.magenta}] {ordinal(cookie_count)} cookie{handle_cli.reset}"
+                cookie_count += 1
+                title = f"{handle_cli.magenta}[{handle_cli.reset+str(cookie_count)+handle_cli.magenta}] {
+                    ordinal(cookie_count)} cookie{handle_cli.reset}"
 
-                shorten_cookie = account['cookie'][:len(account['cookie']) // 6]
-                cookie_info = f"\nusername: {account['username']},\n user id: {account['user_id']}\nratelimited: {account['ratelimit_timestamp']}\nenabled: {account['use_account']}\n\nshortened cookie: {shorten_cookie}\nauth secret: {account['auth_secret']}\n"
+                shorten_cookie = account['cookie'][:len(
+                    account['cookie']) // 6]
+                cookie_info = f"\nusername: {account['username']},\n user id: {account['user_id']}\nratelimited: {account['ratelimit_timestamp']}\nenabled: {
+                    account['use_account']}\n\nshortened cookie: {shorten_cookie}\nauth secret: {account['auth_secret']}\n"
 
-
-                print("---" + title + "---" + cookie_info )
+                print("---" + title + "---" + cookie_info)
 
         else:
             print("no cookies found.")
@@ -280,7 +280,8 @@ class JsonHandler:
 
         default_keys = default_trading_config.keys()
         for user_config in data:
-            inventory_keys = list(data[user_config].keys())  # Convert to list for safe iteration
+            # Convert to list for safe iteration
+            inventory_keys = list(data[user_config].keys())
 
             # Add missing keys
             for key in default_keys:
@@ -298,19 +299,14 @@ class JsonHandler:
         print("Configurations updated with missing keys.")
         time.sleep(3)
 
-
-
-    def update_projected_status(self, item_id:int or str, projected_status: bool, current_price: int or str) -> None:
+    def update_projected_status(self, item_id: int or str, projected_status: bool, current_price: int or str) -> None:
         """Updates the projected status of a specific item ID."""
         data = self.read_data()
         now_time = datetime.now()
 
         data[item_id] = {
-            'is_projected': projected_status, 
+            'is_projected': projected_status,
             'timestamp': now_time.timestamp(),
             'last_price': current_price
         }
         self.write_data(data)
-
-
-

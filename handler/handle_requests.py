@@ -3,6 +3,7 @@ import time
 import random
 import requests
 import re
+from handler.handle_logs import log
 
 
 class RequestsHandler:
@@ -39,7 +40,7 @@ class RequestsHandler:
         """
         Add proxy to timeout and waits.
         """
-        print(f"Rate limit hit for proxy {proxy}, switching proxy...")
+        log(f"Rate limit hit for proxy {proxy}, switching proxy...")
         self.proxy_timeout[proxy] = time.time() + self.timeout_duration
 
     def blacklist_proxy(self, proxy):
@@ -67,15 +68,14 @@ class RequestsHandler:
             response = self.Session.post(
                 'https://auth.roblox.com/v2/login', data={})
         except:
-            print("Failed to post csrf token. returning none")
+            log("Failed to post csrf token. returning none", severityNum=3)
             return None
 
         if 'x-csrf-token' in response.headers:
-            print("[INFO] new token", response.headers['x-csrf-token'])
             self.headers['x-csrf-token'] = response.headers['x-csrf-token']
         else:
-            print(f'[ERROR] Invalidated cookie returned in generate_csrf; {
-                  response.headers}')
+            log(f'[ERROR] Invalidated cookie returned in generate_csrf; {
+                response.headers}', severityNum=3)
 
     def requestAPI(self, URL, method="get", payload=None, additional_headers=None) -> requests.Response:
         """
@@ -119,10 +119,10 @@ class RequestsHandler:
                         URL, headers=headers, json=payload, proxies=proxy_dict, timeout=30)
             except Exception as e:  # except requests.exceptions.ProxyError:
                 if self.use_proxies != False:
-                    print(f"Proxy  Error {proxy_dict['http']}.. blacklisting")
+                    log(f"Proxy  Error {proxy_dict['http']}.. blacklisting")
                     self.rate_limit(proxy_dict['http'])
                 else:
-                    print("Got Error getting/posting API", e)
+                    log(f"Got Error getting/posting API {e}", severityNum=2)
                     self.Session.close()
                     time.sleep(10)
                     # Recreate the session to avoid stale connections
@@ -138,7 +138,7 @@ class RequestsHandler:
                 return Response
 
             if Response.status_code == 429:
-                print("[INFO] hit ratelimit on url", URL, Response.json())
+                log(f"hit ratelimit on url {URL}")
                 if self.use_proxies != False:
                     self.rate_limit(proxy_dict['http'])
                     time.sleep(5)
@@ -156,8 +156,8 @@ class RequestsHandler:
 
                     consecutive_rate_limits = self.ratelimit_urls[URL]
                     wait_time = 10 * (2 ** consecutive_rate_limits)
-                    print(f"[INFO] Rate limited {
-                          URL} without proxies, waiting {wait_time} secs.", URL)
+                    log(f"Rate limited {
+                        URL} without proxies, waiting {wait_time} secs.")
                     time.sleep(wait_time)
                     if consecutive_rate_limits > 4:
                         del self.ratelimit_urls[URL]
@@ -179,7 +179,7 @@ class RequestsHandler:
                 # time.sleep(10)
 
                 # This API doesn't work for some items
-                if 'inventory.roblox.com/v2' in Response.url:
+                if 'inventory' in Response.url:
                     return Response
 
                 print("[DEBUG] Request Auth Failed, seeing what to do for request",
@@ -187,7 +187,7 @@ class RequestsHandler:
                 # print(self.headers, "\nresponse headers:", Response.headers, "\n[Cookie]", self.Session.cookies, "\nPassed through cookies:", self.cookie)
 
                 if "trade" not in Response.url and Response.status_code == 500:
-                    print("API failed to respond", URL)
+                    log(f"API failed to respond {URL}", severityNum=2)
 
                 # If x-csrf-token is invalid apparently the response will provide you with a new one
                 if 'x-csrf-token' in Response.headers:
@@ -205,15 +205,15 @@ class RequestsHandler:
                     return Response
 
             elif Response.status_code == 400:
-                print("Requests payload error, returning",
-                      Response.text, payload)
+                log(f"Requests payload error, Response: Data{Response.text}, {payload}\n Returning Response",
+                    severityNum=1)
                 return Response
             elif Response.status_code == 429:
                 # NOTE: Handled above..
                 continue
             else:
-                print("Unknown Error Code on", URL,
-                      Response.status_code, Response.text)
+                log(f"Unknown Error Code on {URL} {
+                    Response.status_code} {Response.text}", severityNum=4)
                 return Response
 
             # return None
@@ -224,7 +224,7 @@ class RequestsHandler:
                 self.proxies = ["http://" + line.strip()
                                 for line in file if line.strip()]
         except Exception as e:
-            print("No proxy file, returning None.", e)
+            log("No proxy file, returning None.", e)
 
     def refresh_proxies(self, file_path='proxies.txt'):
         self.load_proxies(file_path)
