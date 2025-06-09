@@ -255,6 +255,7 @@ class RobloxAPI():
         """
         This function takes a 401 error response and then returns the 2fa response if there is one
         """
+        print(response.url, "2fa required for this")
         cookie_json = self.json.read_data()
 
         challengeid = response.headers["rblx-challenge-id"]
@@ -282,6 +283,17 @@ class RobloxAPI():
             self.request_handler, challengeid, verification_token, metadata_challengeid)
 
         # before sending the final payout request, add verification information to headers
+        # self.request_handler.headers.update({
+        #     'rblx-challenge-id': challengeid,
+        #     'rblx-challenge-metadata': base64.b64encode(json.dumps({
+        #         "rememberdevice": True,
+        #         "actiontype": "generic",
+        #         "verificationtoken": verification_token,
+        #         "challengeid": metadata_challengeid
+        #     }).encode()).decode(),
+        #     'rblx-challenge-type': "twostepverification"
+        # })
+        #
         return {
             'rblx-challenge-id': challengeid,
             'rblx-challenge-metadata': base64.b64encode(json.dumps({
@@ -299,6 +311,16 @@ class RobloxAPI():
         """
         trades = {}
         for trade in data:
+            trade_id = trade.get("id", None)
+            created = trade.get("created", None)
+            user = trade.get('user', None)
+            if user is None:
+                continue
+            user_id = user.get("id", None)
+
+            if trade_id is None or user_id is None or created is None:
+                continue
+
             trades[trade['id']] = {
                 "trade_id": trade['id'],
                 "user_id": trade['user']['id'],
@@ -311,8 +333,10 @@ class RobloxAPI():
             Get every trade_id from trade pages from APIs: inbounds, outbounds and inactive
             Make sure cursor isn't in the URL arg as the func adds it for you
         """
-        if self.cookies == None:
+        if self.cookies is None:
             input("NOOO COOKIE!!"*300)
+            return None
+
         cursor = ""
         page_count = 0
         trades = {}
@@ -323,9 +347,14 @@ class RobloxAPI():
             # Assuming the URL already has page limit = 100
             response = self.request_handler.requestAPI(
                 f"{page_url}&cursor={cursor}")
+
             if response.status_code == 200:
-                trades.update(self.return_trade_details(
-                    response.json()['data']))
+                data = response.json().get("data", None)
+                if data is not None:
+                    trades.update(self.return_trade_details(
+                        response.json()['data']))
+                else:
+                    continue
                 cursor = response.json()['nextPageCursor']
                 page_count += 1
             elif response.status_code == 429:
@@ -411,8 +440,10 @@ class RobloxAPI():
         """
         # log(response.text, response.url, response.status_code, self.request_handler.headers)
         if 'rblx-challenge-id' in response.headers:
-            log("doing 2fa")
             validation = self.validate_2fa(response)
+            log(f"Auth Handled response {validation}")
+            time.sleep(10)
+            print("returning")
             if validation == False:
                 return 403
             return validation
@@ -715,7 +746,7 @@ class RobloxAPI():
                 f"https://trades.roblox.com/v1/trades/{trade_id}")
             # Handle error
             if trade_info_req.status_code != 200:
-                log(f"trade info api {trade_info.status_code}, {trade_info.text}, Response Headers: {trade_info_req.headers} Url: {trade_info_req.url} Session Cookies: {
+                log(f"trade info api {trade_info_req.status_code}, {trade_info.text}, Response Headers: {trade_info_req.headers} Url: {trade_info_req.url} Session Cookies: {
                     self.request_handler.Session.cookies} Headers: {self.request_handler.Session.headers} account {self.username}", severityNum=3)
                 # self.request_handler.generate_csrf()
                 self.last_generated_csrf_timer = time.time()
@@ -730,8 +761,8 @@ class RobloxAPI():
             # NOTE: Check for duplicates
             for itemId in formatted_trade['their_side_item_ids']:
                 if str(itemId) in self.self_duplicates and self.self_duplicates[str(itemId)] >= self.config.filter_items['Maximum_Amount_of_Duplicate_Items']:
-                    log("[OUTBOUND] Cancel trade for",
-                        itemId, "because duplicates")
+                    log(f"[OUTBOUND] Cancel trade for {
+                        itemId} because duplicates")
                     cancel_request = self.request_handler.requestAPI(
                         url, method="post")
                     time.sleep(1.5)
@@ -876,7 +907,7 @@ class RobloxAPI():
                 time.sleep(30)
             elif resale_data.status_code == 400:
                 log(f"reslate data 400 handling for {
-                    item_id}, plrease report if this is spammed \n{url}", severityNum=2)
+                    item_id}, please report if this is spammed \n{url}", severityNum=2)
                 # Get new id
                 details_url = f"https://catalog.roblox.com/v1/catalog/items/{
                     item_id}/details?itemType=asset"
