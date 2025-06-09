@@ -105,7 +105,7 @@ class Doggo:
             (3, "Whitelist Manager"),
             (4, "Execute Trader"),
         )
-        log("Version: 1 (BETA)")
+        log("Version: 1.0 (BETA)")
         self.cli.print_menu("Main Menu", options)
         try:
             answer = int(self.cli.input_prompt("Enter Option"))
