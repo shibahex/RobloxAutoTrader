@@ -31,7 +31,7 @@ N3bkxXTWRHVitEd0JHUnFucCtlQlowUDlwNwphcVU0S2NXRGFDRkxSZlM3Q1J4N2VSV0kwWXd
 wMGY4Qk53SURBUUFCCi0tLS0tRU5EIFJTQSBQVUJMSUMgS0VZLS0tLS0K
 """
 
-VERSION = "1V"
+VERSION = "1.0V"
 
 
 class Whitelist():
@@ -136,7 +136,18 @@ class Whitelist():
         Decrypts the encryptedData from a response and returns it decoded
         """
         # Decode the private key from Base64
-        encrypted_message_b64 = response.json()['encryptedData']
+        json = None
+        try:
+            json = response.json()['encryptedData']
+        except:
+            try:
+                log(response.text, severityNum=3)
+            except:
+                pass
+            log("Failed to get encrypted data from response",
+                severityNum=3, dontPrint=True)
+            time.sleep(3)
+            return None
 
         private_key_bytes = base64.b64decode(self.client_priv)
         private_key = RSA.import_key(private_key_bytes)
@@ -145,7 +156,7 @@ class Whitelist():
         cipher = PKCS1_OAEP.new(private_key, hashAlgo=SHA256)
 
         # Decode the encrypted message from Base64
-        encrypted_data = base64.b64decode(encrypted_message_b64)
+        encrypted_data = base64.b64decode(json)
 
         # Decrypt the message
         try:
@@ -154,6 +165,7 @@ class Whitelist():
             return decrypted_data.decode('utf-8')
         except ValueError as e:
             log(f"Decryption failed: {e}")
+            time.sleep(3)
             return None
 
     def encrypt_with_public_key(self, message: str):
@@ -180,6 +192,7 @@ class Whitelist():
 
         if 'server_public_key' not in self.req.cookies.keys():
             log("Public key not found, cannot begin authorization.")
+            time.sleep(3)
             return False
 
         try:
@@ -189,6 +202,7 @@ class Whitelist():
                 public_key_der)
         except:
             log("Couldnt get server public key")
+            time.sleep(3)
             return False
 
         return server_public_key
@@ -237,6 +251,7 @@ class Whitelist():
                     except Exception as e:
                         log(f"Couldnt get server public trust key {
                             e}", severityNum=3)
+                        time.sleep(3)
                         return False
 
                     if not self.verify_signature(trust_public_key, send_data, response.json()['trust']):
@@ -268,10 +283,10 @@ class Whitelist():
                             return False
                 else:
                     if 'encryptedData' in response.text:
-                        log(f"Got error from whitelist: {self.decrypt_with_private_key(response)} URL: {
+                        log(f"Got Registering whitelist: {self.decrypt_with_private_key(response)} URL: {
                             response.url} Status Code: {response.status_code}", severityNum=3)
                     else:
-                        log(f"Got error from whitelist {response.text}, URL: {
+                        log(f"Got Registering from whitelist {response.text}, URL: {
                             response.url} Status Code: {response.status_code}", severityNum=3)
 
                     # let people read
@@ -344,7 +359,7 @@ class Whitelist():
                 decrtyped_response = self.decrypt_with_private_key(response)
                 log(decrtyped_response)
             except:
-                log(response.text, severityNum=3)
+                log(response, severityNum=3)
                 pass
 
             return False
@@ -367,6 +382,12 @@ class Whitelist():
 
             if response.status_code == 200:
                 decrtyped_response = self.decrypt_with_private_key(response)
+                if decrtyped_response is None:
+                    log(f"Got error for login API {
+                        response.text}", severityNum=3)
+                    time.sleep(3)
+                    return False
+
                 response_json = response.json()
                 signature_base64 = response_json.get('sig')
                 trusted_sig = response_json.get('trust')
