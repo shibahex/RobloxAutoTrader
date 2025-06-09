@@ -6,6 +6,8 @@ import time
 import traceback
 import os
 import ctypes
+
+
 class WhitelistManager:
     def __init__(self):
         self.cli = Terminal()
@@ -16,7 +18,8 @@ class WhitelistManager:
         order_id = str(input("Enter License Key: "))
         username = str(input("Enter Username: "))
         password = str(input("Enter Password: "))
-        self.json.write_data({'username': username, 'password': password, 'orderid': order_id})
+        self.json.write_data(
+            {'username': username, 'password': password, 'orderid': order_id})
         return order_id, username, password
 
     def register_user(self):
@@ -28,7 +31,7 @@ class WhitelistManager:
             print("User couldn't get registered..")
 
     def main(self):
-        options=( 
+        options = (
             ("1", "Make a new account (Redeem OrderID)"),
             ("2", "Login Existing Order"),
             ("3", "Reset IP & HWID"),
@@ -51,7 +54,8 @@ class WhitelistManager:
                         self.register_user()
                     case 2:
                         order_id, username, password = self.get_info()
-                        valid = self.Whitelist.is_valid(username, password, order_id)
+                        valid = self.Whitelist.is_valid(
+                            username, password, order_id)
                         if valid:
                             print("Valid Whitelist!")
                         else:
@@ -66,12 +70,15 @@ class WhitelistManager:
                         else:
                             order_id, username, password = self.get_info()
 
-                        sucess = self.Whitelist.reset_ip(username, password, order_id)
+                        sucess = self.Whitelist.reset_ip(
+                            username, password, order_id)
                         if sucess:
-                            print("Sucesfully reset IP, please wait 90 minutes before reseting again")
+                            print(
+                                "Sucesfully reset IP, please wait 90 minutes before reseting again")
                             time.sleep(2)
                         else:
-                            print("Couldn't reset IP, whitelist invalid, try to login existing order and try again, or wait 90 minutes for whitelist restart")
+                            print(
+                                "Couldn't reset IP, whitelist invalid, try to login existing order and try again, or wait 90 minutes for whitelist restart")
                             time.sleep(4)
                     case 4:
                         break
