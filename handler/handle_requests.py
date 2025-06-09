@@ -73,6 +73,8 @@ class RequestsHandler:
 
         if 'x-csrf-token' in response.headers:
             self.headers['x-csrf-token'] = response.headers['x-csrf-token']
+            return True
+
         else:
             log(f'[ERROR] Invalidated cookie returned in generate_csrf; {
                 response.headers}', severityNum=3)
@@ -178,24 +180,35 @@ class RequestsHandler:
                 # print("Unathorized API, waiting 10 seconds then handling")
                 # time.sleep(10)
 
+                log(f"Unauthorized debug: {Response.text} {
+                    Response.status_code} {Response.url}")
+
+                if "XSRF token invalid" in Response.text:
+                    gen_status = self.generate_csrf()
+                    log(f"Refreshing CSRF Token: {gen_status}")
+                    continue
+
                 # This API doesn't work for some items
                 if 'inventory' in Response.url:
                     return Response
 
-                print("[DEBUG] Request Auth Failed, seeing what to do for request",
-                      "\n[DEBUG]:", Response.text, Response.url, Response.status_code)
+                if 'Challenge is required' not in Response.text:
+                    log(f"Request Auth Failed, seeing what to do for request Text: {
+                        Response.text} Url: {Response.url}  Status Code{
+                        Response.status_code}\nResponse Headers: {Response.headers}", severityNum=0, dontPrint=True)
+
                 # print(self.headers, "\nresponse headers:", Response.headers, "\n[Cookie]", self.Session.cookies, "\nPassed through cookies:", self.cookie)
 
                 if "trade" not in Response.url and Response.status_code == 500:
                     log(f"API failed to respond {URL}", severityNum=2)
 
                 # If x-csrf-token is invalid apparently the response will provide you with a new one
-                if 'x-csrf-token' in Response.headers:
-                    print("Sucessfully gotten new token from headers",
-                          Response.headers['x-csrf-token'], "Old token:", self.headers['x-csrf-token'])
-                    self.headers['x-csrf-token'] = Response.headers['x-csrf-token']
-                else:
-                    self.generate_csrf()
+                # if 'x-csrf-token' in Response.headers:
+                #     print("Sucessfully gotten new token from headers",
+                #           Response.headers['x-csrf-token'], "Old token:", self.headers['x-csrf-token'])
+                    # self.headers['x-csrf-token'] = Response.headers['x-csrf-token']
+                # else:
+                #     self.generate_csrf()
 
                 # Retry with new csrf once IF there is no 2fa prompt
                 if 'rblx-challenge-id' not in Response.headers:
