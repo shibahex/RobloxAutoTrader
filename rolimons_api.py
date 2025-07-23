@@ -1,6 +1,5 @@
 import json
 import random
-# from handler import *
 from handler.handle_logs import log
 from handler.handle_requests import RequestsHandler
 from handler.handle_json import JsonHandler

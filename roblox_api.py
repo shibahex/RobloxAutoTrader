@@ -1,13 +1,13 @@
-from handler import *
 import requests
 from datetime import datetime, timedelta
 import time
-import os
 import pyotp
 import json
 import base64
-
 import rolimons_api
+from handler.handle_requests import RequestsHandler
+from handler.handle_discord import DiscordHandler
+from handler.handle_config import ConfigHandler
 from handler.handle_json import JsonHandler
 from handler.handle_2fa import AuthHandler
 from trade_algorithm import TradeMaker
@@ -46,7 +46,7 @@ class RobloxAPI():
         self.last_sent_trade = time.time()
         self.last_generated_csrf_timer = time.time()
         self.cookies = None
-        if cookie != None:
+        if cookie is not None:
             self.cookies = cookie
             self.last_completed_scanned = self.json.get_last_completed(
                 cookie['.ROBLOSECURITY'])
@@ -334,7 +334,6 @@ class RobloxAPI():
             Make sure cursor isn't in the URL arg as the func adds it for you
         """
         if self.cookies is None:
-            input("NOOO COOKIE!!"*300)
             return None
 
         cursor = ""
