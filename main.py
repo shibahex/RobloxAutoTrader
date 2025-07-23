@@ -7,10 +7,7 @@ from handler.handle_json import JsonHandler
 from account_manager import AccountManager
 import config_manager
 from handler.account_settings import HandleConfigs
-import os
 import sys
-from whitelist_manager import WhitelistManager
-from handler.handle_whitelist import Whitelist
 from handler.handle_logs import log
 from handler.handle_cli import Terminal
 from handler.handle_discord import DiscordHandler
@@ -52,40 +49,13 @@ class Doggo:
         # self.trader = TradeMaker()
         self.account_configs = HandleConfigs()
         self.discord_webhook = DiscordHandler()
-        self.whitelist = Whitelist()
-        self.whitelist_manager = WhitelistManager()
 
         # Define a stop event that will be shared between threads
         self.stop_event = threading.Event()
 
         # Time Stamps for Routines
-        self.whitelist_checked = time.time()
         self.last_updated_rolimons = time.time()
         self.last_checked_trades = time.time()
-
-    def validate_whitelist(self):
-        """
-            Returns True or False weither the server could validate the credentials in .whitelist file
-            Will Return None if something went wrong
-        """
-        while True:
-            try:
-                if not os.path.isfile(".whitelist"):
-                    log("sending to whitelist menu")
-                    self.whitelist_manager.main()
-                data = self.whitelist_manager.json.read_data()
-                if data and data.get('username') and data.get('password') and data.get('orderid'):
-                    if self.whitelist.is_valid(data['username'], data['password'], data['orderid']):
-                        return True
-                    else:
-                        return False
-                else:
-                    log("Please enter some login details.")
-                    time.sleep(1)
-                    self.whitelist_manager.main()
-            except Exception as e:
-                log(f"Couldn't validate whitelist {e}")
-                raise ValueError("Couldn't validate Whitelist")
 
     def main(self):
         """
@@ -102,8 +72,7 @@ class Doggo:
         options = (
             (1, "Account Manager"),
             (2, "Config Manager"),
-            (3, "Whitelist Manager"),
-            (4, "Execute Trader"),
+            (3, "Execute Trader"),
         )
         log("Version: 1.0 (BETA)")
         self.cli.print_menu("Main Menu", options)
@@ -125,8 +94,6 @@ class Doggo:
                 config_manager.AccountSettings()
                 pass
             case 3:
-                self.whitelist_manager.main()
-            case 4:
                 self.start_trader()
 
     def queue_traders(self, roblox_account: RobloxAPI()):
@@ -179,6 +146,7 @@ class Doggo:
         except Exception as e:
             tb = traceback.format_exc()  # Capture the full traceback
             log(f"{e} {tb}", severityNum=4)
+            time.sleep(5)
 
     def merge_lists(self, list1, list2):
         # Use set to merge and remove duplicates
@@ -197,6 +165,7 @@ class Doggo:
         except Exception as e:
             tb = traceback.format_exc()  # Capture the full traceback
             log(f"{e} {tb}", severityNum=4)
+            time.sleep(5)
 
     def check_outbound_thread(self, roblox_accounts):
         try:
@@ -218,19 +187,7 @@ class Doggo:
         except Exception as e:
             tb = traceback.format_exc()  # Capture the full traceback
             log(f"{e} {tb}", severityNum=4)
-
-    def check_whitelist_timer(self):
-        """
-        Checks the whitelist in intervals
-        """
-        last_checked = time.time() - self.whitelist_checked
-        if last_checked >= 600:
-            self.whitelist_checked = time.time()
-            validate = self.validate_whitelist()
-            if validate is not True:
-                self.stop_event.set()  # Signal all threads to stop
-                input("Whitelist check failed")
-                return False
+            time.sleep(5)
 
     def start_thread(self, thread: threading.Thread):
         thread.daemon = True
@@ -241,11 +198,6 @@ class Doggo:
             Main Loop function that loops through all the accounts and run the traders
         """
         try:
-            if not self.validate_whitelist():
-                log("Whitelist not valid in starting")
-                sys.exit()
-                quit()
-                return False
             roblox_accounts = self.load_roblox_accounts()
             self.start_thread(threading.Thread(
                 target=self.check_outbound_thread, args=(roblox_accounts,)))
@@ -253,11 +205,6 @@ class Doggo:
 
             time.sleep(1)
             while True:
-                if self.check_whitelist_timer() == False:
-                    sys.exit()
-                    quit()
-                    return False
-
                 threads = []
                 if roblox_accounts == []:
                     input("No active accounts found!")
@@ -335,6 +282,7 @@ class Doggo:
         except Exception as e:
             tb = traceback.format_exc()  # Capture the full traceback
             log(f"{e} {tb}", severityNum=4)
+            time.sleep(5)
 
     def process_trades_for_account(self, account):
         """
@@ -343,11 +291,6 @@ class Doggo:
         while True:
             try:
                 account_inventory = account.account_inventory
-
-                if self.check_whitelist_timer() == False:
-                    log("quitting")
-                    sys.exit()
-                    quit()
                 # Check if user queue is empty
                 while not self.user_queue:
                     time.sleep(10)
@@ -469,6 +412,7 @@ class Doggo:
             except Exception as e:
                 tb = traceback.format_exc()  # Capture the full traceback
                 log(f"{e} {tb}", severityNum=4)
+                time.sleep(5)
 
     def load_roblox_accounts(self):
         """
@@ -506,15 +450,13 @@ class Doggo:
 if __name__ == "__main__":
     try:
         doggo = Doggo()
-        if not doggo.validate_whitelist():
-            log("Whitelist not valid")
-            time.sleep(1)
-            Doggo().whitelist_manager.main()
         doggo.main()
 
     except Exception as e:
         tb = traceback.format_exc()  # Capture the full traceback
         log(f"{e} {tb}", severityNum=4)
+        time.sleep(5)
+
     finally:
         sys.exit()
         quit()
