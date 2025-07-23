@@ -33,7 +33,7 @@ This bot used to be a paid service that im releasing, because I dont intend on u
 If you download the exe skip these steps
 ### 1. Clone this repo
 ```bash
-git clone https://github.com/Flaried/TradebotRBX.git
+git clone https://github.com/Flaried/RobloxAutoTrader.git
 cd TradebotRBX
 ```
 
