@@ -34,7 +34,7 @@ If you download the exe skip these steps
 ### 1. Clone this repo
 ```bash
 git clone https://github.com/Flaried/RobloxAutoTrader.git
-cd TradebotRBX
+cd RobloxAutoTrader
 ```
 
 > [!NOTE]
