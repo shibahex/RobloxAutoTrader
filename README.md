@@ -1,4 +1,4 @@
-# DOGGO TRADE BOT
+# DOGGO TRADE BOT 🐕
 [![Roblox](https://img.shields.io/badge/Roblox-00A2FF?style=for-the-badge&logo=roblox&logoColor=white)](https://www.roblox.com/)
 [![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=fff&style=for-the-badge)](#)
 
@@ -9,13 +9,13 @@ A roblox trading bot, automates roblox's player-to-player trading system. It scr
 
 This bot used to be a paid service that im releasing, because I dont intend on updating or rewriting the code.
 # Features
-### Quality of life
+### 🛠️ Quality of life
 - Multiple Cookie Management: Add multiple cookies to trade on and alert when premium expires.
 - Projected Detection: Identify potentially manipulated items
 - Outbound Checker: Cancel Losing outbounds
 - Auto Account Setup: Can login through the browser and the bot will automatically take your cookie.
 
-### Trading Features
+### 🔄 Trading Features
 - Value Trading: Integrates with Rolimons value data
 - RAP Trading: Integrates with Roblox Recent-Average-Price values
 - RAP Algorithm: Algorithm imported from [OTB](https://github.com/pydlv/otb-legacy) to determine the real recent RAP using an algorithm
@@ -29,7 +29,7 @@ This bot used to be a paid service that im releasing, because I dont intend on u
 - User Requirements: Minimum inventory size and item count
 
 
-# 🚀 Installation
+#  Installation
 If you download the exe skip these steps
 ### 1. Clone this repo
 ```bash
@@ -50,13 +50,9 @@ python main.py
 ```
 
 ### Setup
-Video Tutorial (skip to 0:12): https://youtu.be/2SdEivsw8yA?si=kvisNUJGlJV0dyZ9&t=12
-
-After you got the application built, you have to add an account and 2fa authorization secret.
-
-Launch the application and then go to account manager.
-
-Theres two built-in ways of doing this, Automatic browser login or Manual Setup, 
+Video (skip to 0:12): https://youtu.be/2SdEivsw8yA?si=kvisNUJGlJV0dyZ9&t=12
+#### Adding an Account and 2FA Authorization Secret
+Theres two built-in ways of doing this in account manager, automatic browser login or manual setup, 
 
 for automatic login give it your 2fa authorzation secret from ROBLOX (shown in video) and then login to your account through the browser and it will add that account
 
