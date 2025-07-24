@@ -30,7 +30,7 @@ This bot used to be a paid service that im releasing, because I dont intend on u
 
 
 #  Installation
-If you download the exe skip these steps
+If you download the (exe)[https://github.com/Flaried/RobloxAutoTrader/releases/tag/windows] skip these steps
 ### 1. Clone this repo
 ```bash
 git clone https://github.com/Flaried/RobloxAutoTrader.git
