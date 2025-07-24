@@ -5,7 +5,7 @@
 A roblox trading bot, automates roblox's player-to-player trading system. It scrapes trading websites to get values of items then can generate winning trades and mass send them to other roblox users.
 >    [!WARNING]
 >  This bot is for eductional purposes and my first big python project, I would rewrite most of the complex functions and handle errors if I invested more time into this bot.
-<img width="350" height="391" alt="trade1" src="https://github.com/user-attachments/assets/f5941354-2576-4cb3-ad4f-28abeb5889b5" />
+<img width="350" height="276" alt="trade1" src="https://github.com/user-attachments/assets/f5941354-2576-4cb3-ad4f-28abeb5889b5" />
 
 <img width="350" height="500" alt="trade2" src="https://github.com/user-attachments/assets/a3427f47-f6b8-4f1b-b9da-95e47fcabf04" />
 
