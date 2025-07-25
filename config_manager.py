@@ -1,14 +1,13 @@
-import handler.account_settings
-from handler import *
-import time
+from handler.account_settings import HandleConfigs
+from handler.handle_cli import Terminal
+
 
 class AccountSettings():
     def __init__(self):
-        self.account_settings = handler.account_settings.HandleConfigs() 
+        self.account_settings = HandleConfigs()
         self.cli = Terminal()
 
         self.main()
-
 
     def main(self):
         while True:
@@ -48,5 +47,3 @@ class AccountSettings():
                     self.account_settings.check_for_updates()
                 case 7:
                     break
-            
-

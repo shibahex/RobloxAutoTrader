@@ -1,9 +1,14 @@
-from handler import *
 from roblox_api import RobloxAPI
+from handler.handle_json import JsonHandler
+from handler.handle_cli import Terminal
+from handler.handle_2fa import AuthHandler
+from handler.handle_login import FirefoxLogin
 
 COOKIE_WARNING = "_|WARNING:-DO-NOT-SHARE-THIS.--Sharing-this-will-allow-someone-to-log-in-as-you-and-to-steal-your-ROBUX-and-items.|"
 
 # TODO: Add support for adding rolimon cookies
+
+
 class AccountManager:
     def __init__(self):
         self.json_handler = JsonHandler('cookies.json')
@@ -39,21 +44,23 @@ class AccountManager:
                 case 5:
                     break
 
-
     def toggle_accounts(self):
         while True:
             self.cli.clear_console()
             self.json_handler.list_cookies()
             try:
-                index = self.cli.input_prompt("Enter the number of the cookie to toggle (Press enter to stop)")
+                index = self.cli.input_prompt(
+                    "Enter the number of the cookie to toggle (Press enter to stop)")
                 self.json_handler.toggle_cookie(int(index)-1)
             except ValueError:
                 if index.lower() == " " or index.lower() == "":
                     break
 
-                self.cli.print_error(f"Invalid input: '{index}' is not a valid number.")
+                self.cli.print_error(f"Invalid input: '{
+                                     index}' is not a valid number.")
             except Exception as e:
-                self.cli.print_error(f"got execption {e} trying to delete cookie")
+                self.cli.print_error(
+                    f"got execption {e} trying to delete cookie")
                 break
 
     def remove_accounts(self):
@@ -61,21 +68,25 @@ class AccountManager:
             self.cli.clear_console()
             self.json_handler.list_cookies()
             try:
-                index = self.cli.input_prompt("Enter the number of the cookie to delete (Press enter to stop)")
+                index = self.cli.input_prompt(
+                    "Enter the number of the cookie to delete (Press enter to stop)")
                 self.json_handler.delete_cookie(int(index)-1)
             except ValueError:
                 if index.lower() == " " or index.lower() == "":
                     break
-                self.cli.print_error(f"Invalid input: '{index}' is not a valid number.")
+                self.cli.print_error(f"Invalid input: '{
+                                     index}' is not a valid number.")
             except Exception as e:
-                self.cli.print_error(f"got execption {e} trying to delete cookie")
+                self.cli.print_error(
+                    f"got execption {e} trying to delete cookie")
                 break
 
     def manually_add_account(self):
         auth_secret = self.cli.input_prompt("Enter the authorization key")
 
         if not AuthHandler().verify_auth_secret(auth_secret):
-            self.cli.print_error(f"Auth secret isn't right Skipping account...")
+            self.cli.print_error(
+                "Auth secret isn't right Skipping account...")
             return None
 
         acc_cookie = self.cli.input_prompt("Enter Cookie (include warning)")
@@ -90,14 +101,14 @@ class AccountManager:
             self.cli.print_error(f"{error}\nSkipping account...")
             return None
 
-        self.json_handler.add_cookie(acc_cookie, roblox_login.username, roblox_login.account_id, auth_secret)
-
+        self.json_handler.add_cookie(
+            acc_cookie, roblox_login.username, roblox_login.account_id, auth_secret)
 
     def add_account(self):
         auth_secret = self.cli.input_prompt("Enter the authorization key")
 
         if not AuthHandler().verify_auth_secret(auth_secret):
-            self.cli.print_error(f"AUTH CODE INVALID, skipping")
+            self.cli.print_error("AUTH CODE INVALID, skipping")
             return None
 
         firefox = FirefoxLogin()
@@ -110,5 +121,3 @@ class AccountManager:
             firefox.stop()
             return None
         self.json_handler.add_cookie(cookie, username, user_id, auth_secret)
-
-
