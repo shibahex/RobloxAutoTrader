@@ -1,4 +1,4 @@
-# DOGGO TRADE BOT 🐕
+# Multi-account Trading Bot
 [![Roblox](https://img.shields.io/badge/Roblox-00A2FF?style=for-the-badge&logo=roblox&logoColor=white)](https://www.roblox.com/)
 [![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=fff&style=for-the-badge)](#)
 
