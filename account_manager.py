@@ -11,7 +11,7 @@ COOKIE_WARNING = "_|WARNING:-DO-NOT-SHARE-THIS.--Sharing-this-will-allow-someone
 
 class AccountManager:
     def __init__(self):
-        self.json_handler = JsonHandler('cookies.json')
+        self.json_handler = JsonHandler("cookies.json")
         self.cli = Terminal()
         pass
 
@@ -23,7 +23,7 @@ class AccountManager:
                 ("2", "Add Account (Manual)"),
                 ("3", "Remove Accounts"),
                 ("4", "Toggle Accounts"),
-                ("5", "Back to Main Menu")
+                ("5", "Back to Main Menu"),
             )
             self.cli.print_menu("Account Manager", options)
             try:
@@ -50,17 +50,16 @@ class AccountManager:
             self.json_handler.list_cookies()
             try:
                 index = self.cli.input_prompt(
-                    "Enter the number of the cookie to toggle (Press enter to stop)")
-                self.json_handler.toggle_cookie(int(index)-1)
+                    "Enter the number of the cookie to toggle (Press enter to stop)"
+                )
+                self.json_handler.toggle_cookie(int(index) - 1)
             except ValueError:
                 if index.lower() == " " or index.lower() == "":
                     break
 
-                self.cli.print_error(f"Invalid input: '{
-                                     index}' is not a valid number.")
+                self.cli.print_error(f"Invalid input: '{index}' is not a valid number.")
             except Exception as e:
-                self.cli.print_error(
-                    f"got execption {e} trying to delete cookie")
+                self.cli.print_error(f"got execption {e} trying to delete cookie")
                 break
 
     def remove_accounts(self):
@@ -69,24 +68,22 @@ class AccountManager:
             self.json_handler.list_cookies()
             try:
                 index = self.cli.input_prompt(
-                    "Enter the number of the cookie to delete (Press enter to stop)")
-                self.json_handler.delete_cookie(int(index)-1)
+                    "Enter the number of the cookie to delete (Press enter to stop)"
+                )
+                self.json_handler.delete_cookie(int(index) - 1)
             except ValueError:
                 if index.lower() == " " or index.lower() == "":
                     break
-                self.cli.print_error(f"Invalid input: '{
-                                     index}' is not a valid number.")
+                self.cli.print_error(f"Invalid input: '{index}' is not a valid number.")
             except Exception as e:
-                self.cli.print_error(
-                    f"got execption {e} trying to delete cookie")
+                self.cli.print_error(f"got execption {e} trying to delete cookie")
                 break
 
     def manually_add_account(self):
         auth_secret = self.cli.input_prompt("Enter the authorization key")
 
         if not AuthHandler().verify_auth_secret(auth_secret):
-            self.cli.print_error(
-                "Auth secret isn't right Skipping account...")
+            self.cli.print_error("Auth secret isn't right Skipping account...")
             return None
 
         acc_cookie = self.cli.input_prompt("Enter Cookie (include warning)")
@@ -102,7 +99,8 @@ class AccountManager:
             return None
 
         self.json_handler.add_cookie(
-            acc_cookie, roblox_login.username, roblox_login.account_id, auth_secret)
+            acc_cookie, roblox_login.username, roblox_login.account_id, auth_secret
+        )
 
     def add_account(self):
         auth_secret = self.cli.input_prompt("Enter the authorization key")

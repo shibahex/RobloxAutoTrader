@@ -30,7 +30,9 @@ class AuthHandler:
             return False
         return True
 
-    def verify_request(self, req_handler, user_id, metadata_challenge_id, auth_generator):
+    def verify_request(
+        self, req_handler, user_id, metadata_challenge_id, auth_generator
+    ):
         """
         Verify 2FA request for a user using TOTP authenticator.
 
@@ -52,8 +54,8 @@ class AuthHandler:
         while retry_count < max_retries:
             # Check rate limit status
             if self.is_ratelimited:
-                log(f"Rate limited, waiting 1 second (attempt {
-                    retry_count + 1})")
+                log(f"Rate limited, waiting 1 second (attempt {retry_count + 1})")
+
                 time.sleep(1)
                 retry_count += 1
                 continue
@@ -61,29 +63,34 @@ class AuthHandler:
             try:
                 # Make 2FA verification request
                 response = req_handler.Session.post(
-                    f"https://twostepverification.roblox.com/v1/users/{
-                        user_id}/challenges/authenticator/verify",
+                    f"https://twostepverification.roblox.com/v1/users/{user_id}/challenges/authenticator/verify",
                     headers=req_handler.headers,
                     json={
                         "actionType": "Generic",
                         "challengeId": metadata_challenge_id,
-                        "code": auth_generator.now()
-                    }
+                        "code": auth_generator.now(),
+                    },
                 )
 
                 # Success case
                 if response.status_code == 200:
-                    log(f":AUTH STATUS HERE: {response.text}\n{
-                        response.json()}\n{response.headers}", dontPrint=True)
+                    log(
+                        f":AUTH STATUS HERE: {response.text}\n{response.json()}\n{
+                            response.headers
+                        }",
+                        dontPrint=True,
+                    )
                     try:
                         verification_token = response.json().get("verificationToken")
                         if verification_token:
-                            log(f"Successfully obtained verification token for user {
-                                user_id}")
+                            log(
+                                f"Successfully obtained verification token for user {
+                                    user_id
+                                }"
+                            )
                             return verification_token
                         else:
-                            log(f"No verification token in response for user {
-                                user_id}")
+                            log(f"No verification token in response for user {user_id}")
                             return False
                     except (KeyError, ValueError) as e:
                         log(f"Failed to parse successful response: {e}")
@@ -91,8 +98,11 @@ class AuthHandler:
 
                 # Handle error responses
                 if response.status_code == 429:
-                    log(f"Rate limit hit, waiting 75 seconds for user {
-                        user_id} {response.text} {response.url}")
+                    log(
+                        f"Rate limit hit, waiting 75 seconds for user {user_id} {
+                            response.text
+                        } {response.url}"
+                    )
                     self.is_ratelimited = True
                     time.sleep(75)
                     self.is_ratelimited = False
@@ -107,8 +117,11 @@ class AuthHandler:
 
                         # Check for "Authenticator code already used" error
                         if any(error.get("code") == 18 for error in errors):
-                            log(f"Authenticator code already used for user {
-                                user_id}, waiting 30 seconds")
+                            log(
+                                f"Authenticator code already used for user {
+                                    user_id
+                                }, waiting 30 seconds"
+                            )
                             time.sleep(30)
                             retry_count += 1
                             continue
@@ -127,8 +140,11 @@ class AuthHandler:
 
                 except (ValueError, KeyError):
                     # Non-JSON response or missing expected fields
-                    log(f"Non-JSON error response: {
-                        response.text} (status: {response.status_code})")
+                    log(
+                        f"Non-JSON error response: {response.text} (status: {
+                            response.status_code
+                        })"
+                    )
                     req_handler.generate_csrf()
                     retry_count += 1
                     continue
@@ -139,19 +155,26 @@ class AuthHandler:
                 time.sleep(5)  # Brief pause before retry
                 continue
 
-        log(f"2FA verification failed after {
-            max_retries} attempts for user {user_id}")
+        log(f"2FA verification failed after {max_retries} attempts for user {user_id}")
         return False
 
-    def continue_request(self, req_handler, challengeId, verification_token, metadata_challengeId):
-        response = req_handler.Session.post("https://apis.roblox.com/challenge/v1/continue", headers=req_handler.headers, json={
-            "challengeId": challengeId,
-            "challengeMetadata": json.dumps({
-                "rememberDevice": True,
-                "actionType": "Generic",
-                "verificationToken": verification_token,
-                "challengeId": metadata_challengeId
-            }),
-            "challengeType": "twostepverification"
-        })
+    def continue_request(
+        self, req_handler, challengeId, verification_token, metadata_challengeId
+    ):
+        response = req_handler.Session.post(
+            "https://apis.roblox.com/challenge/v1/continue",
+            headers=req_handler.headers,
+            json={
+                "challengeId": challengeId,
+                "challengeMetadata": json.dumps(
+                    {
+                        "rememberDevice": True,
+                        "actionType": "Generic",
+                        "verificationToken": verification_token,
+                        "challengeId": metadata_challengeId,
+                    }
+                ),
+                "challengeType": "twostepverification",
+            },
+        )
         return response

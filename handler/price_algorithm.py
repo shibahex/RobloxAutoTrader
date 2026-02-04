@@ -2,9 +2,15 @@ from typing import List, Dict
 from datetime import datetime
 import time
 
+
 # MADE BY PMETHOD REWRITTEN OLD ALGORITHM
 class SalesVolumeAnalyzer:
-    def __init__(self, sales_data: List[Dict[str, float]], volume_data: List[Dict[str, float]], item_id: str):
+    def __init__(
+        self,
+        sales_data: List[Dict[str, float]],
+        volume_data: List[Dict[str, float]],
+        item_id: str,
+    ):
         """
         Initialize the analyzer with sales and volume data.
 
@@ -30,7 +36,11 @@ class SalesVolumeAnalyzer:
         """Identify low and high points in the dataset."""
         lows, highs = [], []
         for i in range(1, len(data) - 1):
-            prev, curr, nxt = data[i - 1]["value"], data[i]["value"], data[i + 1]["value"]
+            prev, curr, nxt = (
+                data[i - 1]["value"],
+                data[i]["value"],
+                data[i + 1]["value"],
+            )
             if prev > curr < nxt:
                 lows.append(data[i])
             elif prev < curr > nxt:
@@ -57,7 +67,9 @@ class SalesVolumeAnalyzer:
         return segments
 
     @staticmethod
-    def calculate_segment_averages(segments: List[List[Dict[str, float]]]) -> List[float]:
+    def calculate_segment_averages(
+        segments: List[List[Dict[str, float]]],
+    ) -> List[float]:
         """Calculate average values for each segment."""
         averages = []
         for segment in segments:
@@ -65,7 +77,9 @@ class SalesVolumeAnalyzer:
             averages.append(total / len(segment) if segment else 0.0)
         return averages
 
-    def adjust_extrema(self, averages: List[float], thirds: List[List[Dict[str, float]]]) -> List[Dict[str, float]]:
+    def adjust_extrema(
+        self, averages: List[float], thirds: List[List[Dict[str, float]]]
+    ) -> List[Dict[str, float]]:
         """Filter out segments of the data based on average deviations."""
         avg1 = (averages[0] + averages[1]) / 2.0
         avg2 = (averages[1] + averages[2]) / 2.0
@@ -84,7 +98,9 @@ class SalesVolumeAnalyzer:
         total = sum(item["value"] for item in data)
         return total / len(data) if data else 0.0
 
-    def calculate_volume_average(self, data: List[Dict[str, float]], divisor: float) -> float:
+    def calculate_volume_average(
+        self, data: List[Dict[str, float]], divisor: float
+    ) -> float:
         """Calculate the average of the volume data."""
         total = sum(item["value"] for item in data)
         return total / divisor if divisor else 0.0
@@ -122,6 +138,6 @@ class SalesVolumeAnalyzer:
             "value": low_average,
             "volume": volume_average,
             "timestamp": self.now,
-            "age": age
+            "age": age,
         }
         return self.values[self.item_id]

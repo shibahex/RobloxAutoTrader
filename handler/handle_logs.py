@@ -3,7 +3,7 @@ import os
 import time
 
 
-class Logging():
+class Logging:
     """
     A class to handle logging with severity levels,
     It allows for logging messages with different severity levels,
@@ -29,7 +29,7 @@ class Logging():
         logging.basicConfig(filename=log_file, level=logging.INFO)
 
     def log(self, msg, dontPrint=False, severityNum=0) -> None:
-        '''
+        """
         Takes a message then prints and logs it
 
         dontPrint: bool
@@ -43,7 +43,7 @@ class Logging():
 
         Example:
         log("Hello Word", False, 0)
-        '''
+        """
         severity = self.severityStruct.get(severityNum)
         if severity is None:
             print("Invalid severity changing to [INVALID]")
@@ -60,8 +60,11 @@ class Logging():
     @staticmethod
     def cleanupLogs(log_dir="logs", maxLogs=5):
         log_files = [f for f in os.listdir(log_dir) if f.endswith(".log")]
-        log_files = sorted(log_files, key=lambda x: os.path.getmtime(
-            os.path.join(log_dir, x)), reverse=True)
+        log_files = sorted(
+            log_files,
+            key=lambda x: os.path.getmtime(os.path.join(log_dir, x)),
+            reverse=True,
+        )
         files_to_delete = log_files[maxLogs::]
         for file in files_to_delete:
             file_path = os.path.join(log_dir, file)

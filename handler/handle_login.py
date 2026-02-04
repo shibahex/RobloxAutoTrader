@@ -1,4 +1,4 @@
-#from selenium import webdriver
+# from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from webdriver_manager.firefox import GeckoDriverManager
@@ -11,43 +11,44 @@ import pyotp
 import sys
 import os
 
+
 # TODO: create .network directory if not exists, and clear the data alot also I forgor
 class FirefoxLogin:
     """
     Opens the Firefox browser for the user to manually log into a website and captures network logs.
     """
+
     def __init__(self):
         self.firefox_options = webdriver.FirefoxOptions()
-        user_agent = (
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0'
-        )
+        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0"
 
         self.firefox_options.set_preference("general.useragent.override", user_agent)
-        self.firefox_options.add_argument('--private')  # Private mode
+        self.firefox_options.add_argument("--private")  # Private mode
         # Check if the directory exists
-        network_dir = './.network'
+        network_dir = "./.network"
         if not os.path.exists(network_dir):
             # Create the directory
             os.makedirs(network_dir)
-            if os.name == 'nt':
-                os.system(f'attrib +h +s {network_dir}') 
+            if os.name == "nt":
+                os.system(f"attrib +h +s {network_dir}")
 
-        selenium_wire_dir = os.path.join(network_dir, '.seleniumwire')
+        selenium_wire_dir = os.path.join(network_dir, ".seleniumwire")
         if not os.path.exists(selenium_wire_dir):
             os.makedirs(selenium_wire_dir)
 
-        with open(os.path.join(selenium_wire_dir, "seleniumwire-dhparam.pem"), 'w') as f:
+        with open(
+            os.path.join(selenium_wire_dir, "seleniumwire-dhparam.pem"), "w"
+        ) as f:
             f.write(dh_pem)
 
-        with open(os.path.join(selenium_wire_dir, "seleniumwire-ca.pem"), 'w') as f:
+        with open(os.path.join(selenium_wire_dir, "seleniumwire-ca.pem"), "w") as f:
             f.write(ca_pem)
-
 
         # Then use this path for selenium wire options
         self.selenium_wire_options = {
-            'request_storage_base_dir': './.network',
-            'request_storage': 'memory',
-            'request_storage_max_size': 100  # Store no more than 100 requests in memory
+            "request_storage_base_dir": "./.network",
+            "request_storage": "memory",
+            "request_storage_max_size": 100,  # Store no more than 100 requests in memory
         }
         self.initialize_browser()
 
@@ -56,8 +57,9 @@ class FirefoxLogin:
         self.browser = webdriver.Firefox(
             service=FirefoxService(GeckoDriverManager().install()),
             options=self.firefox_options,
-            seleniumwire_options=self.selenium_wire_options
+            seleniumwire_options=self.selenium_wire_options,
         )
+
     def enter_auth(self, totp_secret):
         while True:
             try:
@@ -65,14 +67,18 @@ class FirefoxLogin:
                 print("[Debug] Current Auth Code: ", totp.now())
                 # Wait for the modal to be visible
                 modal = WebDriverWait(self.browser, 360).until(
-                    EC.visibility_of_element_located((By.CSS_SELECTOR, "div.modal.fade.modal-modern.in"))
+                    EC.visibility_of_element_located(
+                        (By.CSS_SELECTOR, "div.modal.fade.modal-modern.in")
+                    )
                 )
 
                 code_input = WebDriverWait(modal, 360).until(
-                    EC.visibility_of_element_located((By.CSS_SELECTOR, "#two-step-verification-code-input"))
+                    EC.visibility_of_element_located(
+                        (By.CSS_SELECTOR, "#two-step-verification-code-input")
+                    )
                 )
                 print("Two-step verification input detected.")
-                time.sleep(.1)
+                time.sleep(0.1)
 
                 # Generate the TOTP code
                 auth_code = totp.now()  # Get the current code
@@ -82,24 +88,24 @@ class FirefoxLogin:
                 print(f"Generated Auth Code: {auth_code}")
 
                 # Click the Verify button
-                verify_button = modal.find_element(By.CSS_SELECTOR, "button.btn-cta-md[aria-label='Verify']")
+                verify_button = modal.find_element(
+                    By.CSS_SELECTOR, "button.btn-cta-md[aria-label='Verify']"
+                )
                 verify_button.click()
                 return True
             except Exception as e:
                 print(f"Error while waiting for the two-step verification input: {e}")
 
-
-
     def roblox_login(self, totp_secret):
         """Logs in to Roblox and captures network requests."""
         # Open the Roblox login page
         self.browser.get("https://www.roblox.com/login")
-        
+
         # Store the initial URL
         initial_url = self.browser.current_url
 
         print("Waiting for user to log in...")
-        
+
         try:
             # Wait for the user to log in by checking if the URL changes
             while True:
@@ -113,28 +119,33 @@ class FirefoxLogin:
                 if current_url != initial_url:
                     print("Login detected. Capturing network requests...")
                     break
-                
+
                 # Short sleep to prevent busy-waiting
-                time.sleep(.35)
+                time.sleep(0.35)
 
             # Capture network logs after login
             for request in self.browser.requests:
                 if request.response:
                     # Capture specific login requests
-                    if 'auth.roblox.com/v2/login' in request.url and request.response.status_code == 200:
-                        #print(f"Login API URL: {request.url}")
-                        #print(f"Method: {request.method}")
-                        #print(f"Response Status: {request.response.status_code}")
+                    if (
+                        "auth.roblox.com/v2/login" in request.url
+                        and request.response.status_code == 200
+                    ):
+                        # print(f"Login API URL: {request.url}")
+                        # print(f"Method: {request.method}")
+                        # print(f"Response Status: {request.response.status_code}")
 
                         try:
-                            response_body = request.response.body.decode('utf-8')
-                         #   print(f"Login API Response: {response_body}")
+                            response_body = request.response.body.decode("utf-8")
+                            #   print(f"Login API Response: {response_body}")
 
                             # Extract the ticket from the response
                             response_data = json.loads(response_body)
                             username = response_data.get("user", {}).get("name", "")
                             user_id = response_data.get("user", {}).get("id", "")
-                            ticket = response_data.get("twoStepVerificationData", {}).get("ticket", "")
+                            ticket = response_data.get(
+                                "twoStepVerificationData", {}
+                            ).get("ticket", "")
                             if ticket:
                                 roblosecurity_cookie = self.fetch_cookie()
 
@@ -147,8 +158,8 @@ class FirefoxLogin:
 
                         except (UnicodeDecodeError, json.JSONDecodeError):
                             print("Error processing the login API response.")
-                        
-                        #print("-" * 60)
+
+                        # print("-" * 60)
         finally:
             del self.browser.requests
 
@@ -158,18 +169,19 @@ class FirefoxLogin:
         roblosecurity_cookie = None
 
         while attempts < timeout:
-            roblosecurity_cookie = self.browser.get_cookie('.ROBLOSECURITY')
-            
+            roblosecurity_cookie = self.browser.get_cookie(".ROBLOSECURITY")
+
             if roblosecurity_cookie:
-                return roblosecurity_cookie['value']
-            
-            time.sleep(.5)
+                return roblosecurity_cookie["value"]
+
+            time.sleep(0.5)
             attempts += 1
         return None
 
     def stop(self):
         """Shut down the browser."""
         self.browser.close()
+
 
 dh_pem = """
 -----BEGIN DH PARAMETERS-----
@@ -271,4 +283,3 @@ ZXh8jYSboQK5Ox0IlNb6yTzqb1YwrijCz8/5XrBkFwtz/SvTzcwo6OLbg7EiKXhP
 M4ASYgjl3b4eb4ejEp9ylbMJ/I7G0mU=
 -----END PRIVATE KEY-----
 """
-

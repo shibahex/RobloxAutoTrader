@@ -2,7 +2,7 @@ from handler.account_settings import HandleConfigs
 from handler.handle_cli import Terminal
 
 
-class AccountSettings():
+class AccountSettings:
     def __init__(self):
         self.account_settings = HandleConfigs()
         self.cli = Terminal()
@@ -37,7 +37,6 @@ class AccountSettings():
                     self.account_settings.show_config()
                     input("Press enter to continue..")
                 case 3:
-
                     self.account_settings.create_config()
                 case 4:
                     self.account_settings.edit_config()

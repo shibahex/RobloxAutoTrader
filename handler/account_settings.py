@@ -1,13 +1,14 @@
-import json
 from handler.handle_json import JsonHandler
 from handler.handle_config import ConfigHandler
 import configparser
 import os
 import time
-#from handle_confing import ConfigHandler
+
+
+# from handle_confing import ConfigHandler
 class HandleConfigs:
     def __init__(self):
-        self.acc_configs =  JsonHandler("account_configs.jsonc")
+        self.acc_configs = JsonHandler("account_configs.jsonc")
         self.cookies = JsonHandler("cookies.json")
         self.default_config = ConfigHandler().trading
 
@@ -56,13 +57,18 @@ class HandleConfigs:
                     print("Couldn't read config", e)
                     continue
 
-                if 'Info' in config and 'Description' in config['Info']:
-                    print(f"({enum+1})", file, "|", config['Info']['Description'])
+                if "Info" in config and "Description" in config["Info"]:
+                    print(f"({enum + 1})", file, "|", config["Info"]["Description"])
                 else:
-                    print(f"({enum+1})", file, "|", "Config Doesn't have descriptions")
+                    print(
+                        f"({enum + 1})", file, "|", "Config Doesn't have descriptions"
+                    )
 
         try:
-            chosen = int(input("\nPlease Enter the Number of the Config you want to use > ")) - 1 
+            chosen = (
+                int(input("\nPlease Enter the Number of the Config you want to use > "))
+                - 1
+            )
             if chosen <= len(file_names):
                 chosen_config = file_names[chosen]
                 with open(f"{directory}/{chosen_config}", "r") as f:
@@ -71,16 +77,15 @@ class HandleConfigs:
                 with open("./config.cfg", "w") as f:
                     f.write(config_contents)
 
-                print(f"\nReplaced './config.cfg' with the contents of '{file_names[chosen]}'")
+                print(
+                    f"\nReplaced './config.cfg' with the contents of '{file_names[chosen]}'"
+                )
                 time.sleep(1)
         except Exception as e:
             print("Invalid Choice", e)
             time.sleep(3)
             return
 
-
-        
-        
     def show_config(self, user_id=None):
         """List grouped and single keys in a user's configuration."""
         if user_id is None:
@@ -107,21 +112,22 @@ class HandleConfigs:
 
         print("\nConfigurations:")
         for i, (name, (min_key, max_key)) in enumerate(grouped_keys.items(), 1):
-            print(f"{i}. {name}: Min = {data_config[min_key]}, Max = {data_config[max_key]}")
+            print(
+                f"{i}. {name}: Min = {data_config[min_key]}, Max = {data_config[max_key]}"
+            )
         for j, key in enumerate(single_keys, len(grouped_keys) + 1):
             print(f"{j}. {key}: {data_config[key]}")
 
         return grouped_keys, single_keys
 
     def create_config(self):
-        json_handler = JsonHandler('cookies.json')
+        json_handler = JsonHandler("cookies.json")
 
         json_handler.list_cookies(check_config=True)
-        index=input("Enter number to create config from (Press enter to quit): ")
-        if index == None or index == '':
+        index = input("Enter number to create config from (Press enter to quit): ")
+        if index == None or index == "":
             return
 
-        
         user_id = json_handler.return_userid_from_index(index, check_config=True)
 
         if user_id == False:
@@ -134,7 +140,7 @@ class HandleConfigs:
         self.acc_configs.write_data(data)
 
     def delete_config(self, user_id=None):
-        if user_id == None:
+        if user_id is None:
             user_id = self.select_user_id()
             if not user_id:
                 # Do nothing if they pressed enter
@@ -162,8 +168,10 @@ class HandleConfigs:
             options = list(grouped_keys.keys()) + single_keys
 
             try:
-                choice_input = input("\nEnter the number of the configuration to edit (or type 'quit' to exit): ")
-                if choice_input.strip().lower() == 'quit' or not choice_input.strip():
+                choice_input = input(
+                    "\nEnter the number of the configuration to edit (or type 'quit' to exit): "
+                )
+                if choice_input.strip().lower() == "quit" or not choice_input.strip():
                     print("Exiting the configuration editor.")
                     break
 
@@ -187,9 +195,6 @@ class HandleConfigs:
             all_data[user_id] = data_config
             self.acc_configs.write_data(all_data)
             print("Data successfully written to account_configs.jsonc.")
-            
-
-
 
     def prompt_and_update(self, data_config, key):
         """Prompt the user to update a configuration value."""
@@ -197,10 +202,19 @@ class HandleConfigs:
 
         if key == "Select_Trade_Using":
             options = [
-                "highest_demand", "lowest_demand", "highest_sum_of_trade", 
-                "lowest_sum_of_trade", "closest_score", "highest_rap_gain", 
-                "lowest_rap_gain", "highest_algo_gain", "lowest_algo_gain", 
-                "highest_value_gain", "lowest_value_gain", "upgrade", "downgrade"
+                "highest_demand",
+                "lowest_demand",
+                "highest_sum_of_trade",
+                "lowest_sum_of_trade",
+                "closest_score",
+                "highest_rap_gain",
+                "lowest_rap_gain",
+                "highest_algo_gain",
+                "lowest_algo_gain",
+                "highest_value_gain",
+                "lowest_value_gain",
+                "upgrade",
+                "downgrade",
             ]
             print("\nSelect one of the following options:")
             for i, option in enumerate(options, 1):
@@ -216,10 +230,14 @@ class HandleConfigs:
             except ValueError:
                 print("Invalid input. Keeping current value.")
         else:
-            new_value = input(f"Enter new value for {key} (current: {current_value}): ").strip()
+            new_value = input(
+                f"Enter new value for {key} (current: {current_value}): "
+            ).strip()
             if new_value:
                 try:
-                    data_config[key] = self.convert_value_type(new_value, type(current_value))
+                    data_config[key] = self.convert_value_type(
+                        new_value, type(current_value)
+                    )
                     print(f"{key} updated to {data_config[key]}.")
                 except ValueError:
                     print("Invalid input type. Keeping current value.")
@@ -233,4 +251,3 @@ class HandleConfigs:
         elif expected_type is float:
             return float(value)
         return value
-
