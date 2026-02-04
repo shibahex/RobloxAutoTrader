@@ -2,6 +2,8 @@
 [![Roblox](https://img.shields.io/badge/Roblox-00A2FF?style=for-the-badge&logo=roblox&logoColor=white)](https://www.roblox.com/)
 [![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=fff&style=for-the-badge)](#)
 
+https://discord.gg/aR7pYBcqHn - The Discord Server for this program!
+
 A roblox trading bot, automates roblox's player-to-player trading system. It scrapes trading websites to get values of items then can generate winning trades and mass send them to other roblox users.
 >    [!WARNING]
 >  This bot is for eductional purposes and my first big python project, I would rewrite most of the complex functions and handle errors if I invested more time into this bot.
