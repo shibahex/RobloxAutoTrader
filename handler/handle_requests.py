@@ -252,8 +252,9 @@ class RequestsHandler:
 
             elif Response.status_code == 400:
                 log(
-                    f"Requests payload error, Response: Data{Response.text}, {payload}\n Returning Response",
+                    f"Requests payload error, Response: {Response.text}, Data: {payload}, URL: {Response.url}",
                     severityNum=1,
+                    dontPrint=True,
                 )
                 return Response
             elif Response.status_code == 429:
