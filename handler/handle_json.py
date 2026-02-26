@@ -115,7 +115,7 @@ class JsonHandler:
         if 0 <= index < len(filtered_accounts):
             try:
                 return filtered_accounts[index]["user_id"]
-            except:
+            except Exception:
                 return False
         else:
             return False
@@ -146,14 +146,14 @@ class JsonHandler:
 
         data = self.read_data()
         for account in data["roblox_accounts"]:
-            if account["use_account"] == True:
+            if account["use_account"]:
                 current_date = datetime.now()
 
                 ratelimit_timestamp = account["ratelimit_timestamp"]
                 # Parse the timestamp string into a datetime object
                 try:
                     timestamp_date = datetime.fromisoformat(ratelimit_timestamp)
-                except:
+                except Exception:
                     # Handle invalid timestamp format if needed
                     return False
 
@@ -199,14 +199,13 @@ class JsonHandler:
         for account in data["roblox_accounts"]:
             if account.get("cookie") == cookie:
                 ratelimit_timestamp = account["ratelimit_timestamp"]
-                if ratelimit_timestamp == None:
+                if ratelimit_timestamp is None:
                     return False
 
-                timestamp = account["ratelimit_timestamp"]
                 # Parse the timestamp string into a datetime object
                 try:
                     timestamp_date = datetime.fromisoformat(ratelimit_timestamp)
-                except:
+                except Exception:
                     # Handle invalid timestamp format if needed
                     return False
 
@@ -271,7 +270,7 @@ class JsonHandler:
         cookie_count = 0
         if data["roblox_accounts"]:
             for account in data["roblox_accounts"]:
-                if check_config == True:
+                if check_config:
                     with open("account_configs.jsonc", "r") as file:
                         settings_data = json.load(file)
                     if account["user_id"] in settings_data.keys():

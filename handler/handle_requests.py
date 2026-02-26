@@ -2,7 +2,6 @@ import time
 
 import random
 import requests
-import re
 from handler.handle_logs import log
 
 
@@ -18,7 +17,7 @@ class RequestsHandler:
         self.proxy_timeout = {}
         self.timeout_duration = 60
 
-        if self.use_proxies == True:
+        if self.use_proxies:
             self.load_proxies()
 
         self.Session = Session
@@ -75,7 +74,7 @@ class RequestsHandler:
         """
         try:
             response = self.Session.post("https://auth.roblox.com/v2/login", data={})
-        except:
+        except Exception:
             log("Failed to post csrf token. returning none", severityNum=3)
             return None
 
@@ -108,7 +107,6 @@ class RequestsHandler:
 
         consecutive_rate_limits = 0
         retries = 0
-        refreshed_csrf = False
         while True:
             headers = self.headers.copy()  # Create a copy of the original headers
             if additional_headers:
@@ -139,7 +137,7 @@ class RequestsHandler:
                         timeout=30,
                     )
             except Exception as e:  # except requests.exceptions.ProxyError:
-                if self.use_proxies != False:
+                if self.use_proxies:
                     log(f"Proxy  Error {proxy_dict['http']}.. blacklisting")
                     self.rate_limit(proxy_dict["http"])
                 else:
@@ -160,7 +158,7 @@ class RequestsHandler:
 
             if Response.status_code == 429:
                 log(f"hit ratelimit on url {URL}")
-                if self.use_proxies != False:
+                if self.use_proxies:
                     self.rate_limit(proxy_dict["http"])
                     time.sleep(5)
                     return Response
@@ -195,7 +193,7 @@ class RequestsHandler:
                     if "errors" in Response.json():
                         Response.status_code = 500
                         return Response
-                except:
+                except Exception:
                     pass
                 return Response
 
@@ -248,7 +246,6 @@ class RequestsHandler:
 
                 # Retry with new csrf once IF there is no 2fa prompt
                 if "rblx-challenge-id" not in Response.headers:
-                    refreshed_csrf = True
                     continue
                 else:
                     return Response

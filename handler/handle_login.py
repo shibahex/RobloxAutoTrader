@@ -8,11 +8,9 @@ from selenium.webdriver.support import expected_conditions as EC
 import time
 import json
 import pyotp
-import sys
 import os
 
 
-# TODO: create .network directory if not exists, and clear the data alot also I forgor
 class FirefoxLogin:
     """
     Opens the Firefox browser for the user to manually log into a website and captures network logs.
@@ -111,7 +109,7 @@ class FirefoxLogin:
             while True:
                 current_url = self.browser.current_url
                 enter_auth = self.enter_auth(totp_secret)
-                if enter_auth == True:
+                if enter_auth:
                     print("Valid Login")
                     break
 

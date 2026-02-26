@@ -59,10 +59,10 @@ class ConfigHandler:
         gain = their_value - self_value
 
         min_gain, is_min_percentage = (
-            self.convert_gain(min_gain) if min_gain != None else (None, False)
+            self.convert_gain(min_gain) if min_gain is not None else (None, False)
         )
         max_gain, is_max_percentage = (
-            self.convert_gain(max_gain) if max_gain != None else (None, False)
+            self.convert_gain(max_gain) if max_gain is not None else (None, False)
         )
 
         if min_gain is not None:
@@ -301,13 +301,13 @@ class ConfigHandler:
                 if self.config.has_option(section, option)
                 else None
             )
-        except (ValueError, TypeError) as e:
+        except (ValueError, TypeError):
             # log(f"Error retrieving float for [{section}] {option}: {e}")
             try:
                 string = self.get_string(section, option)
                 if string.lower() == "false" or string.lower() == "none":
                     return None
-            except:
+            except Exception:
                 pass
             return "Not Set"
 

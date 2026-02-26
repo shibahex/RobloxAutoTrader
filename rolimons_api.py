@@ -159,7 +159,7 @@ class RolimonAPI:
             )
         ]
 
-        if self.config.debug["show_scanning_users"] == True:
+        if self.config.debug["show_scanning_users"]:
             log(f"[DOGGO] Picking random item from list size: {len(filtered_items)}")
 
         # TODO: add into table with timestamp and if we get the same item check if the time has been 30 minutes and if it has remove and return it
@@ -226,7 +226,7 @@ class RolimonAPI:
                     percentage_change = difference / last_price
                     if percentage_change >= threshold:
                         return True  # There is a significant change
-                except:
+                except Exception:
                     pass
 
                 return False
@@ -259,17 +259,17 @@ class RolimonAPI:
         rap_algo_for_valued = self.config.trading["Rap_Algo_For_Valued"]
         for item in inventory:
             asset_id = inventory[item]["item_id"]
-            collectibleItemId = inventory[item]["item_id"]
+            # collectibleItemId = inventory[item]["item_id"]
             # total value reutns the RAP if theres no value
             rap = self.item_data[asset_id]["rap"]
 
             # Make rap independent from value
             value = self.item_data[asset_id]["value"]
-            if value == rap or value == None:
+            if value == rap or value is None:
                 value = 0
 
             demand = self.item_data[asset_id]["demand"]
-            item_price = self.item_data[asset_id]["best_price"]
+            # item_price = self.item_data[asset_id]["best_price"]
             total_value = self.item_data[asset_id]["total_value"]
 
             is_projected = False
@@ -277,7 +277,7 @@ class RolimonAPI:
             rap_algo_value = None
             item_volume = None
 
-            if need_to_scan(asset_id) == True:
+            if need_to_scan(asset_id):
                 roblox_api.RobloxAPI().is_projected_api(item_id=asset_id)
 
             if value != 0:
@@ -300,15 +300,15 @@ class RolimonAPI:
                     rap_algo_value = projected_data[asset_id]["value"]
                     item_volume = projected_data[asset_id]["volume"]
                     sale_gap = projected_data[asset_id]["average_gap"]
-            except:
+            except Exception:
                 log("Couldn't get projected data for item, continuing")
                 continue
 
             if not is_self:
                 if (
                     is_projected
-                    or item_volume == None
-                    or minimum_daily_sales == None
+                    or item_volume is None
+                    or minimum_daily_sales is None
                     or value == 0
                     and float(item_volume) < minimum_daily_sales
                     or value == 0
@@ -356,7 +356,7 @@ class RolimonAPI:
             "https://api.rolimons.com/tradeads/v1/getrecentads"
         )
         response = get_ads_response.json()
-        if response["success"] == False:
+        if not response["success"]:
             return False
 
         return response["trade_ads"]

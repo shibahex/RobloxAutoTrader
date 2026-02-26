@@ -25,7 +25,7 @@ class Terminal:
     def print_error(message):
         try:
             print("[" + red + "ERROR" + reset + "]", message)
-        except:
+        except Exception:
             print("ERROR: ", message)
         time.sleep(2)
 

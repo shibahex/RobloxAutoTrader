@@ -198,7 +198,7 @@ class RobloxAPI:
                 else:
                     trader_duplicates = add_to_duplicates(trader_duplicates, itemId)
 
-                if item["isOnHold"] == True:
+                if item["isOnHold"]:
                     continue
 
                 # TODO: APPLY NFT
@@ -209,7 +209,7 @@ class RobloxAPI:
                     nft_list = self.config.filter_items["NFT"]
 
                     if nft_list and itemId in nft_list:
-                        if self.config.debug["show_scanning_inventory"] == True:
+                        if self.config.debug["show_scanning_inventory"]:
                             log(f"{itemId} in NFT list, skipping it")
                         continue
 
@@ -217,11 +217,11 @@ class RobloxAPI:
                 else:
                     try:
                         current_demand = self.rolimon.item_data[itemId]["demand"]
-                    except:
+                    except Exception:
                         # bad item
                         continue
                     if (
-                        current_demand != None
+                        current_demand is not None
                         and int(current_demand) < self.config.filter_items["MinDemand"]
                     ):
                         # log(current_demand, itemId, "skipped")
@@ -233,7 +233,7 @@ class RobloxAPI:
                         and self.self_duplicates[str(itemId)]
                         >= self.config.filter_items["Maximum_Amount_of_Duplicate_Items"]
                     ):
-                        if self.config.debug["show_scanning_inventory"] == True:
+                        if self.config.debug["show_scanning_inventory"]:
                             log(
                                 f"[Inventory {userid}] Not trading for",
                                 itemId,
@@ -250,7 +250,7 @@ class RobloxAPI:
                             "Maximum_Amount_of_Trader_Duplicate_Items"
                         ]
                     ):
-                        if self.config.debug["show_scanning_inventory"] == True:
+                        if self.config.debug["show_scanning_inventory"]:
                             log(
                                 f"[Inventory {
                                     userid
@@ -263,7 +263,7 @@ class RobloxAPI:
                     if itemId not in nfr_list:
                         inventory[uaid] = {"item_id": itemId}
                     else:
-                        if self.config.debug["show_scanning_inventory"] == True:
+                        if self.config.debug["show_scanning_inventory"]:
                             log(f"{itemId} in NFR list, skipping it")
 
                     # TODO: min demand
@@ -271,7 +271,7 @@ class RobloxAPI:
         minimum_items = self.config.filter_users["Minimum_Total_Items"]
         if not is_self:
             if len(inventory.keys()) < minimum_items:
-                if self.config.debug["show_scanning_inventory"] == True:
+                if self.config.debug["show_scanning_inventory"]:
                     log(f"[Inventory {userid}] User doesn't match minimum items")
                 return False
 
@@ -289,16 +289,13 @@ class RobloxAPI:
         """
         This function takes a 401 error response and then returns the 2fa response if there is one
         """
-        print(response.url, "2fa required for this")
-        cookie_json = self.json.read_data()
-
         challengeid = response.headers["rblx-challenge-id"]
         metadata = json.loads(
             base64.b64decode(response.headers["rblx-challenge-metadata"])
         )
         try:
             metadata_challengeid = metadata["challengeId"]
-        except Exception as e:
+        except Exception:
             log(
                 f"couldnt get meta data challengeid from {metadata} scraping from {
                     response.headers
@@ -308,7 +305,7 @@ class RobloxAPI:
             return False
         try:
             senderid = metadata["userId"]
-        except Exception as e:
+        except Exception:
             log(
                 f"couldnt get userid from {metadata} scraping from {
                     response.headers
@@ -388,7 +385,7 @@ class RobloxAPI:
         cursor = ""
         page_count = 0
         trades = {}
-        while cursor != None and self.cookies != None:
+        while cursor is not None and self.cookies is not None:
             if limit_pages and page_count >= limit_pages:
                 break
 
@@ -442,7 +439,7 @@ class RobloxAPI:
             if not self.check_can_trade(trader_id):
                 continue
 
-            if self.config.inbounds["Dont_Counter_Wins"] == True:
+            if self.config.inbounds["Dont_Counter_Wins"]:
                 # If its a win then continue and dont counter
                 trade_info = self.request_handler.requestAPI(
                     f"https://trades.roblox.com/v1/trades/{trade_id}"
@@ -508,8 +505,7 @@ class RobloxAPI:
             validation = self.validate_2fa(response)
             log(f"Auth Handled response {validation}")
             time.sleep(10)
-            print("returning")
-            if validation == False:
+            if not validation:
                 return 403
             return validation
 
@@ -542,7 +538,7 @@ class RobloxAPI:
         }
 
         trade_api = "https://trades.roblox.com/v1/trades/send"
-        if counter_trade == True and counter_id != None:
+        if counter_trade and counter_id is not None:
             trade_api = f"https://trades.roblox.com/v1/trades/{counter_id}/counter"
 
         validation_headers = None
@@ -573,8 +569,9 @@ class RobloxAPI:
                 auth_response = self.handle_auth_failed(trade_response)
                 if auth_response == 403:
                     continue
-                if auth_response == False:
+                if not auth_response:
                     break
+
             elif trade_response.status_code == 400:
                 """
                     https://trades.roblox.com/v1/trades/send 400 {"errors":[{"code":17,"message":"You have insufficient Robux to make this offer.","userFacingMessage":"Something went wrong"}]}
@@ -662,7 +659,6 @@ class RobloxAPI:
 
             for trade_id, trade_info in trades.items():
                 trader_id = trade_info["user_id"]
-                trade_id = trade_info["trade_id"]
                 created = trade_info["created"]
 
                 timestamp_format = datetime.fromisoformat(
@@ -779,7 +775,7 @@ class RobloxAPI:
                         self.discord_webhook.send_webhook(
                             embed, self.config.discord_settings["Completed_Webhook"]
                         )
-                    except Exception as e:
+                    except Exception:
                         log(
                             "Couldn't format and post webhook.. skipping", severityNum=2
                         )
@@ -809,7 +805,6 @@ class RobloxAPI:
         except Exception as e:
             raise ValueError(e)
 
-        account_total = 0
         for item in item_ids:
             if str(item) not in projected_data:
                 account_algorithm_value += self.rolimon.item_data[str(item)]["rap"]
@@ -962,7 +957,7 @@ class RobloxAPI:
                     dontPrint=True,
                 )
                 validation = self.validate_2fa(can_trade)
-                if validation == False:
+                if not validation:
                     return None
                 validation_headers = validation
             return False
@@ -1018,15 +1013,14 @@ class RobloxAPI:
         so dont scan the same item over and over again, and dont scan value items
         """
         # Check if RAP - Price is correct min price difference
-        # TODO: scan detect rolimon projecteeds
-        rap = self.rolimon.item_data[item_id]["rap"]
-        value = self.rolimon.item_data[item_id]["total_value"]
-        price = self.rolimon.item_data[item_id]["best_price"]
-
+        # rap = self.rolimon.item_data[item_id]["rap"]
+        # value = self.rolimon.item_data[item_id]["total_value"]
+        # price = self.rolimon.item_data[item_id]["best_price"]
+        #
         config_projected = self.config.projected_detection
-        min_graph_difference = config_projected["MinimumGraphDifference"]
-        max_graph_difference = config_projected["MaximumGraphDifference"]
-        min_price_difference = config_projected["MinPriceDifference"]
+        # min_graph_difference = config_projected["MinimumGraphDifference"]
+        # max_graph_difference = config_projected["MaximumGraphDifference"]
+        # min_price_difference = config_projected["MinPriceDifference"]
         use_rolimons_projected = config_projected["Detect_Rolimons_Projecteds"]
         # TODO: ADD MIN AND MAX DIFFERENCE
         # if not self.config.check_gain(int(rap), int(price), min_gain=min_price_difference, max_gain=max_price_difference):
@@ -1034,14 +1028,11 @@ class RobloxAPI:
         #    return True
 
         is_projected = False
-        if (
-            self.rolimon.item_data[item_id]["projected"] == True
-            and use_rolimons_projected
-        ):
+        if self.rolimon.item_data[item_id]["projected"] and use_rolimons_projected:
             is_projected = True
 
         while True:
-            if collectibleItemId != None:
+            if collectibleItemId is not None:
                 url = f"https://apis.roblox.com/marketplace-sales/v1/item/{
                     collectibleItemId
                 }/resale-data"
@@ -1137,10 +1128,10 @@ class RobloxAPI:
                 average_gap = (
                     sum(timestamp_gaps) / len(timestamp_gaps)
                 ) / SECONDS_IN_DAY
-                largest_gap = max(timestamp_gaps) if timestamp_gaps else 0
+                # largest_gap = max(timestamp_gaps) if timestamp_gaps else 0
             else:
                 average_gap = 0
-                largest_gap = 0
+                # largest_gap = 0
 
             today = datetime.utcnow()
             three_months_ago = today - timedelta(days=90)
@@ -1152,7 +1143,7 @@ class RobloxAPI:
                 if self.parse_date(point["date_string"]) > three_months_ago
             ]
 
-            sum_of_price = 0
+            # sum_of_price = 0
             for num, data in enumerate(recent_data_points):
                 loop_price = int(data["value"])
                 percentage_change = (current_price - loop_price) / current_price
@@ -1184,7 +1175,7 @@ class RobloxAPI:
         next_page_cursor = ""
 
         while len(owners) < 20:
-            if next_page_cursor == None:
+            if next_page_cursor is None:
                 break
             inventory_api = f"https://inventory.roblox.com/v2/assets/{
                 item_id
@@ -1205,11 +1196,11 @@ class RobloxAPI:
 
             next_page_cursor = response.json()["nextPageCursor"]
             for asset in response.json()["data"]:
-                if asset["owner"] == None:
+                if asset["owner"] is None:
                     continue
                 # log(asset['owner'])
                 if int(asset["owner"]["id"]) in self.all_cached_traders:
-                    if self.config.debug["show_scanning_users"] == True:
+                    if self.config.debug["show_scanning_users"]:
                         log("Already Traded with User, skipping.")
                     continue
                 # else:
@@ -1236,7 +1227,7 @@ class RobloxAPI:
                 ):
                     # log("Appending Active User")
                     owners.append(asset["owner"]["id"])
-        if self.config.debug["show_scanning_users"] == True:
+        if self.config.debug["show_scanning_users"]:
             log(f"owners: {owners}")
         return owners
 

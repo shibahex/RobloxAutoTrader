@@ -1,9 +1,7 @@
 from handler.handle_config import ConfigHandler
-from itertools import combinations, product
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from itertools import combinations
 import math
 import random
-
 import time
 
 
@@ -57,7 +55,7 @@ class TradeMaker:
 
         self.outbound_cancel_offset = self.config.trading["Outbound_Cancel_Offset"]
         self.algo_outbound_offset = self.config.trading["Algo_Cancel_Offset"]
-        if is_outbound_checker == True:
+        if is_outbound_checker:
             if self.min_rap_gain is not None:
                 self.min_rap_gain = (
                     max(0, self.min_rap_gain - self.outbound_cancel_offset)
@@ -209,8 +207,9 @@ class TradeMaker:
                 if trade["self_value"] != 0 or trade["their_value"] != 0
             ]
 
-            for trade in valid_trades:
-                gain = trade["their_value"] - trade["self_value"]
+            # for trade in valid_trades:
+            #     gain = trade["their_value"] - trade["self_value"]
+
             if non_zero_trades:
                 return min(
                     non_zero_trades,
@@ -246,7 +245,7 @@ class TradeMaker:
 
         def pick_trade():
             # pick random trade to avoid sending the same counter trade
-            if counter_trade == True:
+            if counter_trade:
                 trade = self.select_trade(valid_trades, select_by="random")
                 return trade
 
@@ -255,7 +254,7 @@ class TradeMaker:
 
         start_time = time.perf_counter()  # Use perf_counter for better precision
 
-        if self.debug_print == True:
+        if self.debug_print:
             print("trade algorithm: getting keys")
 
         if not self_inventory or not their_inventory:
@@ -264,7 +263,7 @@ class TradeMaker:
 
         self_keys = list(self_inventory.keys())
         their_keys = list(their_inventory.keys())
-        if self.debug_print == True:
+        if self.debug_print:
             print("Trade algorithm got keys")
 
         def get_total_values(items, inventory):
@@ -274,7 +273,7 @@ class TradeMaker:
             value, rap, rap_algorithm, demand, total_value, volume = 0, 0, 0, 0, 0, 0
 
             def get_value(item, value):
-                if item[value] != None:
+                if item[value] is not None:
                     return item[value]
                 else:
                     print(item, "doesnt have", value)
@@ -296,16 +295,16 @@ class TradeMaker:
 
             return value, rap, rap_algorithm, demand, total_value, volume
 
-        if self.debug_print == True:
+        if self.debug_print:
             print("Trade algorithm: starting trade generation")
         # NOTE: have like: out of 30000 trades, 4 valid: 400 failed sum of trade blah
 
-        pre_checks = [
-            self.min_rap_gain,
-            self.min_value_gain,
-            self.min_overall_gain,
-            self.min_algo_gain,
-        ]
+        # pre_checks = [
+        #     self.min_rap_gain,
+        #     self.min_value_gain,
+        #     self.min_overall_gain,
+        #     self.min_algo_gain,
+        # ]
         invalid_reasons = {
             "value_gain": 0,
             "min_rap_of_trade": 0,
@@ -317,6 +316,7 @@ class TradeMaker:
             "overall_close_percentage": 0,
             "rap_close_percentage": 0,
         }
+
         for self_side in self.generate_combinations(
             self_keys, self.min_items_self, self.max_items_self
         ):
@@ -547,27 +547,23 @@ class TradeMaker:
         robux=None,
     ):
         value_gain = their_value - self_value
-        if robux != None and robux != 0:
+        if robux is not None and robux != 0:
             # see if value is losing because of robux
             # TODO: test to make sure this is a valid method of doing this
             if self.min_value_gain and (value_gain + robux) < self.min_value_gain:
-                # print("robux false")
                 return False, "value_gain"
 
             # if robux > calc_robux:
             #    return False
 
         if (
-            self.min_value_of_trade != False
+            self.min_value_of_trade
             and self.min_value_of_trade > self_value + their_value
         ):
             # print("sum of trade", self_value, their_value)
             return False, "min_value_of_trade"
 
-        if (
-            self.min_rap_of_trade != False
-            and self.min_rap_of_trade > self_rap + their_rap
-        ):
+        if self.min_rap_of_trade and self.min_rap_of_trade > self_rap + their_rap:
             return False, "min_rap_of_trade"
 
         # Precompute the total value and RAP for both sides in a single loop

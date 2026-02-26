@@ -125,12 +125,12 @@ class HandleConfigs:
 
         json_handler.list_cookies(check_config=True)
         index = input("Enter number to create config from (Press enter to quit): ")
-        if index == None or index == "":
+        if index is None or index == "":
             return
 
         user_id = json_handler.return_userid_from_index(index, check_config=True)
 
-        if user_id == False:
+        if not user_id:
             print("Couldnt find userid")
             time.sleep(3)
             return

@@ -50,7 +50,7 @@ class DiscordHandler:
         their_algo = trade["their_rap_algo"]
         their_overall = trade["their_overall_value"]
 
-        self_robux = trade["self_robux"]
+        # self_robux = trade["self_robux"]
         self_rap = trade["self_rap"]
         self_value = trade["self_value"]
         self_algo = trade["self_rap_algo"]
@@ -150,7 +150,7 @@ class DiscordHandler:
                     user_id
                 }&size=48x48&format=Png&isCircular=false"
             ).json()["data"][0]["imageUrl"]
-        except:
+        except Exception:
             thumbnail = PLACEHOLDER_IMAGE
         embed.set_author(name="Doggo Trader", icon_url=thumbnail)
         # embed.set_thumbnail(url=thumbnail)
