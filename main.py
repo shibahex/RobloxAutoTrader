@@ -432,13 +432,13 @@ class Doggo:
 
                             divider = "=" * 40
 
-                            print(f"\n{divider}")
-                            print("[TRADE INFO]".center(40, "="))
-                            print(f"Total Profit: {total_profit}\n")
-                            print(f"Sending: \n{send_items}")
-                            print(f"\nRecieve: \n{receive_items}")
-                            print(f"\n*** BREAKDOWN ***\n{breakdown}")
-                            print(f"\n{divider}\n")
+                            log(f"\n{divider}")
+                            log("[TRADE INFO]".center(40, "="))
+                            log(f"Total Profit: {total_profit}\n")
+                            log(f"Sending: \n{send_items}")
+                            log(f"\nRecieve: \n{receive_items}")
+                            log(f"\n*** BREAKDOWN ***\n{breakdown}")
+                            log(f"\n{divider}\n")
                             pass
                     else:
                         if not account_inventory:

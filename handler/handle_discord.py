@@ -1,6 +1,7 @@
 from discord_webhook import DiscordWebhook, DiscordEmbed
 import requests
 import time
+from handler.handle_logs import log
 
 # Define status colors for better readability and maintainability
 STATUS_COLORS = {
@@ -176,14 +177,14 @@ class DiscordHandler:
             while True:
                 response = webhook.execute()
                 if "429" in str(response):
-                    print("Webhook ratelimited waiting 15 secs")
+                    log("Webhook ratelimited waiting 15 secs")
                     time.sleep(15)
                     continue
 
                 time.sleep(0.5)
                 break
 
-            print("[DOGGO]", response)
+            log("[DOGGO]", response)
         except Exception as e:
             # Log any errors to help with debugging
-            print(f"[ERROR] Failed to send webhook: {e}")
+            log(f"[ERROR] Failed to send webhook: {e}")

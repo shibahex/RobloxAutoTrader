@@ -9,6 +9,7 @@ import time
 import json
 import pyotp
 import os
+from handler.handle_logs import log
 
 
 class FirefoxLogin:
@@ -62,7 +63,7 @@ class FirefoxLogin:
         while True:
             try:
                 totp = pyotp.TOTP(totp_secret)
-                print("[Debug] Current Auth Code: ", totp.now())
+                log("[Debug] Current Auth Code: ", totp.now())
                 # Wait for the modal to be visible
                 modal = WebDriverWait(self.browser, 360).until(
                     EC.visibility_of_element_located(
@@ -75,7 +76,7 @@ class FirefoxLogin:
                         (By.CSS_SELECTOR, "#two-step-verification-code-input")
                     )
                 )
-                print("Two-step verification input detected.")
+                log("Two-step verification input detected.")
                 time.sleep(0.1)
 
                 # Generate the TOTP code
@@ -83,7 +84,7 @@ class FirefoxLogin:
 
                 # Input the auth code into the verification field
                 code_input.send_keys(auth_code)
-                print(f"Generated Auth Code: {auth_code}")
+                log(f"Generated Auth Code: {auth_code}")
 
                 # Click the Verify button
                 verify_button = modal.find_element(
@@ -92,7 +93,7 @@ class FirefoxLogin:
                 verify_button.click()
                 return True
             except Exception as e:
-                print(f"Error while waiting for the two-step verification input: {e}")
+                log(f"Error while waiting for the two-step verification input: {e}")
 
     def roblox_login(self, totp_secret):
         """Logs in to Roblox and captures network requests."""
@@ -102,7 +103,7 @@ class FirefoxLogin:
         # Store the initial URL
         initial_url = self.browser.current_url
 
-        print("Waiting for user to log in...")
+        log("Waiting for user to log in...")
 
         try:
             # Wait for the user to log in by checking if the URL changes
@@ -110,12 +111,12 @@ class FirefoxLogin:
                 current_url = self.browser.current_url
                 enter_auth = self.enter_auth(totp_secret)
                 if enter_auth:
-                    print("Valid Login")
+                    log("Valid Login")
                     break
 
                 # Check if the URL has changed from the login page
                 if current_url != initial_url:
-                    print("Login detected. Capturing network requests...")
+                    log("Login detected. Capturing network requests...")
                     break
 
                 # Short sleep to prevent busy-waiting
@@ -129,13 +130,13 @@ class FirefoxLogin:
                         "auth.roblox.com/v2/login" in request.url
                         and request.response.status_code == 200
                     ):
-                        # print(f"Login API URL: {request.url}")
-                        # print(f"Method: {request.method}")
-                        # print(f"Response Status: {request.response.status_code}")
+                        # log(f"Login API URL: {request.url}")
+                        # log(f"Method: {request.method}")
+                        # log(f"Response Status: {request.response.status_code}")
 
                         try:
                             response_body = request.response.body.decode("utf-8")
-                            #   print(f"Login API Response: {response_body}")
+                            #   log(f"Login API Response: {response_body}")
 
                             # Extract the ticket from the response
                             response_data = json.loads(response_body)
@@ -155,9 +156,9 @@ class FirefoxLogin:
                                 raise ValueError("No ticket found in the response.")
 
                         except (UnicodeDecodeError, json.JSONDecodeError):
-                            print("Error processing the login API response.")
+                            log("Error processing the login API response.")
 
-                        # print("-" * 60)
+                        # log("-" * 60)
         finally:
             del self.browser.requests
 

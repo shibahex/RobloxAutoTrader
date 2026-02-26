@@ -1,5 +1,6 @@
 from handler.handle_json import JsonHandler
 from handler.handle_config import ConfigHandler
+from handler.handle_logs import log
 import configparser
 import os
 import time
@@ -27,12 +28,12 @@ class HandleConfigs:
         data = self.acc_configs.read_data()
         user_ids = list(data.keys())
         if not user_ids:
-            print("no user configurations found.")
+            log("no user configurations found.")
             return False
 
-        print("\nSelect a user ID to configure:")
+        log("\nSelect a user ID to configure:")
         for i, user_id in enumerate(user_ids, 1):
-            print(f"{i}. {user_id}", self.cookies.return_name_from_id(str(user_id)))
+            log(f"{i}. {user_id}", self.cookies.return_name_from_id(str(user_id)))
 
         try:
             choice = int(input("\nEnter the number of the user ID: "))
@@ -40,7 +41,7 @@ class HandleConfigs:
                 raise ValueError
             return user_ids[choice - 1]
         except ValueError:
-            print("Invalid input. Exiting.")
+            log("Invalid input. Exiting.")
             return None
 
     def show_presets(self):
@@ -54,15 +55,13 @@ class HandleConfigs:
                 try:
                     config.read(file_path)
                 except Exception as e:
-                    print("Couldn't read config", e)
+                    log("Couldn't read config", e)
                     continue
 
                 if "Info" in config and "Description" in config["Info"]:
-                    print(f"({enum + 1})", file, "|", config["Info"]["Description"])
+                    log(f"({enum + 1})", file, "|", config["Info"]["Description"])
                 else:
-                    print(
-                        f"({enum + 1})", file, "|", "Config Doesn't have descriptions"
-                    )
+                    log(f"({enum + 1})", file, "|", "Config Doesn't have descriptions")
 
         try:
             chosen = (
@@ -77,12 +76,12 @@ class HandleConfigs:
                 with open("./config.cfg", "w") as f:
                     f.write(config_contents)
 
-                print(
+                log(
                     f"\nReplaced './config.cfg' with the contents of '{file_names[chosen]}'"
                 )
                 time.sleep(1)
         except Exception as e:
-            print("Invalid Choice", e)
+            log("Invalid Choice", e)
             time.sleep(3)
             return
 
@@ -95,7 +94,7 @@ class HandleConfigs:
 
         data_config = self.get_config(user_id)
         if not data_config:
-            print(f"No configuration found for user ID {user_id}.")
+            log(f"No configuration found for user ID {user_id}.")
             return {}, []
 
         grouped_keys = {}
@@ -110,13 +109,13 @@ class HandleConfigs:
             elif not any(key in group for group in grouped_keys.values()):
                 single_keys.append(key)
 
-        print("\nConfigurations:")
+        log("\nConfigurations:")
         for i, (name, (min_key, max_key)) in enumerate(grouped_keys.items(), 1):
-            print(
+            log(
                 f"{i}. {name}: Min = {data_config[min_key]}, Max = {data_config[max_key]}"
             )
         for j, key in enumerate(single_keys, len(grouped_keys) + 1):
-            print(f"{j}. {key}: {data_config[key]}")
+            log(f"{j}. {key}: {data_config[key]}")
 
         return grouped_keys, single_keys
 
@@ -131,7 +130,7 @@ class HandleConfigs:
         user_id = json_handler.return_userid_from_index(index, check_config=True)
 
         if not user_id:
-            print("Couldnt find userid")
+            log("Couldnt find userid")
             time.sleep(3)
             return
 
@@ -149,7 +148,7 @@ class HandleConfigs:
         try:
             del data[user_id]
         except Exception as e:
-            print("Couldnt delete config:", e)
+            log("Couldnt delete config:", e)
         self.acc_configs.write_data(data)
 
     def edit_config(self):
@@ -160,7 +159,7 @@ class HandleConfigs:
         while True:
             data_config = self.get_config(user_id)
             if not data_config:
-                print(f"No configuration found for user ID {user_id}.")
+                log(f"No configuration found for user ID {user_id}.")
                 return
 
             grouped_keys, single_keys = self.show_config(user_id)
@@ -172,14 +171,14 @@ class HandleConfigs:
                     "\nEnter the number of the configuration to edit (or type 'quit' to exit): "
                 )
                 if choice_input.strip().lower() == "quit" or not choice_input.strip():
-                    print("Exiting the configuration editor.")
+                    log("Exiting the configuration editor.")
                     break
 
                 choice = int(choice_input)
                 if choice < 1 or choice > len(options):
                     raise ValueError
             except ValueError:
-                print("Invalid input. Please try again.")
+                log("Invalid input. Please try again.")
                 continue
 
             selected_option = options[choice - 1]
@@ -194,7 +193,7 @@ class HandleConfigs:
             all_data = self.acc_configs.read_data()
             all_data[user_id] = data_config
             self.acc_configs.write_data(all_data)
-            print("Data successfully written to account_configs.jsonc.")
+            log("Data successfully written to account_configs.jsonc.")
 
     def prompt_and_update(self, data_config, key):
         """Prompt the user to update a configuration value."""
@@ -216,19 +215,19 @@ class HandleConfigs:
                 "upgrade",
                 "downgrade",
             ]
-            print("\nSelect one of the following options:")
+            log("\nSelect one of the following options:")
             for i, option in enumerate(options, 1):
-                print(f"{i}. {option}")
+                log(f"{i}. {option}")
 
             try:
                 choice = int(input(f"Enter your choice (current: {current_value}): "))
                 if 1 <= choice <= len(options):
                     data_config[key] = options[choice - 1]
-                    print(f"{key} updated to {data_config[key]}.")
+                    log(f"{key} updated to {data_config[key]}.")
                 else:
-                    print("Invalid choice. Keeping current value.")
+                    log("Invalid choice. Keeping current value.")
             except ValueError:
-                print("Invalid input. Keeping current value.")
+                log("Invalid input. Keeping current value.")
         else:
             new_value = input(
                 f"Enter new value for {key} (current: {current_value}): "
@@ -238,11 +237,11 @@ class HandleConfigs:
                     data_config[key] = self.convert_value_type(
                         new_value, type(current_value)
                     )
-                    print(f"{key} updated to {data_config[key]}.")
+                    log(f"{key} updated to {data_config[key]}.")
                 except ValueError:
-                    print("Invalid input type. Keeping current value.")
+                    log("Invalid input type. Keeping current value.")
             else:
-                print(f"Keeping current value for {key}: {current_value}")
+                log(f"Keeping current value for {key}: {current_value}")
 
     def convert_value_type(self, value, expected_type):
         """Convert input value to the expected type."""

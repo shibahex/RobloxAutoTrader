@@ -3,6 +3,7 @@ from itertools import combinations
 import math
 import random
 import time
+from handler.handle_logs import log
 
 
 class TradeMaker:
@@ -77,7 +78,7 @@ class TradeMaker:
                     else self.min_algo_gain - self.algo_outbound_offset
                 )
 
-            print(
+            log(
                 f"Cancel trades that go below: [min algo gain: {
                     self.min_algo_gain
                 }, min overall gain: {self.min_overall_gain}, min rap gain: {
@@ -255,10 +256,10 @@ class TradeMaker:
         start_time = time.perf_counter()  # Use perf_counter for better precision
 
         if self.debug_print:
-            print("trade algorithm: getting keys")
+            log("trade algorithm: getting keys")
 
         if not self_inventory or not their_inventory:
-            print("[Debug] in generating trade invalid inventory, returning None")
+            log("[Debug] in generating trade invalid inventory, returning None")
             return None
 
         self_keys = list(self_inventory.keys())
@@ -410,7 +411,7 @@ class TradeMaker:
                     )
                     if validate_trade:
                         if self.debug_print:
-                            print(
+                            log(
                                 "[DEBUG] Trade algorithm: validated trade",
                                 len(valid_trades),
                             )
@@ -484,7 +485,7 @@ class TradeMaker:
                             self.max_valid_trades
                             and len(valid_trades) > self.max_valid_trades
                         ):
-                            print("Trade algorithm: valid trade limits reached")
+                            log("Trade algorithm: valid trade limits reached")
                             return pick_trade()
 
                     else:
@@ -495,9 +496,7 @@ class TradeMaker:
         if valid_trades:
             return pick_trade()
 
-        print(
-            "Couldnt find valid_trades heres invalid trades reasons:", invalid_reasons
-        )
+        log("Couldnt find valid_trades heres invalid trades reasons:", invalid_reasons)
         return None
 
     def check_rap_gain(self, their_rap, self_rap):
@@ -616,17 +615,17 @@ class TradeMaker:
         Uses a generator to yield combinations one at a time.
         """
         if not keys:
-            print("Error: Keys list is empty.")
+            log("Error: Keys list is empty.")
             return
             # Returning an empty generator
 
         if len(keys) < min_items:
-            print(
+            log(
                 f"Error: Not enough keys to generate combinations. Keys: {
                     keys
                 }, Min items: {min_items}"
             )
-            print("Ignoring to send trades")
+            log("Ignoring to send trades")
             # return
 
         # Adjust bounds for min_items and max_items

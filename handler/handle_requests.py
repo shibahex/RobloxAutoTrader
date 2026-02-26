@@ -119,7 +119,7 @@ class RequestsHandler:
             proxy_dict = self.return_proxy() if self.use_proxies else None
 
             if proxy_dict is None and self.use_proxies:
-                print("No available proxies, waiting...")
+                log("No available proxies, waiting...")
                 time.sleep(self.timeout_duration)
                 continue
             try:
