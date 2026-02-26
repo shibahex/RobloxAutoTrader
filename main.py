@@ -275,11 +275,10 @@ class Doggo:
 
                     current_account.get_recent_traders()
 
-                    log("Got recent traders")
+                    log("Fetched recent traders")
                     # TODO: add max days inactive in cfg and parse as arg
 
                     # to make the threads run even after stop event is called and another thread starts
-                    log("starting queue thread")
                     self.stop_event.clear()
                     self.start_thread(
                         threading.Thread(
@@ -287,7 +286,7 @@ class Doggo:
                         )
                     )
 
-                    log("started queue thread, now processing trades")
+                    log("Started queue thread, processing trades...")
                     # After queuing, start processing trades for the account (is a while true)
                     self.process_trades_for_account(current_account)
                     log("Stopping threads...")

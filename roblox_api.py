@@ -838,7 +838,7 @@ class RobloxAPI:
         Json way is more messy and not needed for this bot
         """
 
-        log("getting outbound trades..")
+        log("in outbound checker", dontPrint=True)
         trades = self.get_trades(
             "https://trades.roblox.com/v1/trades/outbound?limit=100&sortOrder=Asc"
         )
@@ -1047,9 +1047,7 @@ class RobloxAPI:
                 }/resale-data"
                 # "/marketplace-sales/v1/item/5060a9f2-cae0-4123-88c6-0eab5e2e2b59/resale-data"
             else:
-                url = f"https://economy.roblox.com/v1/assets/{
-                    item_id
-                }/resale-data?limit=100"
+                url = f"https://economy.roblox.com/v1/assets/{item_id}/resale-data"
 
             resale_data = self.parse_handler.requestAPI(url)
 
@@ -1057,11 +1055,13 @@ class RobloxAPI:
                 log("ratelimited resale data")
                 time.sleep(30)
             elif resale_data.status_code == 400:
+                log(f"{item_id} uses new API, retrying.")
                 log(
                     f"reslate data 400 handling for {
                         item_id
                     }, please report if this is spammed \n{url}",
                     severityNum=2,
+                    dontPrint=True,
                 )
                 # Get new id
                 details_url = f"https://catalog.roblox.com/v1/catalog/items/{

@@ -51,8 +51,7 @@ class Logging:
 
         if dontPrint is not True:
             print(f"{severity} {msg}")
-        else:
-            print("Dont print for", msg)
+
         logMessage = f"{time.time()}: {severity} {msg}"
 
         logging.info(logMessage)
