@@ -257,9 +257,6 @@ class RequestsHandler:
                     dontPrint=True,
                 )
                 return Response
-            elif Response.status_code == 429:
-                # NOTE: Handled above..
-                continue
             else:
                 log(
                     f"Unknown Error Code on {URL} {Response.status_code} {
@@ -268,8 +265,6 @@ class RequestsHandler:
                     severityNum=4,
                 )
                 return Response
-
-            # return None
 
     def load_proxies(self, file_path="proxies.txt"):
         try:
