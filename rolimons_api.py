@@ -278,7 +278,7 @@ class RolimonAPI:
             item_volume = None
 
             if need_to_scan(asset_id) == True:
-                roblox_api.RobloxAPI().is_projected_api(asset_id)
+                roblox_api.RobloxAPI().is_projected_api(item_id=asset_id)
 
             if value != 0:
                 if rap_algo_for_valued.lower() == "rolimon_value":
