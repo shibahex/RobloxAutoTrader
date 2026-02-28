@@ -237,7 +237,7 @@ class RobloxAPI:
                             log(
                                 f"[Inventory {userid}] Not trading for",
                                 itemId,
-                                "because duplicates setting",
+                                "(duplicates setting)",
                             )
                         continue
 
@@ -503,7 +503,7 @@ class RobloxAPI:
         # log(response.text, response.url, response.status_code, self.request_handler.headers)
         if "rblx-challenge-id" in response.headers:
             validation = self.validate_2fa(response)
-            log(f"Auth Handled response {validation}")
+            log(f"Auth Handled response {validation}", dontPrint=True)
             time.sleep(10)
             if not validation:
                 return 403
@@ -884,14 +884,18 @@ class RobloxAPI:
                     and self.self_duplicates[str(itemId)]
                     >= self.config.filter_items["Maximum_Amount_of_Duplicate_Items"]
                 ):
-                    log(f"[OUTBOUND] Cancel trade for {itemId} because duplicates")
                     cancel_request = self.request_handler.requestAPI(url, method="post")
                     time.sleep(1.5)
                     if (
                         cancel_request.status_code == 200
                         or cancel_request.status_code == 400
                     ):
-                        log("Cleared outbound...")
+                        log(f"[OUTBOUND] Cancel trade: {itemId} [duplicates]")
+                    else:
+                        log(
+                            f"Failed to cancel outbound {cancel_request.text} {cancel_request.status_code}",
+                            dontPrint=True,
+                        )
 
             valid_trade, reason = self.outbound_trader.validate_trade(
                 self_rap=formatted_trade["self_rap"],
@@ -1046,7 +1050,7 @@ class RobloxAPI:
                 log("ratelimited resale data")
                 time.sleep(30)
             elif resale_data.status_code == 400:
-                log(f"{item_id} uses new API, retrying.")
+                log(f"resolving resale data for {item_id}...")
                 log(
                     f"reslate data 400 handling for {
                         item_id
@@ -1082,7 +1086,7 @@ class RobloxAPI:
                     break
             elif resale_data.status_code == 200:
                 if collectibleItemId is not None:
-                    log("Successfully resolved 400 for resale data")
+                    log("Successfully resolved 400 for resale data", dontPrint=True)
                 break
             else:
                 log(

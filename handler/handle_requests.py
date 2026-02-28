@@ -208,12 +208,23 @@ class RequestsHandler:
                 log(
                     f"Unauthorized debug: {Response.text} {Response.status_code} {
                         Response.url
-                    }"
+                    }",
+                    dontPrint=True,
                 )
 
                 if "XSRF token invalid" in Response.text:
                     gen_status = self.generate_csrf()
-                    log(f"Refreshing CSRF Token: {gen_status}")
+                    if gen_status:
+                        log(
+                            f"Succesfully Refreshing CSRF Token: {gen_status}",
+                            dontPrint=True,
+                        )
+                    else:
+                        log(
+                            "Failed Refreshing CSRF Token",
+                            dontPrint=True,
+                            severityNum=3,
+                        )
                     continue
 
                 # This API doesn't work for some items

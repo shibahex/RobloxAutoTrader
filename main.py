@@ -172,7 +172,7 @@ class Doggo:
             def check_oubounds():
                 for account in roblox_accounts:
                     if not account.config.debug["dont_check_outbounds"]:
-                        log("Checking outbounds")
+                        log("Outbound checker thread started")
                         account.outbound_api_checker()
                     account.check_completeds()
 
@@ -283,7 +283,7 @@ class Doggo:
                         )
                     )
 
-                    log("Started queue thread, processing trades...")
+                    log("All threads executed! Processing Trades...")
                     # After queuing, start processing trades for the account (is a while true)
                     self.process_trades_for_account(current_account)
                     log("Stopping threads...")
@@ -331,7 +331,7 @@ class Doggo:
                                 time.time() - account.last_sent_trade
                             } time spent trying to find trades with {account.username}"
                         )
-                    log(f"trading with {trader}")
+                    log(f"searching for trades with {trader}")
                     trader_inventory = self.user_queue[trader]
 
                     # Delete the key from the dictionary
@@ -432,13 +432,16 @@ class Doggo:
 
                             divider = "=" * 40
 
-                            log(f"\n{divider}")
+                            print("\n")
+                            log(f"{divider}")
                             log("[TRADE INFO]".center(40, "="))
                             log(f"Total Profit: {total_profit}\n")
                             log(f"Sending: \n{send_items}")
                             log(f"\nRecieve: \n{receive_items}")
                             log(f"\n*** BREAKDOWN ***\n{breakdown}")
                             log(f"\n{divider}\n")
+                            print("\n")
+
                             pass
                     else:
                         if not account_inventory:
