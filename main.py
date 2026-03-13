@@ -376,12 +376,11 @@ class Doggo:
                                 )
                             except exceptions_types.TradeLimit:
                                 if not account.config.debug["ignore_limit"]:
-                                    if not send_trade_response:  # Rate-limited
-                                        log("Roblox account limited")
-                                        self.json.add_ratelimit_timestamp(
-                                            account.cookies[".ROBLOSECURITY"]
-                                        )
-                                        return False
+                                    log("Roblox account limited")
+                                    self.json.add_ratelimit_timestamp(
+                                        account.cookies[".ROBLOSECURITY"]
+                                    )
+                                    return False
 
                         # Handle webhook
                         if send_trade_response:
