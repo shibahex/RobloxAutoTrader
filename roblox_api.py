@@ -13,7 +13,7 @@ from handler.handle_2fa import AuthHandler
 from trade_algorithm import TradeMaker
 from handler.account_settings import HandleConfigs
 from handler.handle_logs import log
-
+from handler import exceptions_types
 from handler.price_algorithm import SalesVolumeAnalyzer
 
 SECONDS_IN_DAY = 86400
@@ -553,7 +553,7 @@ class RobloxAPI:
             time.sleep(1)
 
             if trade_response.status_code == 200:
-                log("Trade sent!")  # , trade_response.text)
+                log("Trade sent!")
                 return trade_response.json()["id"]
             elif trade_response.status_code == 429:
                 if "errors" in trade_response.json():
@@ -561,8 +561,8 @@ class RobloxAPI:
                         "you are sending too many trade requests"
                         in trade_response.json()["errors"][0]["message"].lower()
                     ):
-                        # pass
-                        return False
+                        log(f"{trade_response.text}", dontPrint=True)
+                        raise exceptions_types.TradeLimit
 
                 return trade_response.status_code
             elif trade_response.status_code == 403:

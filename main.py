@@ -11,6 +11,7 @@ import sys
 from handler.handle_logs import log
 from handler.handle_cli import Terminal
 from handler.handle_discord import DiscordHandler
+from handler import exceptions_types
 
 
 """
@@ -321,7 +322,11 @@ class Doggo:
                         ]
                     ):
                         log(
-                            f"Couldnt find any trades for {account.username} {account.config.filter_generated['Max_Seconds_Spent_on_One_User']} seconds"
+                            f"Couldnt find any trades for {account.username} {
+                                account.config.filter_generated[
+                                    'Max_Seconds_Spent_on_One_User'
+                                ]
+                            } seconds"
                         )
                         account.last_sent_trade = time.time()
                         return None
@@ -365,17 +370,18 @@ class Doggo:
                         if account.config.debug["dont_send_trade"]:
                             send_trade_response = True
                         else:
-                            send_trade_response = account.send_trade(
-                                trader, self_side, their_side, self_robux=self_robux
-                            )
-
-                        if not account.config.debug["ignore_limit"]:
-                            if not send_trade_response:  # Rate-limited
-                                log("Roblox account limited")
-                                self.json.add_ratelimit_timestamp(
-                                    account.cookies[".ROBLOSECURITY"]
+                            try:
+                                send_trade_response = account.send_trade(
+                                    trader, self_side, their_side, self_robux=self_robux
                                 )
-                                return False
+                            except exceptions_types.TradeLimit:
+                                if not account.config.debug["ignore_limit"]:
+                                    if not send_trade_response:  # Rate-limited
+                                        log("Roblox account limited")
+                                        self.json.add_ratelimit_timestamp(
+                                            account.cookies[".ROBLOSECURITY"]
+                                        )
+                                        return False
 
                         # Handle webhook
                         if send_trade_response:
