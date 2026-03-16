@@ -284,7 +284,7 @@ class RequestsHandler:
                     "http://" + line.strip() for line in file if line.strip()
                 ]
         except Exception as e:
-            log("No proxy file, returning None.", e)
+            log(f"No proxy file, returning None. {e}")
 
     def refresh_proxies(self, file_path="proxies.txt"):
         self.load_proxies(file_path)

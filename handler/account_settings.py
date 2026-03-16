@@ -55,7 +55,7 @@ class HandleConfigs:
                 try:
                     config.read(file_path)
                 except Exception as e:
-                    log("Couldn't read config", e)
+                    log(f"Couldn't read config {e}")
                     continue
 
                 if "Info" in config and "Description" in config["Info"]:

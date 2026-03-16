@@ -360,7 +360,10 @@ class Doggo:
                             break
 
                         if account.config.debug["trading_debug"]:
-                            log(f"Generated trade: {generated_trade}", account.username)
+                            log(
+                                f"Generated trade: {generated_trade} {account.username}",
+                                severityNum=5,
+                            )
 
                         # Extract trade details
                         self_side = generated_trade["self_side"]

@@ -184,7 +184,7 @@ class DiscordHandler:
                 time.sleep(0.5)
                 break
 
-            log("[DOGGO]", response)
+            log(f"[DOGGO] {response}")
         except Exception as e:
             # Log any errors to help with debugging
             log(f"[ERROR] Failed to send webhook: {e}")

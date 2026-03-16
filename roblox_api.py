@@ -235,9 +235,7 @@ class RobloxAPI:
                     ):
                         if self.config.debug["show_scanning_inventory"]:
                             log(
-                                f"[Inventory {userid}] Not trading for",
-                                itemId,
-                                "(duplicates setting)",
+                                f"[Inventory {userid}] Not trading for {itemId} (duplicates setting)",
                             )
                         continue
 

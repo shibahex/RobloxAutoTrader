@@ -150,7 +150,7 @@ class AuthHandler:
                     continue
 
             except Exception as e:
-                log(f"Request failed with exception: {e}", severity_num=2)
+                log(f"Request failed with exception: {e}", severityNum=2)
                 retry_count += 1
                 time.sleep(5)  # Brief pause before retry
                 continue

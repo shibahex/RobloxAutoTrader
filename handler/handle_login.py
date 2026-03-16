@@ -63,7 +63,7 @@ class FirefoxLogin:
         while True:
             try:
                 totp = pyotp.TOTP(totp_secret)
-                log("[Debug] Current Auth Code: ", totp.now())
+                log(f"[Debug] Current Auth Code: {totp.now()}")
                 # Wait for the modal to be visible
                 modal = WebDriverWait(self.browser, 360).until(
                     EC.visibility_of_element_located(

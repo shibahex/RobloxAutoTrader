@@ -256,16 +256,19 @@ class TradeMaker:
         start_time = time.perf_counter()  # Use perf_counter for better precision
 
         if self.debug_print:
-            log("trade algorithm: getting keys")
+            log("trade algorithm: getting keys", severityNum=5)
 
         if not self_inventory or not their_inventory:
-            log("[Debug] in generating trade invalid inventory, returning None")
+            log(
+                "[Debug] in generating trade invalid inventory, returning None",
+                severityNum=5,
+            )
             return None
 
         self_keys = list(self_inventory.keys())
         their_keys = list(their_inventory.keys())
         if self.debug_print:
-            log("Trade algorithm got keys")
+            log("Trade algorithm got keys", severityNum=5)
 
         def get_total_values(items, inventory):
             """
@@ -297,7 +300,7 @@ class TradeMaker:
             return value, rap, rap_algorithm, demand, total_value, volume
 
         if self.debug_print:
-            log("Trade algorithm: starting trade generation")
+            log("Trade algorithm: starting trade generation", severityNum=5)
 
         # pre_checks = [
         #     self.min_rap_gain,
@@ -410,8 +413,8 @@ class TradeMaker:
                     if validate_trade:
                         if self.debug_print:
                             log(
-                                "[DEBUG] Trade algorithm: validated trade",
-                                len(valid_trades),
+                                f"[DEBUG] Trade algorithm: validated trade {len(valid_trades)}",
+                                severityNum=5,
                             )
 
                         # Calculate the trade sum (RAP and value)
@@ -494,7 +497,9 @@ class TradeMaker:
         if valid_trades:
             return pick_trade()
 
-        log("Couldnt find valid_trades heres invalid trades reasons:", invalid_reasons)
+        log(
+            f"Couldnt find valid_trades heres invalid trades reasons: {invalid_reasons}"
+        )
         return None
 
     def check_rap_gain(self, their_rap, self_rap):
