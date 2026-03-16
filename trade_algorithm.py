@@ -265,7 +265,7 @@ class TradeMaker:
         self_keys = list(self_inventory.keys())
         their_keys = list(their_inventory.keys())
         if self.debug_print:
-            print("Trade algorithm got keys")
+            log("Trade algorithm got keys")
 
         def get_total_values(items, inventory):
             """
@@ -277,7 +277,7 @@ class TradeMaker:
                 if item[value] is not None:
                     return item[value]
                 else:
-                    print(item, "doesnt have", value)
+                    log(f"{item} doesnt have value {value}")
                     return 0
 
             for key in items:
@@ -297,8 +297,7 @@ class TradeMaker:
             return value, rap, rap_algorithm, demand, total_value, volume
 
         if self.debug_print:
-            print("Trade algorithm: starting trade generation")
-        # NOTE: have like: out of 30000 trades, 4 valid: 400 failed sum of trade blah
+            log("Trade algorithm: starting trade generation")
 
         # pre_checks = [
         #     self.min_rap_gain,
@@ -326,9 +325,8 @@ class TradeMaker:
                 self.trade_timeout
                 and time.perf_counter() - start_time > self.trade_timeout
             ):
-                print(
-                    "Timeout reached while generating trades. invalid reasons:",
-                    invalid_reasons,
+                log(
+                    f"Timeout reached while generating trades. invalid reasons: {invalid_reasons}"
                 )
                 break
             # Create a set for the current self_side to check against

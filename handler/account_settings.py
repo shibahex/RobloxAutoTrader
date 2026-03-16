@@ -33,7 +33,7 @@ class HandleConfigs:
 
         log("\nSelect a user ID to configure:")
         for i, user_id in enumerate(user_ids, 1):
-            log(f"{i}. {user_id}", self.cookies.return_name_from_id(str(user_id)))
+            log(f"{i}. {user_id}:  {self.cookies.return_name_from_id(str(user_id))}")
 
         try:
             choice = int(input("\nEnter the number of the user ID: "))
@@ -59,9 +59,9 @@ class HandleConfigs:
                     continue
 
                 if "Info" in config and "Description" in config["Info"]:
-                    log(f"({enum + 1})", file, "|", config["Info"]["Description"])
+                    log(f"({enum + 1}) {file} | {config['Info']['Description']}")
                 else:
-                    log(f"({enum + 1})", file, "|", "Config Doesn't have descriptions")
+                    log(f"({enum + 1}) {file} | Config doesnt have description")
 
         try:
             chosen = (
