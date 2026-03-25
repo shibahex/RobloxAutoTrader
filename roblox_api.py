@@ -857,7 +857,7 @@ class RobloxAPI:
             if trade_info_req.status_code != 200:
                 log(
                     f"trade info api {trade_info_req.status_code}, {
-                        trade_info.text
+                        trade_info_req.text
                     }, Response Headers: {trade_info_req.headers} Url: {
                         trade_info_req.url
                     } Session Cookies: {self.request_handler.Session.cookies} Headers: {
