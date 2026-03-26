@@ -440,7 +440,7 @@ class RobloxAPI:
             if self.config.inbounds["Dont_Counter_Wins"]:
                 # If its a win then continue and dont counter
                 trade_info = self.request_handler.requestAPI(
-                    f"https://trades.roblox.com/v1/trades/{trade_id}"
+                    f"https://trades.roblox.com/v2/trades/{trade_id}"
                 )
                 if trade_info.status_code == 200:
                     trade_json = trade_info.json()
@@ -676,15 +676,15 @@ class RobloxAPI:
     def format_trade_api(self, trade_json):
         # TODO: If this function is only used for webhook reasons, scrap it and remake it,
         # Because grouping up RAP as a total value then VALUE has a total value to get webhook totals don't work because  they shouldnt be added together to get a value of an item
-        self_offer = trade_json["offers"][0]
+        self_offer = trade_json["participantAOffer"]
         self_user = self_offer["user"]["id"]
         # Extract only the asset IDs
-        self_assets = [asset["assetId"] for asset in self_offer["userAssets"]]
+        self_assets = [asset["itemTarget"]["targetId"] for asset in self_offer["items"]]
 
         # Assign the second offer to trader_offer
-        trader_offer = trade_json["offers"][1]
+        trader_offer = trade_json["participantBOffer"]
         # Extract only the asset IDs
-        trader_assets = [asset["assetId"] for asset in trader_offer["userAssets"]]
+        trader_assets = [asset["itemTarget"]["targetId"] for asset in trader_offer["items"]]
 
         self_rap, self_value, self_algorithm_value, self_overall = self.calculate_gains(
             self_assets
@@ -747,7 +747,7 @@ class RobloxAPI:
             # log("done getting self2")
             for trade_id in unlogged_trades:
                 trade_info = self.request_handler.requestAPI(
-                    f"https://trades.roblox.com/v1/trades/{trade_id}"
+                    f"https://trades.roblox.com/v2/trades/{trade_id}"
                 )
 
                 if trade_info.status_code == 200:
@@ -773,9 +773,9 @@ class RobloxAPI:
                         self.discord_webhook.send_webhook(
                             embed, self.config.discord_settings["Completed_Webhook"]
                         )
-                    except Exception:
+                    except Exception as e:
                         log(
-                            "Couldn't format and post webhook.. skipping", severityNum=2
+                            f"Couldn't format and post webhook.. skipping {e}", severityNum=2
                         )
                 elif trade_info.status_code == 500:
                     continue
@@ -851,7 +851,7 @@ class RobloxAPI:
             trade_id = trade_info["trade_id"]
 
             trade_info_req = self.request_handler.requestAPI(
-                f"https://trades.roblox.com/v1/trades/{trade_id}"
+                f"https://trades.roblox.com/v2/trades/{trade_id}"
             )
             # Handle error
             if trade_info_req.status_code != 200:
