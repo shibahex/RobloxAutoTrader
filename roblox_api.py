@@ -148,32 +148,24 @@ class RobloxAPI:
                 duplicates[itemId] += 1
             return duplicates
 
-        # NOTE: switch to v2 when they add ishold to API
-
         cursor = ""
         inventory = {}
 
         trader_duplicates = {}
-        # for ['Trade_for_Duplicate_Items']
 
         is_self = False
         while cursor is not None:
-            # https://inventory.roblox.com/v2/users/6410566/inventory/8?cursor=&limit=100&sortOrder=Desc
-            inventory_API = f"https://inventory.roblox.com/v1/users/{
-                userid
-            }/assets/collectibles?cursor={cursor}&limit=100"
+            # NOTE: 100 sometimes has internal server error.
+            inventory_API = f"https://trades.roblox.com/v2/users/{userid}/tradableItems?sortBy=CreationTime&sortOrder=2&limit=50&cursor={cursor}"
 
             response = self.request_handler.requestAPI(inventory_API)
             if response.status_code != 200:
                 log(
-                    f"inventory API error {inventory_API}, {response.status_code} {
-                        response.text
-                    }",
+                    f"inventory API error {inventory_API}, {response.status_code} {response.text}",
                     severityNum=2,
                 )
                 time.sleep(30)
-                # return False
-            elif response.status_code == 403:
+            elif response.status_code == 403 or response.status_code == 500:
                 log(f"Cant view inventory of {userid}")
                 return None
 
@@ -187,8 +179,31 @@ class RobloxAPI:
                 cursor = None
                 break
 
-            for item in response.json()["data"]:
-                itemId = str(item["assetId"])
+            for item in response.json()["items"]:
+                itemId = str(item["itemTarget"]["targetId"])
+
+                # NOTE: Since we are using the V2 API, rolimon doesn't have the new item id for faces.
+                try:
+                    current_demand = self.rolimon.item_data[itemId]["demand"]
+                except Exception as e:
+                    log(
+                        f"Rolimons doesn't have new item_id for {item['itemName']}, skipping {e}"
+                    )
+                    continue
+                # Resolve instance ID
+                instances = item.get("instances")
+                if isinstance(instances, list):
+                    instance = instances[0] if instances else None
+                else:
+                    instance = instances
+
+                if not instance:
+                    continue
+
+                if instance.get("isOnHold"):
+                    continue
+
+                uaid = str(instance.get("collectibleItemInstanceId"))
 
                 # Check for duplicates
                 if str(userid) == str(self.account_id):
@@ -198,12 +213,6 @@ class RobloxAPI:
                 else:
                     trader_duplicates = add_to_duplicates(trader_duplicates, itemId)
 
-                if item["isOnHold"]:
-                    continue
-
-                # TODO: APPLY NFT
-                # TODO: IF USERID = SELF.USERID THEN DONT APPLY NFT
-                uaid = str(item["userAssetId"])
                 if str(userid) == str(self.account_id):
                     is_self = True
                     nft_list = self.config.filter_items["NFT"]
@@ -216,18 +225,30 @@ class RobloxAPI:
                     inventory[uaid] = {"item_id": itemId}
                 else:
                     try:
-                        current_demand = self.rolimon.item_data[itemId]["demand"]
-                    except Exception:
-                        # bad item
+                        # Dont trade for faces or gears depending on the config
+                        if (
+                            self.rolimon.item_data[itemId]["asset_type_id"] == 18
+                            and not self.config.trading["TradeForFaces"]
+                        ):
+                            continue
+                        if (
+                            self.rolimon.item_data[itemId]["asset_type_id"] == 19
+                            and not self.config.trading["TradeForGears"]
+                        ):
+                            continue
+
+                    except Exception as e:
+                        log(
+                            f"Caught expection scanning for rolimon stats {e}.. Skipping {item['itemName']}"
+                        )
                         continue
+
                     if (
                         current_demand is not None
                         and int(current_demand) < self.config.filter_items["MinDemand"]
                     ):
-                        # log(current_demand, itemId, "skipped")
                         continue
 
-                    # NOTE: Dont trade for items you already have
                     if (
                         str(itemId) in self.self_duplicates
                         and self.self_duplicates[str(itemId)]
@@ -235,12 +256,10 @@ class RobloxAPI:
                     ):
                         if self.config.debug["show_scanning_inventory"]:
                             log(
-                                f"[Inventory {userid}] Not trading for {itemId} (duplicates setting)",
+                                f"[Inventory {userid}] Not trading for {itemId} (duplicates setting)"
                             )
                         continue
 
-                    # NOTE: Dont allow trade to have multiple duplicates of items (OWNED OR NOT)
-                    # log(itemId, trader_duplicates, userid)
                     if (
                         str(itemId) in trader_duplicates
                         and trader_duplicates[str(itemId)]
@@ -250,21 +269,16 @@ class RobloxAPI:
                     ):
                         if self.config.debug["show_scanning_inventory"]:
                             log(
-                                f"[Inventory {
-                                    userid
-                                }] Not allowing to trade for another {itemId}"
+                                f"[Inventory {userid}] Not allowing to trade for another {itemId}"
                             )
                         continue
 
-                    # NOTE: Dont trade for items in NFR and dont let the end trade have duplicate items
                     nfr_list = self.config.filter_items["NFR"]
                     if itemId not in nfr_list:
                         inventory[uaid] = {"item_id": itemId}
                     else:
                         if self.config.debug["show_scanning_inventory"]:
                             log(f"{itemId} in NFR list, skipping it")
-
-                    # TODO: min demand
 
         minimum_items = self.config.filter_users["Minimum_Total_Items"]
         if not is_self:
@@ -277,8 +291,6 @@ class RobloxAPI:
             return False
 
         return self.rolimon.add_data_to_inventory(inventory, is_self=is_self)
-
-        # return self.rolimon.get_inventory(userid, apply_NFT)
 
     # NOTE: Payload:
     # {"offers":[{"userId":4486142832,"userAssetIds":[672469540],"robux":null},{"userId":1283171278,"userAssetIds":[1310053014],"robux":null}]}
@@ -517,7 +529,7 @@ class RobloxAPI:
         counter_id=None,
     ):
         """
-        Send Trader ID Then the list of items (list of assetids)
+        Send Trader ID Then the list of items (list of collectibleItemInstanceIds)
         """
         if self_robux and self_robux >= self.account_robux:
             self_robux = self.account_robux
@@ -525,19 +537,21 @@ class RobloxAPI:
                 self_robux -= 1
 
         trade_payload = {
-            "offers": [
-                {"userId": trader_id, "userAssetIds": trade_recieve, "robux": None},
-                {
-                    "userId": self.account_id,
-                    "userAssetIds": trade_send,
-                    "robux": self_robux,
-                },
-            ]
+            "senderOffer": {
+                "userId": self.account_id,
+                "collectibleItemInstanceIds": trade_send,
+                "robux": self_robux or 0,
+            },
+            "recipientOffer": {
+                "userId": trader_id,
+                "collectibleItemInstanceIds": trade_recieve,
+                "robux": 0,
+            },
         }
 
-        trade_api = "https://trades.roblox.com/v1/trades/send"
+        trade_api = "https://trades.roblox.com/v2/trades/send"
         if counter_trade and counter_id is not None:
-            trade_api = f"https://trades.roblox.com/v1/trades/{counter_id}/counter"
+            trade_api = f"https://trades.roblox.com/v2/trades/{counter_id}/counter"
 
         validation_headers = None
         while True:
@@ -550,17 +564,24 @@ class RobloxAPI:
             # this is a very ratelimited API so dont spam
             time.sleep(1)
 
+            if "errors" in trade_response.json():
+                errors = trade_response.json().get("errors", {})
+                # This API can return 2 types of errors, format it the same.
+                if isinstance(errors, list):
+                    error_message = errors[0]["message"].lower()
+                elif isinstance(errors, dict):
+                    error_message = " ".join(errors.values()).lower()
+                else:
+                    error_message = ""
+
             if trade_response.status_code == 200:
                 log("Trade sent!")
-                return trade_response.json()["id"]
+                return trade_response.json()["tradeId"]
+
             elif trade_response.status_code == 429:
-                if "errors" in trade_response.json():
-                    if (
-                        "you are sending too many trade requests"
-                        in trade_response.json()["errors"][0]["message"].lower()
-                    ):
-                        log(f"{trade_response.text}", dontPrint=True)
-                        raise exceptions_types.TradeLimit
+                if "you are sending too many trade requests" in error_message:
+                    log(f"{trade_response.text}", dontPrint=True)
+                    raise exceptions_types.TradeLimit
 
                 return trade_response.status_code
             elif trade_response.status_code == 403:
@@ -569,24 +590,17 @@ class RobloxAPI:
                     continue
                 if not auth_response:
                     break
-
             elif trade_response.status_code == 400:
-                """
-                    https://trades.roblox.com/v1/trades/send 400 {"errors":[{"code":17,"message":"You have insufficient Robux to make this offer.","userFacingMessage":"Something went wrong"}]}
+                error_list = trade_response.json().get("errors")
+                if error_list:
+                    print(error_list, "error list", trade_response.text)
+                    error = trade_response.json()["errors"][0]
+                    error_code = error["code"]
+                else:
+                    error_code = trade_response.text
 
-
-                    {"errors":[{"code":12,"message":"One or more userAssets are invalid. See fieldData for details.","userFacingMessage":"Something went wrong",
-                        "field":"userAssetIds","fieldData":[{"userAssetId":13003706,"reason":"NotOwned"},{"userAssetId":30456875,"reason":"NotOwned"}]}]}
-
-                """
-                # Error code 17 = Not enough robux
-                # Error code 12 = Someone doesn't own the robux anymore
-                error = trade_response.json()["errors"][0]
-                error_code = error["code"]
                 self.get_robux()
-
                 if error_code == 12:
-                    # Check if its our inventory erroring
                     self.check_completeds()
                     break
                 elif error_code == 17:
@@ -597,37 +611,10 @@ class RobloxAPI:
                     break
             else:
                 log(
-                    f"errored at trade {trade_response.status_code} {
-                        trade_response.text
-                    }",
+                    f"errored at trade {trade_response.status_code} {trade_response.text} payload {trade_payload}",
                     severityNum=2,
                 )
-                # log(trade_response.text)
                 break
-
-    # NOTE: this func isnt doing what its suppose to, test it
-    # EXAMPLE RESPONSE PAYLOAD
-    """
-    Requests payload error, returning Already in cached traders, scraping active traders{"errors":[{"code":12,"message":"One or more userAssets
-    are invalid. See fieldData for details.","userFacingMessage":"Something went wrong","field":"userAssetIds","fieldData":[{"userAssetId":334790336,"reason":"NotOwned"}]}]}
-     {'offers': [{'userId': 1335379174, 'userAssetIds': ('13124557550',), 'robux': None}, {'userId': 1283171278, 'userAssetIds': ('334790336', '378058412', '3790416539', '166680335625'), 'robux': 186}]}
-    """
-
-    def handle_invalid_ids(self, error_data):
-        missing_asset_ids = [
-            entry["userAssetId"] for entry in error_data["errors"][0]["fieldData"]
-        ]
-
-        def is_in_inventory():
-            for user_asset_id in missing_asset_ids:
-                if user_asset_id in self.account_inventory:
-                    return True
-
-        if is_in_inventory():
-            self.check_completeds()
-            return True
-        else:
-            return False
 
     def get_robux(self):
         robux_api = f"https://economy.roblox.com/v1/users/{self.account_id}/currency"
@@ -684,7 +671,9 @@ class RobloxAPI:
         # Assign the second offer to trader_offer
         trader_offer = trade_json["participantBOffer"]
         # Extract only the asset IDs
-        trader_assets = [asset["itemTarget"]["targetId"] for asset in trader_offer["items"]]
+        trader_assets = [
+            asset["itemTarget"]["targetId"] for asset in trader_offer["items"]
+        ]
 
         self_rap, self_value, self_algorithm_value, self_overall = self.calculate_gains(
             self_assets
@@ -775,7 +764,8 @@ class RobloxAPI:
                         )
                     except Exception as e:
                         log(
-                            f"Couldn't format and post webhook.. skipping {e}", severityNum=2
+                            f"Couldn't format and post webhook.. skipping {e}",
+                            severityNum=2,
                         )
                 elif trade_info.status_code == 500:
                     continue
@@ -804,6 +794,12 @@ class RobloxAPI:
             raise ValueError(e)
 
         for item in item_ids:
+            # TODO: FIX this when rolimons update
+            try:
+                self.rolimon.item_data[str(item)]["rap"]
+            except Exception:
+                log(f"{item} not in rolimons yet, skipping this trade")
+                return
             if str(item) not in projected_data:
                 account_algorithm_value += self.rolimon.item_data[str(item)]["rap"]
             else:
