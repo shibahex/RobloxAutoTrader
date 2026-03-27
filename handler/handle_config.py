@@ -248,6 +248,8 @@ class ConfigHandler:
             "MinimumRapOfTrade": self.get_float(
                 "Trading Settings", "Minimum Rap Sum Of Trade"
             ),
+            "TradeForFaces": self.get_boolean("Trading Settings", "Trade For Faces"),
+            "TradeForGears": self.get_boolean("Trading Settings", "Trade For Gears"),
         }
 
     def load_inbounds(self):
