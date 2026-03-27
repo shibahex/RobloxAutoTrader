@@ -131,7 +131,8 @@ class Doggo:
                     roblox_account.all_cached_traders.add(owner)
                     if roblox_account.check_can_trade(owner):
                         if roblox_account.config.debug["show_scanning_users"]:
-                            log(f"User: {owner} has trades on, checking invetory..")
+                            log(f"User: {
+                                owner} has trades on, checking invetory..")
 
                         inventory = roblox_account.fetch_inventory(owner)
                         if not inventory:
@@ -190,13 +191,41 @@ class Doggo:
             log(f"{e} {tb}", severityNum=4)
             time.sleep(5)
 
+    def counter_trade_thread(self, roblox_accounts):
+        try:
+
+            def counter_trades_logic():
+                for account in roblox_accounts:
+                    if (
+                        account.config.inbounds["CounterTrades"]
+                        and not account.config.debug["dont_send_trade"]
+                    ):
+                        try:
+                            last_checked = time.time() - account.counter_timer
+                            if last_checked >= 1800:
+                                account.counter_timer = time.time()
+                                account.counter_trades()
+                        except Exception as e:
+                            log(f"starting countering error: {e}")
+                            pass
+
+            log("counter trade thread started")
+
+            while True:
+                counter_trades_logic()
+                time.sleep(5)
+        except Exception as e:
+            log(f"counter trade thread {e}", severityNum=4)
+            pass
+
     def start_thread(self, thread: threading.Thread):
         thread.daemon = True
         thread.start()
 
     def start_trader(self):
         """
-        Main Loop function that loops through all the accounts and run the traders
+        Main Loop function that loops through all the accounts
+        then run the traders
         """
         try:
             roblox_accounts = self.load_roblox_accounts()
@@ -205,6 +234,12 @@ class Doggo:
                     target=self.check_outbound_thread, args=(roblox_accounts,)
                 )
             )
+            self.start_thread(
+                threading.Thread(
+                    target=self.counter_trade_thread, args=(roblox_accounts,)
+                )
+            )
+
             self.start_thread(threading.Thread(target=self.update_data_thread))
 
             time.sleep(1)
@@ -213,21 +248,6 @@ class Doggo:
                     input("No active accounts found!")
                     break
                 for current_account in roblox_accounts:
-                    if (
-                        current_account.config.inbounds["CounterTrades"]
-                        and not current_account.config.debug["dont_send_trade"]
-                    ):
-                        try:
-                            current_account.counter_trades()
-                            last_checked = time.time() - current_account.counter_timer
-                            if last_checked >= 1800:
-                                log("countering")
-                                current_account.counter_timer = time.time()
-                                current_account.counter_trades()
-                        except Exception as e:
-                            log(f"starting countering error: {e}")
-                            pass
-
                     if time.time() - current_account.last_generated_csrf_timer >= 900:
                         log("Refreshing csrf token")
                         current_account.request_handler.generate_csrf()
@@ -361,7 +381,9 @@ class Doggo:
 
                         if account.config.debug["trading_debug"]:
                             log(
-                                f"Generated trade: {generated_trade} {account.username}",
+                                f"Generated trade: {generated_trade} {
+                                    account.username
+                                }",
                                 severityNum=5,
                             )
 
@@ -418,7 +440,8 @@ class Doggo:
                                 )
                             )
                             embed = self.discord_webhook.setup_embed(
-                                title=f"Sent a trade with {total_profit} total profit",
+                                title=f"Sent a trade with {
+                                    total_profit} total profit",
                                 color=1,
                                 user_id=trader,
                                 embed_fields=embed_fields,
@@ -434,7 +457,8 @@ class Doggo:
                             if isinstance(send_items, tuple):
                                 send_items = "\n".join(map(str, send_items))
                             if isinstance(receive_items, tuple):
-                                receive_items = "\n".join(map(str, receive_items))
+                                receive_items = "\n".join(
+                                    map(str, receive_items))
 
                             breakdown = embed_fields["Trade Breakdown"]
 
@@ -480,7 +504,8 @@ class Doggo:
             # last_completed = account["last_completed"]
             user_id = account["user_id"]
 
-            roblox_account = RobloxAPI(cookie=roblox_cookie, auth_secret=auth_secret)
+            roblox_account = RobloxAPI(
+                cookie=roblox_cookie, auth_secret=auth_secret)
             roblox_account.request_handler.generate_csrf()
 
             user_config = self.account_configs.get_config(user_id)
