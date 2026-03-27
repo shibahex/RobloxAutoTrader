@@ -457,6 +457,8 @@ class RobloxAPI:
                 if trade_info.status_code == 200:
                     trade_json = trade_info.json()
                     formatted_trade = self.format_trade_api(trade_json)
+                    if not formatted_trade:
+                        continue
                     if (
                         formatted_trade["self_overall_value"]
                         - formatted_trade["their_overall_value"]
@@ -580,7 +582,10 @@ class RobloxAPI:
 
             elif trade_response.status_code == 429:
                 if "you are sending too many trade requests" in error_message:
-                    log(f"{trade_response.text}", dontPrint=True)
+                    log(
+                        f"acc reached 100 trades based on {trade_response.text}",
+                        dontPrint=True,
+                    )
                     raise exceptions_types.TradeLimit
 
                 return trade_response.status_code
@@ -678,9 +683,13 @@ class RobloxAPI:
         self_rap, self_value, self_algorithm_value, self_overall = self.calculate_gains(
             self_assets
         )
-        trader_rap, trader_value, trader_algorithm_value, trader_overall = (
-            self.calculate_gains(trader_assets)
-        )
+        try:
+            trader_rap, trader_value, trader_algorithm_value, trader_overall = (
+                self.calculate_gains(trader_assets)
+            )
+        except Exception:
+            return
+
         trade = {
             "their_id": trader_offer["user"]["id"],
             "their_side_item_ids": trader_assets,
@@ -743,6 +752,8 @@ class RobloxAPI:
                     trade_json = trade_info.json()
                     try:
                         formatted_trade = self.format_trade_api(trade_json)
+                        if not formatted_trade:
+                            continue
                         embed_fields, total_profit = (
                             self.discord_webhook.embed_fields_from_trade(
                                 formatted_trade,
@@ -869,6 +880,8 @@ class RobloxAPI:
 
             data = trade_info_req.json()
             formatted_trade = self.format_trade_api(data)
+            if not formatted_trade:
+                continue
             url = f"https://trades.roblox.com/v1/trades/{trade_id}/decline"
 
             # NOTE: Check for duplicates
