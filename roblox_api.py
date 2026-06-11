@@ -181,15 +181,15 @@ class RobloxAPI:
 
             for item in response.json()["items"]:
                 itemId = str(item["itemTarget"]["targetId"])
+                collectibleItemId = item["collectibleItemId"]
+                # Check if item is bundle or not for the new rolimons format
+                if item["itemTarget"]["itemType"] == "Bundle":
+                    itemId = "2:" + itemId
+                else:
+                    itemId = "1:" + itemId
 
-                # NOTE: Since we are using the V2 API, rolimon doesn't have the new item id for faces.
-                try:
-                    current_demand = self.rolimon.item_data[itemId]["demand"]
-                except Exception as e:
-                    log(
-                        f"Rolimons doesn't have new item_id for {item['itemName']}, skipping {e}"
-                    )
-                    continue
+                current_demand = self.rolimon.item_data[itemId]["demand"]
+
                 # Resolve instance ID
                 instances = item.get("instances")
                 if isinstance(instances, list):
@@ -222,17 +222,20 @@ class RobloxAPI:
                             log(f"{itemId} in NFT list, skipping it")
                         continue
 
-                    inventory[uaid] = {"item_id": itemId}
+                    inventory[uaid] = {
+                        "item_id": itemId,
+                        "collectibleItemId": collectibleItemId,
+                    }
                 else:
                     try:
                         # Dont trade for faces or gears depending on the config
                         if (
-                            self.rolimon.item_data[itemId]["asset_type_id"] == 18
+                            self.rolimon.item_data[itemId]["asset_type"] == "asset:18"
                             and not self.config.trading["TradeForFaces"]
                         ):
                             continue
                         if (
-                            self.rolimon.item_data[itemId]["asset_type_id"] == 19
+                            self.rolimon.item_data[itemId]["asset_type"] == "asset:19"
                             and not self.config.trading["TradeForGears"]
                         ):
                             continue
@@ -275,7 +278,10 @@ class RobloxAPI:
 
                     nfr_list = self.config.filter_items["NFR"]
                     if itemId not in nfr_list:
-                        inventory[uaid] = {"item_id": itemId}
+                        inventory[uaid] = {
+                            "item_id": itemId,
+                            "collectibleItemId": collectibleItemId,
+                        }
                     else:
                         if self.config.debug["show_scanning_inventory"]:
                             log(f"{itemId} in NFR list, skipping it")
@@ -285,6 +291,7 @@ class RobloxAPI:
             if len(inventory.keys()) < minimum_items:
                 if self.config.debug["show_scanning_inventory"]:
                     log(f"[Inventory {userid}] User doesn't match minimum items")
+
                 return False
 
         if inventory == {}:
@@ -671,23 +678,30 @@ class RobloxAPI:
         self_offer = trade_json["participantAOffer"]
         self_user = self_offer["user"]["id"]
         # Extract only the asset IDs
-        self_assets = [asset["itemTarget"]["targetId"] for asset in self_offer["items"]]
-
+        self_assets = [
+            ("1:" if asset["itemTarget"]["itemType"] == "Asset" else "2:")
+            + asset["itemTarget"]["targetId"]
+            for asset in self_offer["items"]
+        ]
         # Assign the second offer to trader_offer
         trader_offer = trade_json["participantBOffer"]
         # Extract only the asset IDs
         trader_assets = [
-            asset["itemTarget"]["targetId"] for asset in trader_offer["items"]
+            ("1:" if asset["itemTarget"]["itemType"] == "Asset" else "2:")
+            + asset["itemTarget"]["targetId"]
+            for asset in trader_offer["items"]
         ]
 
-        self_rap, self_value, self_algorithm_value, self_overall = self.calculate_gains(
-            self_assets
-        )
         try:
+            self_rap, self_value, self_algorithm_value, self_overall = (
+                self.calculate_gains(self_assets)
+            )
+
             trader_rap, trader_value, trader_algorithm_value, trader_overall = (
                 self.calculate_gains(trader_assets)
             )
         except Exception:
+            log("failed to calculate gains", severityNum=2)
             return
 
         trade = {
@@ -805,7 +819,6 @@ class RobloxAPI:
             raise ValueError(e)
 
         for item in item_ids:
-            # TODO: FIX this when rolimons update
             try:
                 self.rolimon.item_data[str(item)]["rap"]
             except Exception:
@@ -1010,100 +1023,42 @@ class RobloxAPI:
         # Return None if all formats fail
         return None
 
-    def is_projected_api(self, item_id, collectibleItemId=None):
+    def is_projected_api(self, collectibleId, item_id):
         """
-        Check rolimons projected API, scan the price chart and determain the value of an item and if its projected
+        Check rolimons projected API, scan the price chart and determine the value of an item and if its projected
         then update all the data to the projected_checker.json
         """
         # TODO: GET the dates and see how much the item sells so we dont trade dead items or we can
         # see how active an item is
         # TODO: Delete all the value: "1" from data points
-        """
-        Takes itemID and returns if its projected,
-        projected detection should have a cooldown so you dont spam the URL, 
-        so dont scan the same item over and over again, and dont scan value items
-        """
-        # Check if RAP - Price is correct min price difference
-        # rap = self.rolimon.item_data[item_id]["rap"]
-        # value = self.rolimon.item_data[item_id]["total_value"]
-        # price = self.rolimon.item_data[item_id]["best_price"]
-        #
-        config_projected = self.config.projected_detection
-        # min_graph_difference = config_projected["MinimumGraphDifference"]
-        # max_graph_difference = config_projected["MaximumGraphDifference"]
-        # min_price_difference = config_projected["MinPriceDifference"]
-        use_rolimons_projected = config_projected["Detect_Rolimons_Projecteds"]
-        # TODO: ADD MIN AND MAX DIFFERENCE
-        # if not self.config.check_gain(int(rap), int(price), min_gain=min_price_difference, max_gain=max_price_difference):
-        #    log("projected due to price difference")
-        #    return True
 
+        config_projected = self.config.projected_detection
+        use_rolimons_projected = config_projected["Detect_Rolimons_Projecteds"]
+
+        # is_projected starts False; may be set True by rolimons flag or price chart analysis
         is_projected = False
         if self.rolimon.item_data[item_id]["projected"] and use_rolimons_projected:
             is_projected = True
 
+        # Route to the correct endpoint based on the prefix
+        url = f"https://apis.roblox.com/marketplace-sales/v1/item/{collectibleId}/resale-data"
+        # Loop strictly handles rate limiting (429) now
         while True:
-            if collectibleItemId is not None:
-                url = f"https://apis.roblox.com/marketplace-sales/v1/item/{
-                    collectibleItemId
-                }/resale-data"
-                # "/marketplace-sales/v1/item/5060a9f2-cae0-4123-88c6-0eab5e2e2b59/resale-data"
-            else:
-                url = f"https://economy.roblox.com/v1/assets/{item_id}/resale-data"
-
             resale_data = self.parse_handler.requestAPI(url)
-
             if resale_data.status_code == 429:
                 log("ratelimited resale data")
                 time.sleep(30)
-            elif resale_data.status_code == 400:
-                log(f"resolving resale data for {item_id}...")
-                log(
-                    f"reslate data 400 handling for {
-                        item_id
-                    }, please report if this is spammed \n{url}",
-                    severityNum=2,
-                    dontPrint=True,
-                )
-                # Get new id
-                details_url = f"https://catalog.roblox.com/v1/catalog/items/{
-                    item_id
-                }/details?itemType=asset"
-                detail_api = self.parse_handler.requestAPI(details_url)
-                if detail_api.status_code == 200:
-                    detail_data = detail_api.json()
-                    if "collectibleItemId" in detail_data:
-                        log(
-                            f"{detail_data['collectibleItemId']} resending back",
-                            dontPrint=True,
-                        )
-                        collectibleItemId = detail_data["collectibleItemId"]
-                    else:
-                        log("v2 Catalog API didnt work", severityNum=3)
-                elif detail_api.status_code == 429:
-                    log("Ratelimited detail api")
-                    time.sleep(30)
-                else:
-                    log(
-                        f"Couldn't get details on after 400 {item_id}, skipping item, {
-                            resale_data
-                        }, {resale_data.status_code}",
-                        severityNum=2,
-                    )
-                    break
+                continue
             elif resale_data.status_code == 200:
-                if collectibleItemId is not None:
-                    log("Successfully resolved 400 for resale data", dontPrint=True)
                 break
             else:
                 log(
-                    f"Couldn't get details on {item_id} {resale_data.text} {
-                        resale_data.status_code
-                    }",
+                    f"Couldn't get details on {item_id} {resale_data.text} {resale_data.status_code}",
                     severityNum=2,
                 )
                 break
 
+        # Process data if request was successful
         if resale_data.status_code == 200:
 
             def parse_api_data(data_points):
@@ -1129,20 +1084,17 @@ class RobloxAPI:
             result_value = result["value"]
             result_volume = result["volume"]
             result_timestamp = result["timestamp"]
-            # {'value': 558.2293577981651, 'volume': 84.825, 'timestamp': 1732423848.2720559, 'age': 63157848.272055864} 1609402609
+
             if len(volume_data) > 1:
                 timestamp_gaps = [
                     volume_data[i]["date"] - volume_data[i + 1]["date"]
                     for i in range(len(volume_data) - 1)
                 ]
-                # Calculate the average gap
                 average_gap = (
                     sum(timestamp_gaps) / len(timestamp_gaps)
                 ) / SECONDS_IN_DAY
-                # largest_gap = max(timestamp_gaps) if timestamp_gaps else 0
             else:
                 average_gap = 0
-                # largest_gap = 0
 
             today = datetime.utcnow()
             three_months_ago = today - timedelta(days=90)
@@ -1154,12 +1106,12 @@ class RobloxAPI:
                 if self.parse_date(point["date_string"]) > three_months_ago
             ]
 
-            # sum_of_price = 0
             for num, data in enumerate(recent_data_points):
                 loop_price = int(data["value"])
                 percentage_change = (current_price - loop_price) / current_price
 
-                if percentage_change < -0.4 and percentage_change > 0.4:
+                # Fixed logical bug: replaced 'and' with 'or'
+                if percentage_change < -0.4 or percentage_change > 0.4:
                     is_projected = True
 
             data = self.rolimon.projected_json.read_data()

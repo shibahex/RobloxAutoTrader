@@ -14,7 +14,7 @@ class Item:
         self,
         item_id,
         item_name,
-        asset_type_id,
+        asset_type,
         original_price,
         created,
         first_timestamp,
@@ -37,10 +37,12 @@ class Item:
         rare,
         total_value,
         thumbnail_url_lg,
+        category_id,
+        original_asset_id,
     ):
         self.item_id = item_id
         self.item_name = item_name
-        self.asset_type_id = asset_type_id
+        self.asset_type = asset_type
         self.original_price = original_price
         self.created = created
         self.first_timestamp = first_timestamp
@@ -64,6 +66,8 @@ class Item:
         self.rare = rare
         self.total_value = total_value
         self.thumbnail_url_lg = thumbnail_url_lg
+        self.category_id = category_id
+        self.original_asset_id = original_asset_id
 
     def __repr__(self):
         return self.to_dict()
@@ -72,7 +76,7 @@ class Item:
         return {
             "item_id": self.item_id,
             "item_name": self.item_name,
-            "asset_type_id": self.asset_type_id,
+            "asset_type": self.asset_type,
             "original_price": self.original_price,
             "created": self.created,
             "first_timestamp": self.first_timestamp,
@@ -96,6 +100,8 @@ class Item:
             "rare": self.rare,
             "total_value": self.total_value,
             "thumbnail_url_lg": self.thumbnail_url_lg,
+            "category_id": self.category_id,
+            "original_asset_id": self.original_asset_id,
         }
 
 
@@ -123,7 +129,7 @@ class RolimonAPI:
         self.scanned_items_for_owners = {}
         # print(self.config.filter_users)
 
-    def return_item_to_scan(self) -> str:
+    def return_item_to_scan(self) -> Item:
         minimum_value = self.config.scan_items["Minimum_Value_of_Item"]
         minimum_rap = self.config.scan_items["Minimum_Rap_of_Item"]
         minimum_owners = self.config.scan_items["Minimum_Owners_of_Item"]
@@ -278,7 +284,9 @@ class RolimonAPI:
             item_volume = None
 
             if need_to_scan(asset_id):
-                roblox_api.RobloxAPI().is_projected_api(item_id=asset_id)
+                roblox_api.RobloxAPI().is_projected_api(
+                    item_id=asset_id, collectibleId=inventory[item]["collectibleItemId"]
+                )
 
             if value != 0:
                 if rap_algo_for_valued.lower() == "rolimon_value":
