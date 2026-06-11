@@ -109,7 +109,7 @@ class Doggo:
                     # log("user queue is above 20")
                     time.sleep(40)
                     continue
-                random_item = self.rolimons.return_item_to_scan()["item_id"]
+                random_item = self.rolimons.return_item_to_scan()["original_asset_id"]
 
                 owners = []
                 active_traders_response = roblox_account.get_active_traders(
@@ -131,8 +131,7 @@ class Doggo:
                     roblox_account.all_cached_traders.add(owner)
                     if roblox_account.check_can_trade(owner):
                         if roblox_account.config.debug["show_scanning_users"]:
-                            log(f"User: {
-                                owner} has trades on, checking invetory..")
+                            log(f"User: {owner} has trades on, checking invetory..")
 
                         inventory = roblox_account.fetch_inventory(owner)
                         if not inventory:
@@ -440,8 +439,7 @@ class Doggo:
                                 )
                             )
                             embed = self.discord_webhook.setup_embed(
-                                title=f"Sent a trade with {
-                                    total_profit} total profit",
+                                title=f"Sent a trade with {total_profit} total profit",
                                 color=1,
                                 user_id=trader,
                                 embed_fields=embed_fields,
@@ -457,8 +455,7 @@ class Doggo:
                             if isinstance(send_items, tuple):
                                 send_items = "\n".join(map(str, send_items))
                             if isinstance(receive_items, tuple):
-                                receive_items = "\n".join(
-                                    map(str, receive_items))
+                                receive_items = "\n".join(map(str, receive_items))
 
                             breakdown = embed_fields["Trade Breakdown"]
 
@@ -504,8 +501,7 @@ class Doggo:
             # last_completed = account["last_completed"]
             user_id = account["user_id"]
 
-            roblox_account = RobloxAPI(
-                cookie=roblox_cookie, auth_secret=auth_secret)
+            roblox_account = RobloxAPI(cookie=roblox_cookie, auth_secret=auth_secret)
             roblox_account.request_handler.generate_csrf()
 
             user_config = self.account_configs.get_config(user_id)
