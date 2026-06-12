@@ -109,7 +109,7 @@ class Doggo:
                     # log("user queue is above 20")
                     time.sleep(40)
                     continue
-                random_item = self.rolimons.return_item_to_scan()["original_asset_id"]
+                random_item = self.rolimons.return_item_to_scan()
 
                 owners = []
                 active_traders_response = roblox_account.get_active_traders(

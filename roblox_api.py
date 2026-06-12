@@ -1129,13 +1129,14 @@ class RobloxAPI:
             )
             self.rolimon.projected_json.write_data(data)
 
-    def get_active_traders(self, item_id, owners):
+    def get_active_traders(self, item, owners):
         """
         Scan atleast 3 pages of owners and append new owners
         If less than 5 owners isn't found it will contintue to the next pages
         """
         # TODO: Maybe add a date to recently scraped owners in projecteds.json to  avoid scraping the same item
         next_page_cursor = ""
+        item_id = item["original_asset_id"]
 
         while len(owners) < 20:
             if next_page_cursor is None:
@@ -1148,14 +1149,15 @@ class RobloxAPI:
 
             if response.status_code == 403:
                 return None
+            # TODO: maybe resolve faces because thier ItemID makes this response fail
             elif response.status_code != 200:
                 log(
                     f"Got API response {response.text} on {
                         response.url
-                    } Trying to get active traders again..",
+                    } Trying to get active traders again.. {item}",
                     severityNum=2,
                 )
-                continue
+                return None
 
             next_page_cursor = response.json()["nextPageCursor"]
             for asset in response.json()["data"]:
