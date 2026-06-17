@@ -503,19 +503,16 @@ class TradeMaker:
         return None
 
     def check_rap_gain(self, their_rap, self_rap):
-        return True
         return self.config.check_gain(
             their_rap, self_rap, self.min_rap_gain, self.max_rap_gain
         )
 
     def check_value_gain(self, their_value, self_value):
-        return True
         return self.config.check_gain(
             their_value, self_value, self.min_value_gain, self.max_value_gain
         )
 
     def check_algo_gain(self, their_algo, self_algo):
-        return True
         return self.config.check_gain(
             their_algo, self_algo, self.min_algo_gain, self.max_algo_gain
         )
