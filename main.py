@@ -318,6 +318,7 @@ class Doggo:
         """
         Generates and Starts trading for the given account
         """
+        TradeDebugSent = 0
         while True:
             try:
                 account_inventory = account.account_inventory
@@ -448,6 +449,7 @@ class Doggo:
                             self.discord_webhook.send_webhook(
                                 embed, account.config.discord_settings["Send_Webhook"]
                             )
+                            TradeDebugSent += 1
 
                             # log THE TRADE
                             send_items = embed_fields["Send"][0]
@@ -463,6 +465,7 @@ class Doggo:
 
                             print("\n")
                             log(f"{divider}")
+                            log(f"Trades sent: {TradeDebugSent}")
                             log("[TRADE INFO]".center(40, "="))
                             log(f"Total Profit: {total_profit}\n")
                             log(f"Sending: \n{send_items}")
