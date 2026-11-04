@@ -79,7 +79,8 @@ class RobloxAPI:
         # When this account's trading config last changed (see _config_changed_at)
         self.config_changed_at = None
         self.auth_secret = auth_secret
-        self.counter_timer = time.time()
+        # 0 = check inbounds as soon as the bot starts
+        self.counter_timer = 0
 
         self.account_configs = HandleConfigs()
 
@@ -121,6 +122,9 @@ class RobloxAPI:
             self.trade_maker = TradeMaker(config=self.config)
             self.outbound_trader = TradeMaker(
                 config=self.config, is_outbound_checker=True
+            )
+            self.inbound_trader = TradeMaker(
+                config=self.config, is_inbound_checker=True
             )
 
             # log("getting self")
@@ -486,42 +490,172 @@ class RobloxAPI:
 
         return trades
 
-    def counter_trades(self):
+    def handle_inbounds(self, accept=True, counter=True) -> dict:
         """
-        Gets the recent inbound trades and will generate a response trade and the function will send the trade,
-        Returns Nothing. TradeLimit and CookieInvalid are raised to the caller; other
-        errors only skip the trade they happened on.
+        Goes through every inbound trade:
+          - accept: accepts it if it passes this account's trading config
+          - counter: counters it unless it's already a win in overall value
+        Returns how many were accepted/countered/kept.
+        A TradeLimit stops countering but accepting carries on; it's re-raised
+        at the end so the caller can record the limit. CookieInvalid is raised
+        right away; other errors only skip the trade they happened on.
         """
-        # TODO: make the counter kind of like the original trade
         trades = self.get_trades(
             "https://trades.roblox.com/v1/trades/inbound?limit=100&sortOrder=Desc"
         )
-        for trade_id, trade_info in trades.items():
-            trader_id = trade_info["user_id"]
+        results = {"accepted": 0, "countered": 0, "kept": 0}
+        trade_limit = None
+        for trade_info in trades.values():
+            if not accept and not counter:
+                break
             trade_id = trade_info["trade_id"]
             try:
-                self._counter_one_trade(trade_id, trader_id)
-            except (exceptions_types.TradeLimit, CookieInvalid):
+                outcome = self._handle_one_inbound(
+                    trade_id, trade_info["user_id"], accept, counter
+                )
+            except exceptions_types.TradeLimit as e:
+                log(f"[INBOUND] Trade limit hit, only accepting from now on: {e}")
+                trade_limit = e
+                counter = False
+                continue
+            except CookieInvalid:
                 raise
             except TradebotError as e:
-                log(f"Skipping counter for trade {trade_id}: {e}", severityNum=2)
+                log(f"[INBOUND] Skipping trade {trade_id}: {e}", severityNum=2)
+                continue
+            if outcome in results:
+                results[outcome] += 1
 
-    def _counter_one_trade(self, trade_id, trader_id):
-        if not self.check_can_trade(trader_id):
-            return
+        if results["accepted"]:
+            try:
+                self.refresh_self_inventory()
+            except InventoryUnavailable as e:
+                log(f"Couldn't refresh inventory after accepting: {e}", severityNum=2)
 
-        if self.config.inbounds["Dont_Counter_Wins"]:
-            # If its a win then dont counter
-            trade_info = self.request_handler.requestAPI(
+        if trade_limit is not None:
+            raise trade_limit
+        return results
+
+    def _handle_one_inbound(self, trade_id, trader_id, accept, counter) -> str:
+        """Returns "accepted", "countered", "kept" or "failed"."""
+        trade_json = read_json(
+            self.request_handler.requestAPI(
                 f"https://trades.roblox.com/v2/trades/{trade_id}"
             )
-            formatted_trade = self.format_trade_api(read_json(trade_info))
-            if (
-                formatted_trade["self_overall_value"]
-                - formatted_trade["their_overall_value"]
-                < 0
+        )
+        trade = self.format_trade_api(trade_json)
+
+        if accept:
+            reason = self._inbound_reject_reason(trade)
+            # Accepting can't be undone: make sure prices are fresh, then re-check
+            if reason is None and self._rescan_stale_items(
+                trade["their_side_item_ids"]
             ):
-                return
+                trade = self.format_trade_api(trade_json)
+                reason = self._inbound_reject_reason(trade)
+
+            if reason is None:
+                if self._accept_trade(trade_id):
+                    log(
+                        f"[INBOUND] Accepted trade {trade_id} from {trader_id} "
+                        f"(overall {self._overall_profit(trade):+})"
+                    )
+                    return "accepted"
+                return "failed"
+            log(
+                f"[INBOUND] Not accepting {trade_id}: {reason}",
+                dontPrint=True,
+            )
+
+        profit = self._overall_profit(trade)
+        receiving_projected = self._projected_items(trade["their_side_item_ids"])
+        if profit > 0 and not receiving_projected:
+            if self.config.inbounds["Dont_Counter_Wins"] or not counter:
+                log(
+                    f"[INBOUND] Keeping {trade_id}, it's an overall win (+{profit})",
+                    dontPrint=True,
+                )
+                return "kept"
+
+        if not counter:
+            return "kept"
+
+        return "countered" if self._counter_trade(trade_id, trader_id) else "failed"
+
+    @staticmethod
+    def _overall_profit(trade) -> int:
+        """Overall value we gain, counting robux on both sides."""
+        return (
+            trade["their_overall_value"]
+            + (trade.get("their_robux") or 0)
+            - trade["self_overall_value"]
+            - (trade.get("self_robux") or 0)
+        )
+
+    def _too_many_duplicates(self, item_ids):
+        """First item we'd receive that we already own too many of, or None."""
+        limit = self.config.filter_items["Maximum_Amount_of_Duplicate_Items"]
+        for item_id in item_ids:
+            owned = self.self_duplicates.get(str(item_id))
+            if owned is not None and limit is not None and owned >= limit:
+                return item_id
+        return None
+
+    def _inbound_reject_reason(self, trade):
+        """Why an inbound shouldn't be accepted, or None if it passes the config."""
+        if trade.get("self_robux"):
+            return f"asks for {trade['self_robux']} robux"
+
+        projected = self._projected_items(trade["their_side_item_ids"])
+        if projected:
+            return f"receiving projected {projected}"
+
+        duplicate = self._too_many_duplicates(trade["their_side_item_ids"])
+        if duplicate is not None:
+            return f"too many duplicates of {duplicate}"
+
+        valid, reason = self.inbound_trader.validate_trade(
+            self_rap=trade["self_rap"],
+            self_rap_algo=trade["self_rap_algo"],
+            self_value=trade["self_value"],
+            self_overall_value=trade["self_overall_value"],
+            their_rap=trade["their_rap"],
+            their_rap_algo=trade["their_rap_algo"],
+            their_value=trade["their_value"],
+            their_overall_value=trade["their_overall_value"],
+        )
+        return None if valid else reason
+
+    def _accept_trade(self, trade_id) -> bool:
+        """
+        Accepts an inbound, solving 2FA if Roblox asks.
+        Returns False if Roblox refused (trade gone, items moved).
+        """
+        url = f"https://trades.roblox.com/v1/trades/{trade_id}/accept"
+        validation_headers = None
+        for attempt in range(1, SEND_TRADE_ATTEMPTS + 1):
+            try:
+                self.request_handler.requestAPI(
+                    url, "post", additional_headers=validation_headers
+                )
+                return True
+            except ChallengeRequired as e:
+                if attempt == SEND_TRADE_ATTEMPTS:
+                    raise
+                log(f"Accept needs 2FA, solving (attempt {attempt})", dontPrint=True)
+                validation_headers = self.validate_2fa(e.response)
+                time.sleep(10)
+            except BadRequest as e:
+                log(f"[INBOUND] Roblox refused to accept {trade_id}: {e}", severityNum=2)
+                return False
+            finally:
+                time.sleep(1)
+        return False
+
+    def _counter_trade(self, trade_id, trader_id) -> bool:
+        """Generates a trade from our config and sends it as a counter."""
+        if not self.check_can_trade(trader_id):
+            return False
 
         if not self.account_inventory:
             log(
@@ -529,18 +663,18 @@ class RobloxAPI:
             )
             self.refresh_self_inventory()
             if not self.account_inventory:
-                return
+                return False
 
         trader_inventory = self.fetch_inventory(trader_id)
         if not trader_inventory:
-            return
+            return False
 
         generated_trade = self.trade_maker.generate_trade(
             self.account_inventory, trader_inventory, counter_trade=True
         )
         if not generated_trade:
-            log("couldnt generate trade for counter")
-            return
+            log(f"[INBOUND] Couldn't generate a counter for {trade_id}")
+            return False
 
         self.send_trade(
             trader_id,
@@ -550,7 +684,8 @@ class RobloxAPI:
             counter_id=trade_id,
             self_robux=generated_trade["self_robux"],
         )
-        log("sent counter")
+        log(f"[INBOUND] Countered trade {trade_id}")
+        return True
 
     def send_trade(
         self,
@@ -736,9 +871,15 @@ class RobloxAPI:
         try:
             self_offer = trade_json["participantAOffer"]
             trader_offer = trade_json["participantBOffer"]
+            # Don't trust the order: work out which side is ours by user id
+            if str(trader_offer["user"]["id"]) == str(
+                getattr(self, "account_id", None)
+            ):
+                self_offer, trader_offer = trader_offer, self_offer
             self_user = self_offer["user"]["id"]
             trader_user = trader_offer["user"]["id"]
             self_robux = self_offer.get("robux") or 0
+            their_robux = trader_offer.get("robux") or 0
             self_assets = asset_ids(self_offer)
             trader_assets = asset_ids(trader_offer)
         except (KeyError, TypeError) as e:
@@ -758,6 +899,7 @@ class RobloxAPI:
             "their_rap": trader_rap,
             "their_rap_algo": trader_algorithm_value,
             "their_overall_value": trader_overall,
+            "their_robux": their_robux,
             "self_robux": self_robux,
             "self_rap": self_rap,
             "self_id": self_user,
@@ -1088,16 +1230,12 @@ class RobloxAPI:
             return False
 
         # NOTE: Check for duplicates
-        for itemId in formatted_trade["their_side_item_ids"]:
-            if (
-                str(itemId) in self.self_duplicates
-                and self.self_duplicates[str(itemId)]
-                >= self.config.filter_items["Maximum_Amount_of_Duplicate_Items"]
-            ):
-                if self._cancel_outbound(trade_id):
-                    log(f"[OUTBOUND] Cancel trade: {itemId} [duplicates]")
-                    return True
-                return False
+        duplicate = self._too_many_duplicates(formatted_trade["their_side_item_ids"])
+        if duplicate is not None:
+            if self._cancel_outbound(trade_id):
+                log(f"[OUTBOUND] Cancel trade: {duplicate} [duplicates]")
+                return True
+            return False
 
         valid_trade, reason = self.outbound_trader.validate_trade(
             self_rap=formatted_trade["self_rap"],

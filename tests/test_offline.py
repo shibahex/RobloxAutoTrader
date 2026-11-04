@@ -51,7 +51,9 @@ def test_unauthorized_with_cookie_is_cookie_invalid(router):
     h = handler(
         router,
         U,
-        resp(401, {"errors": [{"code": 0, "message": "Authorization has been denied"}]}),
+        resp(
+            401, {"errors": [{"code": 0, "message": "Authorization has been denied"}]}
+        ),
         cookie={".ROBLOSECURITY": "x"},
     )
     with pytest.raises(E.CookieInvalid):
@@ -129,14 +131,22 @@ def test_send_trade_gives_up_after_3_challenges(router, account):
 
     router.set(
         SEND,
-        resp(403, {"errors": [{"code": 0, "message": "x"}]}, headers={"rblx-challenge-id": "c"}),
+        resp(
+            403,
+            {"errors": [{"code": 0, "message": "x"}]},
+            headers={"rblx-challenge-id": "c"},
+        ),
     )
     solved = []
     account.validate_2fa = lambda r: solved.append(1) or {}
     with pytest.raises(E.ChallengeRequired):
         account.send_trade(2, ["a"], ["b"])
     # 3 sends, but no pointless solve after the last one
-    assert len([c for c in router.calls if c[1] == SEND]) == roblox_api.SEND_TRADE_ATTEMPTS == 3
+    assert (
+        len([c for c in router.calls if c[1] == SEND])
+        == roblox_api.SEND_TRADE_ATTEMPTS
+        == 3
+    )
     assert len(solved) == 2
 
 
@@ -172,7 +182,14 @@ def test_trade_limit_on_send(router):
     h = handler(
         router,
         SEND,
-        resp(429, {"errors": [{"code": 0, "message": "You are sending too many trade requests"}]}),
+        resp(
+            429,
+            {
+                "errors": [
+                    {"code": 0, "message": "You are sending too many trade requests"}
+                ]
+            },
+        ),
     )
     with pytest.raises(E.TradeLimit) as info:
         h.requestAPI(SEND, "post", payload={})
@@ -218,7 +235,11 @@ def test_send_trade_success(router, account):
 
 def test_send_trade_insufficient_robux_refreshes_but_does_not_resend(router, account):
     """Resending with different robux would no longer match the logged trade."""
-    router.set(SEND, resp(400, {"errors": [{"code": 17, "message": "robux"}]}), resp(200, {"tradeId": 5}))
+    router.set(
+        SEND,
+        resp(400, {"errors": [{"code": 17, "message": "robux"}]}),
+        resp(200, {"tradeId": 5}),
+    )
     refreshed = []
     account.get_robux = lambda: refreshed.append(1)
     with pytest.raises(E.InsufficientRobux):
@@ -249,7 +270,10 @@ def test_send_trade_bad_2fa_metadata_raises_two_factor_error(router, account):
         resp(
             403,
             {"errors": [{"code": 0, "message": "Challenge"}]},
-            headers={"rblx-challenge-id": "c", "rblx-challenge-metadata": "not-base64!!"},
+            headers={
+                "rblx-challenge-id": "c",
+                "rblx-challenge-metadata": "not-base64!!",
+            },
         ),
     )
     with pytest.raises(E.TwoFactorError):
@@ -325,7 +349,11 @@ def test_check_can_trade_logged_out_raises_cookie_invalid(router, account, monke
 
 
 def test_check_can_trade_uses_solved_2fa(router, account):
-    challenge = resp(403, {"errors": [{"code": 0, "message": "x"}]}, headers={"rblx-challenge-id": "c"})
+    challenge = resp(
+        403,
+        {"errors": [{"code": 0, "message": "x"}]},
+        headers={"rblx-challenge-id": "c"},
+    )
     router.set("https://www.roblox.com/users/", challenge, resp(200, text="<html>"))
     account.validate_2fa = lambda r: {"rblx-challenge-id": "c"}
     assert account.check_can_trade(9) is True
@@ -368,7 +396,9 @@ def test_rolimons_bad_page_keeps_old_data(router):
 
     rol = RolimonAPI()
     old = rol.item_data
-    router.set("https://www.rolimons.com/catalog", resp(200, text="<html>changed</html>"))
+    router.set(
+        "https://www.rolimons.com/catalog", resp(200, text="<html>changed</html>")
+    )
     with pytest.raises(E.RolimonsError):
         rol.update_data()
     assert rol.item_data is old and "1:1" in rol.item_data
@@ -448,7 +478,11 @@ THEIR_INV = {"t1": {"item_id": "1:2"}}
 
 def trade_account(account, send_effect):
     account.trade_maker = types.SimpleNamespace(
-        generate_trade=lambda a, b: {"self_side": ["u1"], "their_side": ["t1"], "self_robux": 0}
+        generate_trade=lambda a, b: {
+            "self_side": ["u1"],
+            "their_side": ["t1"],
+            "self_robux": 0,
+        }
     )
 
     def send(*_a, **_k):
@@ -590,7 +624,9 @@ def test_outbound_cancelled_when_received_item_is_projected(router, outbound):
 
 
 @pytest.mark.parametrize("setting_on", [True, False])
-def test_outbound_rolimons_projected_flag_respects_setting(router, outbound, setting_on):
+def test_outbound_rolimons_projected_flag_respects_setting(
+    router, outbound, setting_on
+):
     outbound.config.projected_detection["Detect_Rolimons_Projecteds"] = setting_on
     outbound.rolimon.item_data["1:1"]["projected"] = True
     outbound._check_one_outbound(55)
@@ -600,14 +636,26 @@ def test_outbound_rolimons_projected_flag_respects_setting(router, outbound, set
 def test_outbound_rescans_stale_item_before_judging(router, outbound):
     # Algo value is days old; a fresh scan finds the price collapsed
     outbound.rolimon.projected_json.write_data(
-        {"1:1": {"is_projected": False, "value": 1000, "timestamp": 0, "collectible_item_id": "abc"}}
+        {
+            "1:1": {
+                "is_projected": False,
+                "value": 1000,
+                "timestamp": 0,
+                "collectible_item_id": "abc",
+            }
+        }
     )
     scanned = []
 
     def fresh_scan(collectibleId, item_id):
         scanned.append((collectibleId, item_id))
         data = outbound.rolimon.projected_json.read_data()
-        data[item_id] = {"is_projected": True, "value": 300, "timestamp": 9e18, "collectible_item_id": "abc"}
+        data[item_id] = {
+            "is_projected": True,
+            "value": 300,
+            "timestamp": 9e18,
+            "collectible_item_id": "abc",
+        }
         outbound.rolimon.projected_json.write_data(data)
 
     outbound.is_projected_api = fresh_scan
@@ -620,7 +668,14 @@ def test_outbound_does_not_rescan_fresh_items(router, outbound):
     import time as time_module
 
     outbound.rolimon.projected_json.write_data(
-        {"1:1": {"is_projected": False, "value": 1000, "timestamp": time_module.time(), "collectible_item_id": "abc"}}
+        {
+            "1:1": {
+                "is_projected": False,
+                "value": 1000,
+                "timestamp": time_module.time(),
+                "collectible_item_id": "abc",
+            }
+        }
     )
     outbound.is_projected_api = lambda **_k: pytest.fail("should not rescan")
     outbound._check_one_outbound(55)
@@ -673,7 +728,14 @@ def test_recheck_makes_no_requests_when_nothing_changed(router, outbound):
 def test_recheck_never_rescans_price_history(router, outbound):
     outbound.outbound_cache[55] = cached(outbound_trade_json(["1:2"], ["1:1"]))
     outbound.rolimon.projected_json.write_data(
-        {"1:1": {"is_projected": False, "value": 1000, "timestamp": 0, "collectible_item_id": "abc"}}
+        {
+            "1:1": {
+                "is_projected": False,
+                "value": 1000,
+                "timestamp": 0,
+                "collectible_item_id": "abc",
+            }
+        }
     )
     outbound.is_projected_api = lambda **_k: pytest.fail("recheck must not call Roblox")
     outbound.recheck_cached_outbounds()
@@ -710,13 +772,17 @@ OLD, NEW = 500, 2000  # trade created before / after the change
 
 
 def test_old_trade_still_winning_is_kept_after_config_change(router, config_changed):
-    config_changed._evaluate_outbound(55, outbound_trade_json(["1:2"], ["1:1"]), False, created=OLD)
+    config_changed._evaluate_outbound(
+        55, outbound_trade_json(["1:2"], ["1:1"]), False, created=OLD
+    )
     assert declined(router) == []
 
 
 def test_old_trade_that_turns_losing_is_cancelled(router, config_changed):
     config_changed.rolimon.item_data["1:1"]["total_value"] = 100  # receive side crashed
-    config_changed._evaluate_outbound(55, outbound_trade_json(["1:2"], ["1:1"]), False, created=OLD)
+    config_changed._evaluate_outbound(
+        55, outbound_trade_json(["1:2"], ["1:1"]), False, created=OLD
+    )
     assert declined(router) == [DECLINE_URL + "55/decline"]
 
 
@@ -729,18 +795,24 @@ def test_old_trade_losing_because_of_robux_is_cancelled(router, config_changed):
 
 def test_old_trade_receiving_projected_is_still_cancelled(router, config_changed):
     config_changed.rolimon.projected_json.write_data({"1:1": {"is_projected": True}})
-    config_changed._evaluate_outbound(55, outbound_trade_json(["1:2"], ["1:1"]), False, created=OLD)
+    config_changed._evaluate_outbound(
+        55, outbound_trade_json(["1:2"], ["1:1"]), False, created=OLD
+    )
     assert declined(router) == [DECLINE_URL + "55/decline"]
 
 
 def test_new_trade_uses_full_rules(router, config_changed):
-    config_changed._evaluate_outbound(55, outbound_trade_json(["1:2"], ["1:1"]), False, created=NEW)
+    config_changed._evaluate_outbound(
+        55, outbound_trade_json(["1:2"], ["1:1"]), False, created=NEW
+    )
     assert declined(router) == [DECLINE_URL + "55/decline"]
 
 
 def test_option_off_uses_full_rules_for_old_trades(router, config_changed):
     config_changed.config.outbound["Only_Cancel_Losing_After_Config_Change"] = False
-    config_changed._evaluate_outbound(55, outbound_trade_json(["1:2"], ["1:1"]), False, created=OLD)
+    config_changed._evaluate_outbound(
+        55, outbound_trade_json(["1:2"], ["1:1"]), False, created=OLD
+    )
     assert declined(router) == [DECLINE_URL + "55/decline"]
 
 
@@ -762,7 +834,15 @@ def test_config_change_detected_and_remembered(router, outbound, monkeypatch):
 def test_full_check_reads_trade_creation_time(router, outbound):
     router.set(
         "https://trades.roblox.com/v1/trades/outbound",
-        resp(200, {"data": [{"id": 55, "user": {"id": 2}, "created": "2026-11-01T12:00:00.123Z"}], "nextPageCursor": None}),
+        resp(
+            200,
+            {
+                "data": [
+                    {"id": 55, "user": {"id": 2}, "created": "2026-11-01T12:00:00.123Z"}
+                ],
+                "nextPageCursor": None,
+            },
+        ),
     )
     outbound.outbound_api_checker()
     from datetime import datetime, timezone
@@ -819,7 +899,15 @@ def test_coerce_accepts(value, expected_type, result):
 
 @pytest.mark.parametrize(
     "value, expected_type",
-    [("abc", int), (2.5, int), (True, int), ("yes", bool), (None, bool), (None, str), (1, bool)],
+    [
+        ("abc", int),
+        (2.5, int),
+        (True, int),
+        ("yes", bool),
+        (None, bool),
+        (None, str),
+        (1, bool),
+    ],
 )
 def test_coerce_rejects(value, expected_type):
     with pytest.raises(ValueError):
@@ -869,7 +957,14 @@ def test_prompt_and_update(configs, monkeypatch, key, typed, current, result):
 
 def test_get_config_repairs_values_saved_as_text(configs):
     configs.acc_configs.write_data(
-        {"7": {"MaxRobux": "100", "Maximum_RAP_Gain": "None", "TradeForFaces": "False", "Rap_Algo_For_Valued": "rap_algo"}}
+        {
+            "7": {
+                "MaxRobux": "100",
+                "Maximum_RAP_Gain": "None",
+                "TradeForFaces": "False",
+                "Rap_Algo_For_Valued": "rap_algo",
+            }
+        }
     )
     assert configs.get_config("7") == {
         "MaxRobux": 100,
@@ -877,3 +972,171 @@ def test_get_config_repairs_values_saved_as_text(configs):
         "TradeForFaces": False,
         "Rap_Algo_For_Valued": "rap_algo",
     }
+
+
+# --- inbound accept / counter ---------------------------------------------------
+
+INBOUND_LIST = "https://trades.roblox.com/v1/trades/inbound"
+ACCEPT_URL = "https://trades.roblox.com/v1/trades/"
+
+
+def inbound_trade_json(self_items, their_items, self_robux=0, their_robux=0):
+    """Inbound as Roblox may send it: the sender (them, id 2) as participant A."""
+    trade = outbound_trade_json(self_items, their_items)
+    trade["participantAOffer"]["robux"] = self_robux
+    trade["participantBOffer"]["robux"] = their_robux
+    return {
+        "participantAOffer": trade["participantBOffer"],
+        "participantBOffer": trade["participantAOffer"],
+    }
+
+
+def inbound_list(*trade_ids):
+    return resp(
+        200,
+        {
+            "data": [
+                {"id": t, "user": {"id": 2}, "created": "2026-11-01T00:00:00Z"}
+                for t in trade_ids
+            ],
+            "nextPageCursor": None,
+        },
+    )
+
+
+@pytest.fixture
+def inbound(router, account):
+    """
+    One inbound: they give 1:1 (1000), we give 1:2 (600 overall) -> a win.
+    Config only requires a RAP gain of at least 1.
+    """
+    from trade_algorithm import TradeMaker
+
+    checker = object.__new__(TradeMaker)
+    checker.config = account.config
+    for attr in (
+        "min_value_gain max_value_gain min_algo_gain max_algo_gain "
+        "min_overall_gain max_overall_gain max_rap_gain "
+        "min_rap_score_percentage max_rap_score_percentage "
+        "min_overall_score_percentage max_overall_score_percentage "
+        "min_value_of_trade min_rap_of_trade"
+    ).split():
+        setattr(checker, attr, None)
+    checker.min_rap_gain = 1
+    account.inbound_trader = checker
+    account.config.projected_detection["Detect_Rolimons_Projecteds"] = False
+    account.config.inbounds["Dont_Counter_Wins"] = True
+    account.rolimon.projected_json.write_data({})
+    account.refresh_self_inventory = lambda: None
+
+    router.set(INBOUND_LIST, inbound_list(70))
+    router.set(TRADE_URL, resp(200, inbound_trade_json(["1:2"], ["1:1"])))
+    router.set(ACCEPT_URL, resp(200, {}))
+
+    account.countered = []
+    account._counter_trade = lambda trade_id, trader_id: (
+        account.countered.append(trade_id) or True
+    )
+    return account
+
+
+def accepted(router):
+    return [url for method, url in router.calls if url.endswith("/accept")]
+
+
+def test_format_trade_finds_our_side_when_we_are_participant_b(router, account):
+    trade = account.format_trade_api(inbound_trade_json(["1:2"], ["1:1"], their_robux=5))
+    assert trade["self_id"] == 1 and trade["their_id"] == 2
+    assert trade["self_side_item_ids"] == ["1:2"]
+    assert trade["their_side_item_ids"] == ["1:1"]
+    assert trade["their_robux"] == 5 and trade["self_robux"] == 0
+
+
+def test_valid_inbound_is_accepted_not_countered(router, inbound):
+    results = inbound.handle_inbounds(accept=True, counter=True)
+    assert accepted(router) == [ACCEPT_URL + "70/accept"]
+    assert inbound.countered == []
+    assert results["accepted"] == 1
+
+
+def test_win_is_kept_when_accepting_is_off(router, inbound):
+    results = inbound.handle_inbounds(accept=False, counter=True)
+    assert accepted(router) == [] and inbound.countered == []
+    assert results["kept"] == 1
+
+
+def test_win_that_fails_config_is_kept_not_countered(router, inbound):
+    inbound.inbound_trader.min_rap_gain = 100000
+    inbound.handle_inbounds(accept=True, counter=True)
+    assert accepted(router) == [] and inbound.countered == []
+
+
+def test_losing_inbound_is_countered(router, inbound):
+    router.set(TRADE_URL, resp(200, inbound_trade_json(["1:1"], ["1:2"])))
+    results = inbound.handle_inbounds(accept=True, counter=True)
+    assert accepted(router) == []
+    assert inbound.countered == [70] and results["countered"] == 1
+
+
+def test_win_is_countered_when_dont_counter_wins_is_off(router, inbound):
+    inbound.config.inbounds["Dont_Counter_Wins"] = False
+    inbound.inbound_trader.min_rap_gain = 100000
+    inbound.handle_inbounds(accept=True, counter=True)
+    assert inbound.countered == [70]
+
+
+def test_inbound_giving_projected_is_countered_not_accepted(router, inbound):
+    inbound.rolimon.projected_json.write_data(
+        {"1:1": {"is_projected": True, "value": 1000, "timestamp": 9e18}}
+    )
+    inbound.handle_inbounds(accept=True, counter=True)
+    assert accepted(router) == [] and inbound.countered == [70]
+
+
+def test_inbound_asking_for_robux_is_not_accepted(router, inbound):
+    router.set(
+        TRADE_URL, resp(200, inbound_trade_json(["1:2"], ["1:1"], self_robux=50))
+    )
+    inbound.handle_inbounds(accept=True, counter=False)
+    assert accepted(router) == []
+
+
+def test_inbound_with_too_many_duplicates_is_not_accepted(router, inbound):
+    inbound.config.filter_items["Maximum_Amount_of_Duplicate_Items"] = 1
+    inbound.self_duplicates = {"1:1": 1}
+    inbound.handle_inbounds(accept=True, counter=False)
+    assert accepted(router) == []
+
+
+def test_accept_solves_2fa(router, inbound):
+    challenge = resp(
+        403,
+        {"errors": [{"code": 0, "message": "anything"}]},
+        headers={"rblx-challenge-id": "c"},
+    )
+    router.set(ACCEPT_URL, challenge, resp(200, {}))
+    inbound.validate_2fa = lambda r: {"rblx-challenge-id": "c"}
+    assert inbound.handle_inbounds(accept=True, counter=False)["accepted"] == 1
+    assert len(accepted(router)) == 2
+
+
+def test_accept_refused_by_roblox_is_not_counted(router, inbound):
+    router.set(ACCEPT_URL, resp(400, {"errors": [{"code": 2, "message": "gone"}]}))
+    assert inbound.handle_inbounds(accept=True, counter=False)["accepted"] == 0
+
+
+def test_trade_limit_stops_countering_but_keeps_accepting(router, inbound):
+    router.set(INBOUND_LIST, inbound_list(70, 71))
+    router.set(
+        TRADE_URL + "70",
+        resp(200, inbound_trade_json(["1:1"], ["1:2"])),  # loss -> counter
+    )
+    router.set(TRADE_URL + "71", resp(200, inbound_trade_json(["1:2"], ["1:1"])))
+
+    def limited(trade_id, trader_id):
+        raise E.TradeLimit(resp(429, {}))
+
+    inbound._counter_trade = limited
+    with pytest.raises(E.TradeLimit):
+        inbound.handle_inbounds(accept=True, counter=True)
+    assert accepted(router) == [ACCEPT_URL + "71/accept"]

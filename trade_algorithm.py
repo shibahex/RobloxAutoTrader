@@ -7,7 +7,12 @@ from handler.handle_logs import log
 
 
 class TradeMaker:
-    def __init__(self, config=ConfigHandler("config.cfg"), is_outbound_checker=False):
+    def __init__(
+        self,
+        config=ConfigHandler("config.cfg"),
+        is_outbound_checker=False,
+        is_inbound_checker=False,
+    ):
         self.config = config
 
         self.min_rap_gain = self.config.trading["Minimum_RAP_Gain"]
@@ -95,6 +100,17 @@ class TradeMaker:
             self.max_rap_score_percentage = None
 
             self.min_overall_score_percentage = None
+            self.max_overall_score_percentage = None
+
+        if is_inbound_checker:
+            # Judging a trade someone sent us: the minimums still apply, but the
+            # maximums only exist to make our own offers look fair, so a bigger
+            # win than we'd ever ask for is still worth accepting.
+            self.max_rap_gain = None
+            self.max_algo_gain = None
+            self.max_value_gain = None
+            self.max_overall_gain = None
+            self.max_rap_score_percentage = None
             self.max_overall_score_percentage = None
 
     def select_trade(self, valid_trades, select_by="lowest_rap_gain"):
@@ -585,7 +601,7 @@ class TradeMaker:
         if (
             self.min_rap_score_percentage
             and rap_close_percentage < self.min_rap_score_percentage
-            or self.min_rap_score_percentage
+            or self.max_rap_score_percentage
             and rap_close_percentage > self.max_rap_score_percentage
         ):
             return False, "rap_close_percentage"

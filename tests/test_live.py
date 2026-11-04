@@ -152,3 +152,23 @@ def test_owner_scan_does_not_crash(live_account):
     owners = []
     result = live_account.get_active_traders(item, owners)
     assert result is None or isinstance(result, list)
+
+
+def test_first_inbound_formats_with_our_side_correct(live_account):
+    """Read-only: an inbound's 'self' side must be this account, whatever order Roblox uses."""
+    trades = live_account.get_trades(
+        "https://trades.roblox.com/v1/trades/inbound?limit=10&sortOrder=Desc",
+        limit_pages=1,
+    )
+    if not trades:
+        pytest.skip("Account has no inbound trades")
+    trade_id = next(iter(trades))
+    response = live_account.request_handler.requestAPI(
+        f"https://trades.roblox.com/v2/trades/{trade_id}"
+    )
+    try:
+        trade = live_account.format_trade_api(response.json())
+    except E.UnknownItem as e:
+        pytest.skip(f"Trade has an item not on Rolimons: {e}")
+    assert str(trade["self_id"]) == str(live_account.account_id)
+    assert str(trade["their_id"]) == str(trades[trade_id]["user_id"])
