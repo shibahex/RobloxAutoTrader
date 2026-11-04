@@ -1200,3 +1200,13 @@ def test_inbound_trade_limit_is_recorded(doggo, account):
     acc, _ = inbound_account(account, True, True, effect=E.TradeLimit())
     doggo.handle_inbounds_once(acc)
     assert doggo.limited == ["x"]
+
+
+def test_inbound_check_interval_setting(tmp_path):
+    from handler.handle_config import ConfigHandler
+
+    cfg = tmp_path / "c.cfg"
+    cfg.write_text("[Inbound Settings]\nCheck Inbounds Every Minutes = 10\n")
+    assert ConfigHandler(str(cfg)).inbounds["Check_Every_Minutes"] == 10
+    cfg.write_text("[Inbound Settings]\n")
+    assert ConfigHandler(str(cfg)).inbounds["Check_Every_Minutes"] == 30

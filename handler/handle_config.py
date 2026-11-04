@@ -278,6 +278,10 @@ class ConfigHandler:
             "Accept_Valid_Trades": bool(
                 self.get_boolean("Inbound Settings", "Accept Valid Trades")
             ),
+            "Check_Every_Minutes": self.get_float(
+                "Inbound Settings", "Check Inbounds Every Minutes"
+            )
+            or 30,
         }
 
     def load_projected_detection(self):

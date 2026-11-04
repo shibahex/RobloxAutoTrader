@@ -336,13 +336,14 @@ class Doggo:
         return None
 
     def counter_trade_thread(self, roblox_accounts):
-        """Checks every account's inbound trades every 30 minutes."""
+        """Checks every account's inbound trades every Check Inbounds Every Minutes."""
         log("inbound trade thread started")
         while True:
             for account in roblox_accounts:
                 if self.is_disabled(account):
                     continue
-                if time.time() - account.counter_timer < 1800:
+                interval = account.config.inbounds["Check_Every_Minutes"] * 60
+                if time.time() - account.counter_timer < interval:
                     continue
                 account.counter_timer = time.time()
                 self.handle_inbounds_once(account)
