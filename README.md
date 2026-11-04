@@ -65,7 +65,12 @@ if that didn't work you can manually input the 2fa authorzation secret and cooki
 
 
 # Config Guide
+**Full guide: [docs/CONFIG_GUIDE.md](docs/CONFIG_GUIDE.md)**, every section and setting explained.
+
 The bot reads `config.cfg`. Every setting has a note above it explaining what it does.
+
+> [!IMPORTANT]
+> **`[Trading Settings]` is the section that decides which trades get sent.** Everything else is tweaking: who the bot looks for, how fast it searches, and how it handles inbound and outbound trades.
 
 ### Picking a config
 `configs/` has ready-made presets. To use one: **Config Manager > Change Config**, then pick a preset. It's copied over your `config.cfg`.

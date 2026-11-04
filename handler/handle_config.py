@@ -47,6 +47,8 @@ class ConfigHandler:
     def __init__(self, filename="config.cfg"):
         self.config = configparser.ConfigParser()
         self.config.read(filename)
+        # "[Section] Option" of every setting that couldn't be read
+        self.invalid_settings = []
 
         # Load configuration values into attributes
         self.scan_items = self.load_scan_items()
@@ -348,6 +350,9 @@ class ConfigHandler:
             )
         except (ValueError, TypeError) as e:
             log(f"Error retrieving integer for [{section}] {option}: {e}")
+            self.invalid_settings.append(
+                f"[{section}] {option} (must be a whole number)"
+            )
             return "Not Set"
 
     def get_float(self, section, option):
@@ -365,6 +370,9 @@ class ConfigHandler:
                     return None
             except (AttributeError, ValueError, TypeError):
                 pass
+            self.invalid_settings.append(
+                f"[{section}] {option} (must be a number or None)"
+            )
             return "Not Set"
 
     def get_string(self, section, option):
@@ -376,6 +384,7 @@ class ConfigHandler:
             )
         except (ValueError, TypeError) as e:
             log(f"Error retrieving string for [{section}] {option}: {e}")
+            self.invalid_settings.append(f"[{section}] {option}")
             return "Not Set"
 
     def get_boolean(self, section, option):
@@ -387,6 +396,9 @@ class ConfigHandler:
             )
         except (ValueError, TypeError) as e:
             log(f"Error retrieving boolean for [{section}] {option}: {e}")
+            self.invalid_settings.append(
+                f"[{section}] {option} (must be True or False)"
+            )
             return "Not Set"
 
     def get_list(self, section, option):
@@ -404,7 +416,12 @@ class ConfigHandler:
             return []
 
     def validate_config(self):
-        # Check if any required values are None and raise an error
+        # Any setting that couldn't be read, named the way it's written in the file
+        if self.invalid_settings:
+            raise ConfigError(
+                "These config settings are invalid: "
+                + "; ".join(dict.fromkeys(self.invalid_settings))
+            )
         for section in [
             self.scan_items,
             self.filter_users,

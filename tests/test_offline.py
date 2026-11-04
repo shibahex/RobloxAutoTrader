@@ -1278,13 +1278,24 @@ def test_valued_items_skip_sales_volume_checks(router, inbound):
 # --- config + speed fixes -------------------------------------------------------------
 
 
-@pytest.mark.parametrize("typed", ["10m", "0", "-5", ""])
+@pytest.mark.parametrize("typed", ["0", "-5"])
 def test_bad_inbound_interval_falls_back_to_30(tmp_path, typed):
     from handler.handle_config import ConfigHandler
 
     cfg = tmp_path / "c.cfg"
     cfg.write_text(f"[Inbound Settings]\nCheck Inbounds Every Minutes = {typed}\n")
     assert ConfigHandler(str(cfg)).inbounds["Check_Every_Minutes"] == 30
+
+
+@pytest.mark.parametrize("typed", ["10m", ""])
+def test_typo_in_inbound_interval_stops_startup(tmp_path, typed):
+    from handler.exceptions_types import ConfigError
+    from handler.handle_config import ConfigHandler
+
+    cfg = tmp_path / "c.cfg"
+    cfg.write_text(f"[Inbound Settings]\nCheck Inbounds Every Minutes = {typed}\n")
+    with pytest.raises(ConfigError, match="Check Inbounds Every Minutes"):
+        ConfigHandler(str(cfg))
 
 
 def test_unknown_select_option_falls_back(router):
@@ -1470,3 +1481,31 @@ def test_sales_limits_none_means_no_limit(router, sales, gap, kept):
     )
     out = rol.add_data_to_inventory({"u": {"item_id": "1:1", "collectibleItemId": "c"}})
     assert bool(out) is kept
+
+
+@pytest.mark.parametrize(
+    "line, expected",
+    [
+        (
+            "[Filtering Items]\nMaximum Amount of Duplicate Items = None\n",
+            "[Filtering Items] Maximum Amount of Duplicate Items (must be a whole number)",
+        ),
+        (
+            "[Trading Settings]\nMinimum RAP Gain = 3oo\n",
+            "[Trading Settings] Minimum RAP Gain (must be a number or None)",
+        ),
+        (
+            "[debug]\nDont Send Trades = yes please\n",
+            "[debug] Dont Send Trades (must be True or False)",
+        ),
+    ],
+)
+def test_invalid_settings_stop_startup_with_their_real_name(tmp_path, line, expected):
+    from handler.exceptions_types import ConfigError
+    from handler.handle_config import ConfigHandler
+
+    cfg = tmp_path / "c.cfg"
+    cfg.write_text(line)
+    with pytest.raises(ConfigError) as info:
+        ConfigHandler(str(cfg))
+    assert expected in str(info.value)
