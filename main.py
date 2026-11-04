@@ -353,6 +353,22 @@ class Doggo:
     # Main trading loop
     # ------------------------------------------------------------------
 
+    def open_account_manager_for_setup(self):
+        """No usable accounts: explain why and open the Account Manager."""
+        saved = self.json.read_data().get("roblox_accounts", [])
+        if not saved:
+            reason = "No accounts added yet."
+            hint = "Use option 1 (Firefox) or 2 (Manual) to add an account."
+        elif not any(a.get("use_account") for a in saved):
+            reason = f"All {len(saved)} saved account(s) are turned off."
+            hint = "Use option 4 to turn one on, or 1 / 2 to add another account."
+        else:
+            reason = "None of your enabled accounts could log in (cookie expired?)."
+            hint = "Use option 1 (Firefox) or 2 (Manual) to add the account again."
+        self.cli.print_error(f"{reason}\nOpening the Account Manager: {hint}")
+        input("Press enter to continue.")
+        AccountManager().main()
+
     def start_trader(self):
         """
         Main Loop function that loops through all the accounts
@@ -360,7 +376,7 @@ class Doggo:
         """
         roblox_accounts = self.load_roblox_accounts()
         if not roblox_accounts:
-            input("No active accounts found! Press enter to go back.")
+            self.open_account_manager_for_setup()
             return
 
         self.start_thread(

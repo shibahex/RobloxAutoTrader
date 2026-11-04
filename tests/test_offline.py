@@ -1351,3 +1351,32 @@ def test_valued_item_algo_setting_survives_scan_data(router):
             {"u": {"item_id": "1:2", "collectibleItemId": "c"}}, is_self=True
         )
         assert out["u"]["rap_algorithm"] == expected, mode
+
+
+# --- no accounts -> account manager ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "saved, expected",
+    [
+        ([], "option 1 (Firefox) or 2 (Manual)"),
+        ([{"use_account": False}], "option 4"),
+        ([{"use_account": True}], "add the account again"),
+    ],
+)
+def test_no_accounts_opens_account_manager(doggo, monkeypatch, saved, expected):
+    import main
+
+    shown, opened = [], []
+    doggo.json = types.SimpleNamespace(read_data=lambda: {"roblox_accounts": saved})
+    doggo.cli = types.SimpleNamespace(print_error=shown.append)
+    doggo.load_roblox_accounts = lambda: []
+    monkeypatch.setattr("builtins.input", lambda *_: "")
+    monkeypatch.setattr(
+        main,
+        "AccountManager",
+        lambda: types.SimpleNamespace(main=lambda: opened.append(1)),
+    )
+    doggo.start_trader()
+    assert opened == [1]
+    assert expected in shown[0]
