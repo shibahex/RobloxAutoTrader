@@ -308,37 +308,44 @@ class Doggo:
                 check_oubounds()
             time.sleep(5)
 
+    def handle_inbounds_once(self, account):
+        """
+        One pass over an account's inbound trades: accept those that pass the
+        config (if Accept Valid Trades is on), counter the rest (if Counter
+        Trades is on). Does nothing in dont_send_trade test mode.
+        """
+        accept = account.config.inbounds["Accept_Valid_Trades"]
+        counter = account.config.inbounds["CounterTrades"]
+        if account.config.debug["dont_send_trade"] or not (accept or counter):
+            return None
+        try:
+            results = account.handle_inbounds(accept=accept, counter=counter)
+            log(
+                f"[INBOUND] {account.username}: accepted {results['accepted']}, "
+                f"countered {results['countered']}, kept {results['kept']}"
+            )
+            return results
+        except exceptions_types.TradeLimit:
+            log(f"{account.username} hit the trade limit while countering")
+            if not account.config.debug["ignore_limit"]:
+                self.json.add_ratelimit_timestamp(account.cookies[".ROBLOSECURITY"])
+        except exceptions_types.CookieInvalid as e:
+            self.disable_account(account, e)
+        except exceptions_types.TradebotError as e:
+            log(f"Inbound check failed for {account.username}: {e}", severityNum=2)
+        return None
+
     def counter_trade_thread(self, roblox_accounts):
-        def counter_trades_logic():
+        """Checks every account's inbound trades every 30 minutes."""
+        log("inbound trade thread started")
+        while True:
             for account in roblox_accounts:
                 if self.is_disabled(account):
                     continue
-                if (
-                    not account.config.inbounds["CounterTrades"]
-                    or account.config.debug["dont_send_trade"]
-                ):
-                    continue
                 if time.time() - account.counter_timer < 1800:
                     continue
-
                 account.counter_timer = time.time()
-                try:
-                    account.counter_trades()
-                except exceptions_types.TradeLimit:
-                    log(f"{account.username} hit the trade limit while countering")
-                    if not account.config.debug["ignore_limit"]:
-                        self.json.add_ratelimit_timestamp(
-                            account.cookies[".ROBLOSECURITY"]
-                        )
-                except exceptions_types.CookieInvalid as e:
-                    self.disable_account(account, e)
-                except exceptions_types.TradebotError as e:
-                    log(f"Countering failed for {account.username}: {e}", severityNum=2)
-
-        log("counter trade thread started")
-
-        while True:
-            counter_trades_logic()
+                self.handle_inbounds_once(account)
             time.sleep(5)
 
     # ------------------------------------------------------------------
@@ -358,7 +365,7 @@ class Doggo:
         self.start_thread(
             "Outbound checker", self.check_outbound_thread, roblox_accounts
         )
-        self.start_thread("Counter trades", self.counter_trade_thread, roblox_accounts)
+        self.start_thread("Inbound trades", self.counter_trade_thread, roblox_accounts)
         self.start_thread("Rolimons updater", self.update_data_thread, roblox_accounts)
 
         time.sleep(1)

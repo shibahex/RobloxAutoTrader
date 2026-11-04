@@ -1045,7 +1045,9 @@ def accepted(router):
 
 
 def test_format_trade_finds_our_side_when_we_are_participant_b(router, account):
-    trade = account.format_trade_api(inbound_trade_json(["1:2"], ["1:1"], their_robux=5))
+    trade = account.format_trade_api(
+        inbound_trade_json(["1:2"], ["1:1"], their_robux=5)
+    )
     assert trade["self_id"] == 1 and trade["their_id"] == 2
     assert trade["self_side_item_ids"] == ["1:2"]
     assert trade["their_side_item_ids"] == ["1:1"]
@@ -1140,3 +1142,61 @@ def test_trade_limit_stops_countering_but_keeps_accepting(router, inbound):
     with pytest.raises(E.TradeLimit):
         inbound.handle_inbounds(accept=True, counter=True)
     assert accepted(router) == [ACCEPT_URL + "71/accept"]
+
+
+# --- inbound wiring -------------------------------------------------------------
+
+
+def test_accept_valid_trades_defaults_to_off(tmp_path):
+    from handler.handle_config import ConfigHandler
+
+    cfg = tmp_path / "c.cfg"
+    cfg.write_text("[Inbound Settings]\nCounter Trades = True\n")
+    assert ConfigHandler(str(cfg)).inbounds["Accept_Valid_Trades"] is False
+    cfg.write_text("[Inbound Settings]\nAccept Valid Trades = True\n")
+    assert ConfigHandler(str(cfg)).inbounds["Accept_Valid_Trades"] is True
+
+
+def inbound_account(account, accept, counter, effect=None):
+    calls = []
+
+    def handle_inbounds(accept, counter):
+        calls.append((accept, counter))
+        if effect:
+            raise effect
+        return {"accepted": 0, "countered": 0, "kept": 0}
+
+    account.handle_inbounds = handle_inbounds
+    account.config.inbounds["Accept_Valid_Trades"] = accept
+    account.config.inbounds["CounterTrades"] = counter
+    account.config.debug["dont_send_trade"] = False
+    account.config.debug["ignore_limit"] = False
+    return account, calls
+
+
+@pytest.mark.parametrize(
+    "accept, counter", [(True, True), (True, False), (False, True)]
+)
+def test_inbound_pass_uses_both_settings(doggo, account, accept, counter):
+    acc, calls = inbound_account(account, accept, counter)
+    doggo.handle_inbounds_once(acc)
+    assert calls == [(accept, counter)]
+
+
+def test_inbound_pass_does_nothing_when_both_off(doggo, account):
+    acc, calls = inbound_account(account, False, False)
+    doggo.handle_inbounds_once(acc)
+    assert calls == []
+
+
+def test_inbound_pass_never_runs_in_test_mode(doggo, account):
+    acc, calls = inbound_account(account, True, True)
+    acc.config.debug["dont_send_trade"] = True
+    doggo.handle_inbounds_once(acc)
+    assert calls == []
+
+
+def test_inbound_trade_limit_is_recorded(doggo, account):
+    acc, _ = inbound_account(account, True, True, effect=E.TradeLimit())
+    doggo.handle_inbounds_once(acc)
+    assert doggo.limited == ["x"]

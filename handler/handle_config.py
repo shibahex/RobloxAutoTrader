@@ -274,6 +274,10 @@ class ConfigHandler:
             "Dont_Counter_Wins": self.get_boolean(
                 "Inbound Settings", "Dont Counter Wins"
             ),
+            # Off unless set: accepting a trade can't be undone
+            "Accept_Valid_Trades": bool(
+                self.get_boolean("Inbound Settings", "Accept Valid Trades")
+            ),
         }
 
     def load_projected_detection(self):
