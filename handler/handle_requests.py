@@ -3,12 +3,19 @@ import time
 import random
 import requests
 from handler.handle_logs import log
+from handler import exceptions_types
+
+MAX_NETWORK_RETRIES = 4
+MAX_SERVER_RETRIES = 3
+MAX_CSRF_RETRIES = 2
+MAX_RATE_LIMIT_RETRIES = 4
+TRADE_SEND_PREFIX = "https://trades.roblox.com/v2/trades/"
 
 
 class RequestsHandler:
     def __init__(
         self,
-        Session: requests.Session = requests.Session(),
+        Session: requests.Session | None = None,
         use_proxies=False,
         cookie: dict = None,
     ) -> None:
@@ -20,7 +27,8 @@ class RequestsHandler:
         if self.use_proxies:
             self.load_proxies()
 
-        self.Session = Session
+        # Each handler gets its own session so cookies never leak between accounts
+        self.Session = Session if Session is not None else requests.Session()
 
         # URL = Consecutive Limits
         self.ratelimit_urls = {}
@@ -67,215 +75,209 @@ class RequestsHandler:
         proxy_dict = {"http": proxy, "https": proxy}
         return proxy_dict
 
-    def generate_csrf(self):
+    def generate_csrf(self) -> bool:
         """
         Posts the auth API and grabs the csrf and sets the Class headers as the csrf
         The API response has a failure status code, but we still get the token.
+        Returns True if a token was set.
         """
         try:
-            response = self.Session.post("https://auth.roblox.com/v2/login", data={})
-        except Exception:
-            log("Failed to post csrf token. returning none", severityNum=3)
-            return None
+            response = self.Session.post(
+                "https://auth.roblox.com/v2/login", data={}, timeout=30
+            )
+        except requests.RequestException as e:
+            log(f"Failed to post for a csrf token: {e}", severityNum=3)
+            return False
 
-        if "x-csrf-token" in response.headers:
-            self.headers["x-csrf-token"] = response.headers["x-csrf-token"]
+        token = response.headers.get("x-csrf-token")
+        if token:
+            self.headers["x-csrf-token"] = token
             return True
 
-        else:
-            log(
-                f"[ERROR] Invalidated cookie returned in generate_csrf; {
-                    response.headers
-                }",
-                severityNum=3,
+        log(
+            f"No csrf token returned, cookie may be invalid; {response.headers}",
+            severityNum=3,
+        )
+        return False
+
+    def _send(self, method, URL, headers, payload, proxy_dict) -> requests.Response:
+        method = method.lower()
+        if method == "get":
+            return self.Session.get(
+                URL, headers=headers, proxies=proxy_dict, timeout=30
             )
+        if method == "post":
+            return self.Session.post(
+                URL, headers=headers, json=payload, proxies=proxy_dict, timeout=30
+            )
+        raise ValueError(f"Unsupported request method: {method}")
+
+    def _refresh_csrf_from(self, response) -> bool:
+        """Roblox sends a fresh token on a failed CSRF check; use it, else ask for one."""
+        token = response.headers.get("x-csrf-token")
+        if token and token != self.headers.get("x-csrf-token"):
+            self.headers["x-csrf-token"] = token
+            return True
+        return self.generate_csrf()
+
+    @staticmethod
+    def _is_csrf_failure(response) -> bool:
+        text = response.text or ""
+        return "XSRF token invalid" in text or "Token Validation Failed" in text
 
     def requestAPI(
         self, URL, method="get", payload=None, additional_headers=None
     ) -> requests.Response:
         """
-        Handles the requests and returns the response if its successful.
-        You can pass through requests.Session() with Roblox Cookies.
-        """
+        Sends the request and returns the Response only if it succeeded (2xx).
 
+        Retries network errors, 5xx, rate limits and CSRF refreshes on its own.
+        Anything it can't fix is raised as a typed error from handler.exceptions_types:
+        NetworkError, RateLimited/TradeLimit, ChallengeRequired, CookieInvalid,
+        AuthError, Forbidden, NotFound, BadRequest, ServerError, RobloxAPIError.
         """
-        Proxy Managment
-        """
-
         if not self.proxies:
             self.use_proxies = False
 
-        consecutive_rate_limits = 0
-        retries = 0
+        network_failures = 0
+        server_failures = 0
+        csrf_refreshes = 0
+        proxy_rate_limits = 0
+
         while True:
-            headers = self.headers.copy()  # Create a copy of the original headers
+            headers = self.headers.copy()
             if additional_headers:
-                # Add the additional headers temporarily
                 headers.update(additional_headers)
 
             if self.cookie:
                 self.Session.cookies.update(self.cookie)
 
             proxy_dict = self.return_proxy() if self.use_proxies else None
-
             if proxy_dict is None and self.use_proxies:
                 log("No available proxies, waiting...")
                 time.sleep(self.timeout_duration)
                 continue
+
             try:
-                if method.lower() == "get":
-                    # print(URL)
-                    Response = self.Session.get(
-                        URL, headers=headers, proxies=proxy_dict, timeout=30
-                    )
-                elif method.lower() == "post":
-                    Response = self.Session.post(
-                        URL,
-                        headers=headers,
-                        json=payload,
-                        proxies=proxy_dict,
-                        timeout=30,
-                    )
-            except Exception as e:  # except requests.exceptions.ProxyError:
+                Response = self._send(method, URL, headers, payload, proxy_dict)
+            except requests.RequestException as e:
+                network_failures += 1
+                if network_failures > MAX_NETWORK_RETRIES:
+                    raise exceptions_types.NetworkError(URL, e) from e
+
                 if self.use_proxies:
-                    log(f"Proxy  Error {proxy_dict['http']}.. blacklisting")
+                    log(f"Proxy error {proxy_dict['http']}, putting it on timeout")
                     self.rate_limit(proxy_dict["http"])
                 else:
-                    log(f"Got Error getting/posting API {e}", severityNum=2)
+                    log(
+                        f"Network error on {URL} ({network_failures}/{MAX_NETWORK_RETRIES}): {e}",
+                        severityNum=2,
+                    )
                     self.Session.close()
                     time.sleep(10)
                     # Recreate the session to avoid stale connections
                     self.Session = requests.Session()
                 continue
 
-            """
-            Status Code Managment
-            """
-            if Response.status_code != 429:
-                retries += 1
-            if retries > 3:
-                return Response
+            status = Response.status_code
 
-            if Response.status_code == 429:
-                log(f"hit ratelimit on url {URL}")
+            # Rate limits
+            if status == 429:
+                error = exceptions_types.RateLimited(Response)
+                if URL.startswith(TRADE_SEND_PREFIX) and error.has_message(
+                    "too many trade requests"
+                ):
+                    raise exceptions_types.TradeLimit(Response)
+
+                log(f"hit ratelimit on url {URL}", dontPrint=True)
                 if self.use_proxies:
+                    proxy_rate_limits += 1
                     self.rate_limit(proxy_dict["http"])
+                    if proxy_rate_limits > MAX_RATE_LIMIT_RETRIES:
+                        raise error
                     time.sleep(5)
-                    return Response
-                else:
-                    # If this API is hard ratelimited then return 429
-                    if "https://trades.roblox.com/v1/trades/send" == URL:
-                        if (
-                            "you are sending too many trade requests"
-                            in Response.json()["errors"][0]["message"].lower()
-                        ):
-                            return Response
-
-                    if URL not in self.ratelimit_urls:
-                        self.ratelimit_urls[URL] = 1
-                    else:
-                        self.ratelimit_urls[URL] += 1
-
-                    consecutive_rate_limits = self.ratelimit_urls[URL]
-                    wait_time = 10 * (2**consecutive_rate_limits)
-                    log(
-                        f"Rate limited {URL} without proxies, waiting {wait_time} secs."
-                    )
-                    time.sleep(wait_time)
-                    if consecutive_rate_limits > 4:
-                        del self.ratelimit_urls[URL]
-                        return Response
                     continue
 
-            if Response.status_code == 200:
-                # Because roblox API is weird and sometimes returns 200 with errors
-                try:
-                    if "errors" in Response.json():
-                        Response.status_code = 500
-                        return Response
-                except Exception:
-                    pass
+                self.ratelimit_urls[URL] = self.ratelimit_urls.get(URL, 0) + 1
+                consecutive_rate_limits = self.ratelimit_urls[URL]
+                if consecutive_rate_limits > MAX_RATE_LIMIT_RETRIES:
+                    del self.ratelimit_urls[URL]
+                    raise error
+
+                wait_time = 10 * (2**consecutive_rate_limits)
+                log(f"Rate limited {URL} without proxies, waiting {wait_time} secs.")
+                time.sleep(wait_time)
+                continue
+
+            self.ratelimit_urls.pop(URL, None)
+
+            # Success, but Roblox sometimes returns 200 with an error body
+            if 200 <= status < 300:
+                if exceptions_types.parse_roblox_errors(Response):
+                    raise exceptions_types.RobloxAPIError(Response)
                 return Response
 
-            elif (
-                Response.status_code == 403
-                or Response.status_code == 401
-                or Response.status_code == 500
-            ):
-                # print("Unathorized API, waiting 10 seconds then handling")
-                # time.sleep(10)
-
+            # Auth problems
+            if status in (401, 403):
                 log(
-                    f"Unauthorized debug: {Response.text} {Response.status_code} {
-                        Response.url
-                    }",
+                    f"Auth failure debug: {status} {Response.url} {Response.text[:300]}",
                     dontPrint=True,
                 )
-
-                if "XSRF token invalid" in Response.text:
-                    gen_status = self.generate_csrf()
-                    if gen_status:
-                        log(
-                            f"Succesfully Refreshing CSRF Token: {gen_status}",
-                            dontPrint=True,
+                if self._is_csrf_failure(Response) or (
+                    status == 403 and "x-csrf-token" in Response.headers
+                ):
+                    csrf_refreshes += 1
+                    if csrf_refreshes > MAX_CSRF_RETRIES:
+                        raise exceptions_types.AuthError(
+                            Response, f"CSRF token kept failing on {URL}"
                         )
+                    if self._refresh_csrf_from(Response):
+                        log("Refreshed CSRF token", dontPrint=True)
                     else:
                         log(
-                            "Failed Refreshing CSRF Token",
-                            dontPrint=True,
+                            "Failed refreshing CSRF token",
                             severityNum=3,
+                            dontPrint=True,
                         )
                     continue
 
-                # This API doesn't work for some items
-                if "inventory" in Response.url:
-                    return Response
+                if "rblx-challenge-id" in Response.headers:
+                    raise exceptions_types.ChallengeRequired(Response)
 
-                if "Challenge is required" not in Response.text:
-                    log(
-                        f"Request Auth Failed, seeing what to do for request Text: {
-                            Response.text
-                        } Url: {Response.url}  Status Code{
-                            Response.status_code
-                        }\nResponse Headers: {Response.headers}",
-                        severityNum=0,
-                        dontPrint=True,
-                    )
+                if status == 401:
+                    if self.cookie:
+                        raise exceptions_types.CookieInvalid(Response)
+                    raise exceptions_types.AuthError(Response)
 
-                # print(self.headers, "\nresponse headers:", Response.headers, "\n[Cookie]", self.Session.cookies, "\nPassed through cookies:", self.cookie)
+                raise exceptions_types.Forbidden(Response)
 
-                if "trade" not in Response.url and Response.status_code == 500:
-                    log(f"API failed to respond {URL}", severityNum=2)
-
-                # If x-csrf-token is invalid apparently the response will provide you with a new one
-                # if 'x-csrf-token' in Response.headers:
-                #     print("Sucessfully gotten new token from headers",
-                #           Response.headers['x-csrf-token'], "Old token:", self.headers['x-csrf-token'])
-                # self.headers['x-csrf-token'] = Response.headers['x-csrf-token']
-                # else:
-                #     self.generate_csrf()
-
-                # Retry with new csrf once IF there is no 2fa prompt
-                if "rblx-challenge-id" not in Response.headers:
-                    continue
-                else:
-                    return Response
-
-            elif Response.status_code == 400:
+            if status == 400:
                 log(
-                    f"Requests payload error, Response: {Response.text}, Data: {payload}, URL: {Response.url}",
+                    f"Request payload error, Response: {Response.text}, Data: {payload}, URL: {Response.url}",
                     severityNum=1,
                     dontPrint=True,
                 )
-                return Response
-            else:
+                raise exceptions_types.BadRequest(Response)
+
+            if status == 404:
+                raise exceptions_types.NotFound(Response)
+
+            if status >= 500:
+                server_failures += 1
+                if server_failures > MAX_SERVER_RETRIES:
+                    raise exceptions_types.ServerError(Response)
                 log(
-                    f"Unknown Error Code on {URL} {Response.status_code} {
-                        Response.text
-                    }",
-                    severityNum=4,
+                    f"Server error {status} on {URL}, retrying ({server_failures}/{MAX_SERVER_RETRIES})",
+                    dontPrint=True,
                 )
-                return Response
+                time.sleep(2 * server_failures)
+                continue
+
+            log(
+                f"Unknown status code on {URL} {status} {Response.text[:300]}",
+                severityNum=3,
+            )
+            raise exceptions_types.RobloxAPIError(Response)
 
     def load_proxies(self, file_path="proxies.txt"):
         try:
@@ -283,8 +285,8 @@ class RequestsHandler:
                 self.proxies = [
                     "http://" + line.strip() for line in file if line.strip()
                 ]
-        except Exception as e:
-            log(f"No proxy file, returning None. {e}")
+        except OSError as e:
+            log(f"No proxy file, not using proxies. {e}")
 
     def refresh_proxies(self, file_path="proxies.txt"):
         self.load_proxies(file_path)

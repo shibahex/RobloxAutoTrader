@@ -54,8 +54,8 @@ class HandleConfigs:
 
                 try:
                     config.read(file_path)
-                except Exception as e:
-                    log(f"Couldn't read config {e}")
+                except (configparser.Error, OSError, UnicodeDecodeError) as e:
+                    log(f"Couldn't read config {file}: {e}")
                     continue
 
                 if "Info" in config and "Description" in config["Info"]:
@@ -68,7 +68,7 @@ class HandleConfigs:
                 int(input("\nPlease Enter the Number of the Config you want to use > "))
                 - 1
             )
-            if chosen <= len(file_names):
+            if 0 <= chosen < len(file_names):
                 chosen_config = file_names[chosen]
                 with open(f"{directory}/{chosen_config}", "r") as f:
                     config_contents = f.read()
@@ -80,10 +80,15 @@ class HandleConfigs:
                     f"\nReplaced './config.cfg' with the contents of '{file_names[chosen]}'"
                 )
                 time.sleep(1)
-        except Exception as e:
-            log("Invalid Choice", e)
+            else:
+                log("Invalid Choice")
+                time.sleep(3)
+        except ValueError:
+            log("Invalid Choice, enter a number")
             time.sleep(3)
-            return
+        except OSError as e:
+            log(f"Couldn't copy the preset into config.cfg: {e}", severityNum=3)
+            time.sleep(3)
 
     def show_config(self, user_id=None):
         """List grouped and single keys in a user's configuration."""
@@ -145,10 +150,10 @@ class HandleConfigs:
                 # Do nothing if they pressed enter
                 return
         data = self.acc_configs.read_data()
-        try:
-            del data[user_id]
-        except Exception as e:
-            log("Couldnt delete config:", e)
+        if user_id not in data:
+            log(f"No config saved for {user_id}")
+            return
+        del data[user_id]
         self.acc_configs.write_data(data)
 
     def edit_config(self):

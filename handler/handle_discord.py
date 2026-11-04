@@ -2,6 +2,7 @@ from discord_webhook import DiscordWebhook, DiscordEmbed
 import requests
 import time
 from handler.handle_logs import log
+from handler.exceptions_types import UnknownItem
 
 # Define status colors for better readability and maintainability
 STATUS_COLORS = {
@@ -78,12 +79,13 @@ class DiscordHandler:
             string = ""
             total_sum = 0
             for item in item_ids:
-                item_name = rolimon_data[str(item)]["item_name"]
-                item_total_value = rolimon_data[str(item)]["total_value"]
-                if str(item) in projected_data:
-                    item_algo_value = round(projected_data[str(item)]["value"])
-                else:
-                    item_algo_value = 0
+                item_data = rolimon_data.get(str(item))
+                if item_data is None:
+                    raise UnknownItem(item)
+                item_name = item_data["item_name"]
+                item_total_value = item_data["total_value"] or 0
+                projected = (projected_data or {}).get(str(item)) or {}
+                item_algo_value = round(projected.get("value") or 0)
 
                 string += (
                     item_name
@@ -149,10 +151,12 @@ class DiscordHandler:
             thumbnail = requests.get(
                 f"https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds={
                     user_id
-                }&size=48x48&format=Png&isCircular=false"
+                }&size=48x48&format=Png&isCircular=false",
+                timeout=10,
             ).json()["data"][0]["imageUrl"]
-        except Exception:
+        except (requests.RequestException, ValueError, KeyError, IndexError, TypeError):
             thumbnail = PLACEHOLDER_IMAGE
+        thumbnail = thumbnail or PLACEHOLDER_IMAGE
         embed.set_author(name="Doggo Trader", icon_url=thumbnail)
         # embed.set_thumbnail(url=thumbnail)
 
@@ -161,30 +165,42 @@ class DiscordHandler:
 
         return embed
 
-    def send_webhook(self, embed: DiscordEmbed, webhook_url: str):
+    def send_webhook(self, embed: DiscordEmbed, webhook_url: str) -> bool:
         """
         Sends a webhook to Discord with a detailed message and embed.
+        Never raises: a failed webhook shouldn't stop trading. Returns True if sent.
         """
+        if not webhook_url:
+            return False
         try:
-            if webhook_url == "":
-                return None
-            # Create a webhook instance and setup embed
             webhook = DiscordWebhook(url=webhook_url, username="Doggo Tradebot")
-
             webhook.add_embed(embed)
 
-            # Wait if ratelimited
-            while True:
+            # Wait if ratelimited, but not forever
+            for _ in range(5):
                 response = webhook.execute()
-                if "429" in str(response):
+                if getattr(response, "status_code", None) == 429 or "429" in str(
+                    response
+                ):
                     log("Webhook ratelimited waiting 15 secs")
                     time.sleep(15)
                     continue
-
                 time.sleep(0.5)
-                break
+                log(f"[DOGGO] {response}", dontPrint=True)
+                return True
 
-            log(f"[DOGGO] {response}")
-        except Exception as e:
-            # Log any errors to help with debugging
-            log(f"[ERROR] Failed to send webhook: {e}")
+            log("Gave up sending webhook after repeated rate limits", severityNum=2)
+            return False
+        except (requests.RequestException, ValueError, TypeError) as e:
+            log(f"Failed to send webhook: {e}", severityNum=2)
+            return False
+
+    def send_error(self, webhook_url: str, title: str, details: str) -> bool:
+        """Posts an error alert to the optional Error Webhook. Never raises."""
+        if not webhook_url:
+            return False
+        embed = DiscordEmbed(
+            title=title[:256], description=details[:4000], color=STATUS_COLORS[0]
+        )
+        embed.set_timestamp()
+        return self.send_webhook(embed, webhook_url)

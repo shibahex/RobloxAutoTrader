@@ -3,6 +3,7 @@ from handler.handle_json import JsonHandler
 from handler.handle_cli import Terminal
 from handler.handle_2fa import AuthHandler
 from handler.handle_login import FirefoxLogin
+from handler.exceptions_types import TradebotError, CookieInvalid
 
 COOKIE_WARNING = "_|WARNING:-DO-NOT-SHARE-THIS.--Sharing-this-will-allow-someone-to-log-in-as-you-and-to-steal-your-ROBUX-and-items.|"
 
@@ -58,8 +59,8 @@ class AccountManager:
                     break
 
                 self.cli.print_error(f"Invalid input: '{index}' is not a valid number.")
-            except Exception as e:
-                self.cli.print_error(f"got execption {e} trying to delete cookie")
+            except TradebotError as e:
+                self.cli.print_error(f"Couldn't update cookies.json: {e}")
                 break
 
     def remove_accounts(self):
@@ -75,8 +76,8 @@ class AccountManager:
                 if index.lower() == " " or index.lower() == "":
                     break
                 self.cli.print_error(f"Invalid input: '{index}' is not a valid number.")
-            except Exception as e:
-                self.cli.print_error(f"got execption {e} trying to delete cookie")
+            except TradebotError as e:
+                self.cli.print_error(f"Couldn't update cookies.json: {e}")
                 break
 
     def manually_add_account(self):
@@ -93,8 +94,15 @@ class AccountManager:
             return None
 
         try:
-            roblox_login = RobloxAPI(cookie={".ROBLOSECURITY": acc_cookie})
-        except ValueError as error:
+            roblox_login = RobloxAPI(
+                cookie={".ROBLOSECURITY": acc_cookie}, auth_secret=auth_secret
+            )
+        except CookieInvalid:
+            self.cli.print_error(
+                "That cookie is expired or invalid.\nSkipping account..."
+            )
+            return None
+        except TradebotError as error:
             self.cli.print_error(f"{error}\nSkipping account...")
             return None
 

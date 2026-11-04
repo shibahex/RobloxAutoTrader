@@ -5,6 +5,7 @@ from webdriver_manager.firefox import GeckoDriverManager
 from seleniumwire import webdriver  # Importing seleniumwire's webdriver
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import WebDriverException
 import time
 import json
 import pyotp
@@ -92,7 +93,8 @@ class FirefoxLogin:
                 )
                 verify_button.click()
                 return True
-            except Exception as e:
+            except WebDriverException as e:
+                # Includes TimeoutException; keep waiting for the 2FA prompt
                 log(f"Error while waiting for the two-step verification input: {e}")
 
     def roblox_login(self, totp_secret):

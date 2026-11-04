@@ -1,4 +1,5 @@
 from handler.handle_logs import log
+from handler.exceptions_types import ConfigError
 
 import configparser
 
@@ -91,6 +92,8 @@ class ConfigHandler:
         return {
             "Send_Webhook": self.get_string("Discord", "Send Webhook"),
             "Completed_Webhook": self.get_string("Discord", "Completed Webhook"),
+            # Optional: where crashes and account problems get posted
+            "Error_Webhook": self.get_string("Discord", "Error Webhook"),
         }
 
     def load_scan_items(self):
@@ -309,7 +312,7 @@ class ConfigHandler:
                 string = self.get_string(section, option)
                 if string.lower() == "false" or string.lower() == "none":
                     return None
-            except Exception:
+            except (AttributeError, ValueError, TypeError):
                 pass
             return "Not Set"
 
@@ -359,6 +362,6 @@ class ConfigHandler:
         ]:
             for key, value in section.items():
                 if value == "Not Set":
-                    raise ValueError(
+                    raise ConfigError(
                         f"Configuration error: '{key}' is missing or invalid."
                     )

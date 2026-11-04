@@ -4,6 +4,11 @@ from handler.handle_logs import log
 from handler.handle_requests import RequestsHandler
 from handler.handle_json import JsonHandler
 from handler.handle_config import ConfigHandler
+from handler.exceptions_types import (
+    TradebotError,
+    RolimonsError,
+    NoItemsToScan,
+)
 
 import roblox_api
 from datetime import datetime
@@ -124,7 +129,13 @@ class RolimonAPI:
         self.rolimon_parser = RequestsHandler()
         self.projected_json = JsonHandler("projected_checker.json")
         self.config = ConfigHandler("config.cfg")
-        self.update_data()
+        try:
+            self.update_data()
+        except RolimonsError as e:
+            log(
+                f"Couldn't load Rolimons data at startup, will retry: {e}",
+                severityNum=3,
+            )
         # ItemID: Timestamp
         self.scanned_items_for_owners = {}
         # print(self.config.filter_users)
@@ -138,7 +149,8 @@ class RolimonAPI:
         scan_type = self.config.scan_items["Scan_Type"]
         scan_rares = self.config.scan_items["Scan_Rares"]
 
-        if self.item_data == {}:
+        if not self.item_data:
+            # Raises RolimonsError if it still can't load
             self.update_data()
         # for item in self.item_data.values():
         #   print(item['item_name'], item['trend'])
@@ -168,6 +180,11 @@ class RolimonAPI:
         if self.config.debug["show_scanning_users"]:
             log(f"[DOGGO] Picking random item from list size: {len(filtered_items)}")
 
+        if not filtered_items:
+            raise NoItemsToScan(
+                f"No items match the [Scan Items] filters (scan type {scan_type}); loosen them in config.cfg"
+            )
+
         # TODO: add into table with timestamp and if we get the same item check if the time has been 30 minutes and if it has remove and return it
         return random.choice(filtered_items)
         # print(filtered_items)
@@ -191,7 +208,9 @@ class RolimonAPI:
 
             # TODO: this doesnt get followed properly
             def is_recently_scanned(projected_data, asset_id):
-                timestamp = projected_data[str(asset_id)]["timestamp"]
+                timestamp = projected_data[str(asset_id)].get("timestamp")
+                if timestamp is None:
+                    return False
                 timestamp_datetime = datetime.utcfromtimestamp(timestamp)
                 current_datetime = datetime.utcnow()
 
@@ -220,22 +239,15 @@ class RolimonAPI:
                 A price change from 100 to 200 has a 100% increase, or 1.0 (doubling).
                 """
 
-                last_price = projected_data[str(asset_id)]["last_price"]
+                last_price = projected_data[str(asset_id)].get("last_price")
                 current_price = self.item_data[asset_id]["best_price"]
 
-                difference = abs(current_price - last_price)
-                # avoid division by 0
-                if difference == 0:
+                # No price on either side (no sellers), can't compare
+                if not last_price or current_price is None:
                     return False
 
-                try:
-                    percentage_change = difference / last_price
-                    if percentage_change >= threshold:
-                        return True  # There is a significant change
-                except Exception:
-                    pass
-
-                return False
+                difference = abs(current_price - last_price)
+                return difference / last_price >= threshold
 
             projected_data = self.projected_json.read_data()
             projected_ids = projected_data.keys()
@@ -265,7 +277,9 @@ class RolimonAPI:
         rap_algo_for_valued = self.config.trading["Rap_Algo_For_Valued"]
         for item in inventory:
             asset_id = inventory[item]["item_id"]
-            # collectibleItemId = inventory[item]["item_id"]
+            if asset_id not in self.item_data:
+                log(f"{asset_id} not on Rolimons yet, leaving it out", dontPrint=True)
+                continue
             # total value reutns the RAP if theres no value
             rap = self.item_data[asset_id]["rap"]
 
@@ -282,11 +296,16 @@ class RolimonAPI:
 
             rap_algo_value = None
             item_volume = None
+            sale_gap = None
 
             if need_to_scan(asset_id):
-                roblox_api.RobloxAPI().is_projected_api(
-                    item_id=asset_id, collectibleId=inventory[item]["collectibleItemId"]
-                )
+                try:
+                    roblox_api.RobloxAPI().is_projected_api(
+                        item_id=asset_id,
+                        collectibleId=inventory[item]["collectibleItemId"],
+                    )
+                except TradebotError as e:
+                    log(f"Projected check failed for {asset_id}: {e}", severityNum=2)
 
             if value != 0:
                 if rap_algo_for_valued.lower() == "rolimon_value":
@@ -302,15 +321,18 @@ class RolimonAPI:
 
             projected_data = self.projected_json.read_data()
 
-            try:
-                if asset_id in projected_data.keys():
-                    is_projected = projected_data[asset_id]["is_projected"]
-                    rap_algo_value = projected_data[asset_id]["value"]
-                    item_volume = projected_data[asset_id]["volume"]
-                    sale_gap = projected_data[asset_id]["average_gap"]
-            except Exception:
-                log("Couldn't get projected data for item, continuing")
-                continue
+            projected_entry = projected_data.get(asset_id)
+            if projected_entry is not None:
+                try:
+                    is_projected = projected_entry["is_projected"]
+                    rap_algo_value = projected_entry["value"]
+                    item_volume = projected_entry["volume"]
+                    sale_gap = projected_entry["average_gap"]
+                except (KeyError, TypeError) as e:
+                    log(
+                        f"Projected data for {asset_id} is incomplete ({e}), skipping item"
+                    )
+                    continue
 
             if not is_self:
                 if (
@@ -320,6 +342,7 @@ class RolimonAPI:
                     or value == 0
                     and float(item_volume) < minimum_daily_sales
                     or value == 0
+                    and sale_gap is not None
                     and float(sale_gap) > max_sales_gap
                 ):
                     continue
@@ -340,34 +363,50 @@ class RolimonAPI:
     def update_data(self) -> None:
         """
         scrapes rolimons.com/catalog item_details because the API doesn't show shit like owners
+        Keeps the old data and raises RolimonsError if the page can't be loaded or parsed.
         """
+        try:
+            page = self.rolimon_parser.requestAPI("https://www.rolimons.com/catalog")
+        except TradebotError as e:
+            raise RolimonsError(f"Couldn't reach rolimons catalog: {e}") from e
 
-        page = self.rolimon_parser.requestAPI("https://www.rolimons.com/catalog")
-        if page.status_code == 200:
-            item_details = json.loads(
-                page.text.split("var item_details = ")[1].split(";")[0]
-            )
-            for item in item_details:
-                item_info = item_details[item]
-                # add in the itemID
-                item_info.insert(0, item)
-                self.item_data[item] = Item(*item_details[item]).to_dict()
-        else:
-            log("Couldnt get rolimon data")
-            return False
+        try:
+            raw = page.text.split("var item_details = ")[1].split(";")[0]
+            item_details = json.loads(raw)
+        except (IndexError, ValueError) as e:
+            raise RolimonsError(
+                f"Rolimons catalog page format changed, couldn't find item_details: {e}"
+            ) from e
+
+        new_data = {}
+        for item_id, item_info in item_details.items():
+            try:
+                new_data[item_id] = Item(item_id, *item_info).to_dict()
+            except TypeError as e:
+                raise RolimonsError(
+                    f"Rolimons item format changed ({len(item_info)} fields for {item_id}): {e}"
+                ) from e
+
+        if not new_data:
+            raise RolimonsError("Rolimons catalog returned no items")
+        # Swap in one step so other threads never see half-loaded data
+        self.item_data = new_data
 
     def return_trade_ads(self):
         """
         Returns rolimons recent trade ads
         """
-        get_ads_response = self.rolimon_parser.requestAPI(
-            "https://api.rolimons.com/tradeads/v1/getrecentads"
-        )
-        response = get_ads_response.json()
-        if not response["success"]:
+        try:
+            get_ads_response = self.rolimon_parser.requestAPI(
+                "https://api.rolimons.com/tradeads/v1/getrecentads"
+            )
+            response = get_ads_response.json()
+        except (TradebotError, ValueError) as e:
+            raise RolimonsError(f"Couldn't get trade ads: {e}") from e
+        if not response.get("success"):
             return False
 
-        return response["trade_ads"]
+        return response.get("trade_ads", [])
         # 6 downgrade
         # 1 demand
         # 5 upgrade
