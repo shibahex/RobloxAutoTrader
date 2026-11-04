@@ -1,7 +1,33 @@
+import functools
 from handler.handle_logs import log
 from handler.exceptions_types import ConfigError
 
 import configparser
+
+
+@functools.lru_cache(maxsize=256)
+def _convert_gain(gain):
+    """
+    Convert gain to a float or int; gains between -1 and 1 are percentages.
+    Cached: trade generation checks the same few settings millions of times.
+    """
+    try:
+        gain = float(gain) if "." in str(gain) else int(gain)
+
+        if gain == 0.0:
+            return gain, False
+
+        return gain, abs(gain) < 1  # True if between -1 and 1 (percentage)
+    except ValueError:
+        raise ValueError(f"Invalid gain value: {gain}")
+
+
+def _positive_number(value, default):
+    """A setting that must be a number above 0; anything else (missing, "Not Set",
+    a typo like "10m", 0 or negative) falls back to the default."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+        return value
+    return default
 
 
 class ConfigHandler:
@@ -30,15 +56,7 @@ class ConfigHandler:
         Convert gain to a float or int
         Treat gains < 1 and > -1 as percentages.
         """
-        try:
-            gain = float(gain) if "." in str(gain) else int(gain)
-
-            if gain == 0.0:
-                return gain, False
-
-            return gain, abs(gain) < 1  # True if between -1 and 1 (percentage)
-        except ValueError:
-            raise ValueError(f"Invalid gain value: {gain}")
+        return _convert_gain(gain)
 
     def calculate_gain(self, gain, base_value, is_percentage):
         """
@@ -278,10 +296,9 @@ class ConfigHandler:
             "Accept_Valid_Trades": bool(
                 self.get_boolean("Inbound Settings", "Accept Valid Trades")
             ),
-            "Check_Every_Minutes": self.get_float(
-                "Inbound Settings", "Check Inbounds Every Minutes"
-            )
-            or 30,
+            "Check_Every_Minutes": _positive_number(
+                self.get_float("Inbound Settings", "Check Inbounds Every Minutes"), 30
+            ),
         }
 
     def load_projected_detection(self):

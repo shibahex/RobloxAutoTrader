@@ -291,21 +291,10 @@ class HandleConfigs:
         current_value = data_config[key]
 
         if key == "Select_Trade_Using":
-            options = [
-                "highest_demand",
-                "lowest_demand",
-                "highest_sum_of_trade",
-                "lowest_sum_of_trade",
-                "closest_score",
-                "highest_rap_gain",
-                "lowest_rap_gain",
-                "highest_algo_gain",
-                "lowest_algo_gain",
-                "highest_value_gain",
-                "lowest_value_gain",
-                "upgrade",
-                "downgrade",
-            ]
+            # Exactly what the trade picker supports
+            from trade_algorithm import SELECT_TRADE_OPTIONS
+
+            options = list(SELECT_TRADE_OPTIONS)
             log("\nSelect one of the following options:")
             for i, option in enumerate(options, 1):
                 log(f"{i}. {option}")

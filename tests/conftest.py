@@ -111,7 +111,9 @@ def pytest_sessionfinish(session, exitstatus):
 
 
 # --- fake HTTP for offline tests ---------------------------------------------
-def make_response(status=200, body=None, text=None, headers=None, url="https://x.test/"):
+def make_response(
+    status=200, body=None, text=None, headers=None, url="https://x.test/"
+):
     r = requests.Response()
     r.status_code = status
     if body is not None:

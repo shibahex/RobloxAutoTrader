@@ -6,6 +6,42 @@ import time
 from handler.handle_logs import log
 
 
+# Their side's combinations are worked out once and reused when there are at
+# most this many (about 30 items, up to 4 per side); bigger ones are made as needed
+MAX_CACHED_COMBINATIONS = 50_000
+
+
+# Every "Select Trade Using" value select_trade understands
+SELECT_TRADE_OPTIONS = (
+    "lowest_demand",
+    "random",
+    "highest_volume_gain",
+    "lowest_volume_gain",
+    "highest_sum_of_volume",
+    "lowest_sum_of_volume",
+    "highest_demand",
+    "highest_sum_of_trade_value",
+    "lowest_sum_of_trade_value",
+    "highest_sum_of_trade_rap",
+    "lowest_sum_of_trade_rap",
+    "highest_sum_of_overall_value",
+    "lowest_sum_of_overall_value",
+    "closest_score_based_on_overall_value",
+    "closest_score_based_on_rap",
+    "highest_rap_gain",
+    "lowest_rap_gain",
+    "highest_algo_gain",
+    "lowest_algo_gain",
+    "highest_overall_gain",
+    "lowest_overall_gain",
+    "highest_value_gain",
+    "lowest_value_gain",
+    "upgrade",
+    "downgrade",
+)
+DEFAULT_SELECT_TRADE = "lowest_rap_gain"
+
+
 class TradeMaker:
     def __init__(
         self,
@@ -266,8 +302,15 @@ class TradeMaker:
                 trade = self.select_trade(valid_trades, select_by="random")
                 return trade
 
-            trade = self.select_trade(valid_trades, select_by=self.select_by.lower())
-            return trade
+            select_by = (self.select_by or DEFAULT_SELECT_TRADE).lower()
+            if select_by not in SELECT_TRADE_OPTIONS:
+                log(
+                    f"Select Trade Using = {select_by} isn't a valid option, "
+                    f"using {DEFAULT_SELECT_TRADE}",
+                    severityNum=2,
+                )
+                select_by = DEFAULT_SELECT_TRADE
+            return self.select_trade(valid_trades, select_by=select_by)
 
         start_time = time.perf_counter()  # Use perf_counter for better precision
 
@@ -286,44 +329,76 @@ class TradeMaker:
         if self.debug_print:
             log("Trade algorithm got keys", severityNum=5)
 
-        def get_total_values(items, inventory):
-            """
-            Gets the total value, rap, and demand of a list of items.
-            """
-            value, rap, rap_algorithm, demand, total_value, volume = 0, 0, 0, 0, 0, 0
+        # Each item's numbers, looked up once (a missing field is logged once,
+        # not once per combination it's in)
+        def item_totals(inventory):
+            totals = {}
+            for key, item in inventory.items():
 
-            def get_value(item, value):
-                if item[value] is not None:
-                    return item[value]
-                else:
-                    log(f"{item} doesnt have value {value}")
+                def get_value(field):
+                    if item.get(field) is not None:
+                        return item[field]
+                    log(f"{item} doesnt have value {field}")
                     return 0
 
+                totals[key] = (
+                    get_value("value"),
+                    get_value("rap"),
+                    get_value("rap_algorithm"),
+                    item["demand"] or 0,
+                    get_value("total_value"),
+                    get_value("item_volume"),
+                )
+            return totals
+
+        self_item_totals = item_totals(self_inventory)
+        their_item_totals = item_totals(their_inventory)
+
+        def get_total_values(items, totals):
+            """
+            Sums value, rap, rap algorithm, demand, total value and volume of a
+            combination, in the same order as the items.
+            """
+            value = rap = rap_algorithm = demand = total_value = volume = 0
             for key in items:
-                item = inventory[key]
-
-                rap += get_value(item, "rap")
-                rap_algorithm += get_value(item, "rap_algorithm")
-
-                value += get_value(item, "value")
-                total_value += get_value(item, "total_value")
-                volume += get_value(item, "item_volume")
-
-                current_demand = item["demand"]
-                if current_demand:
-                    demand += current_demand
-
+                v, r, ra, d, tv, vol = totals[key]
+                value += v
+                rap += r
+                rap_algorithm += ra
+                demand += d
+                total_value += tv
+                volume += vol
             return value, rap, rap_algorithm, demand, total_value, volume
+
+        def their_combinations():
+            """Their side's combinations with ids and totals, worked out once."""
+            for their_side in self.generate_combinations(
+                their_keys, self.min_items_their, self.max_items_their
+            ):
+                yield (
+                    their_side,
+                    {their_inventory[key]["item_id"] for key in their_side},
+                    get_total_values(their_side, their_item_totals),
+                )
+
+        # Reused for every combination of our side instead of rebuilt each time
+        # (capped so a huge inventory can't use too much memory)
+        their_count = sum(
+            math.comb(len(their_keys), r)
+            for r in range(
+                max(1, self.min_items_their),
+                min(self.max_items_their, len(their_keys)) + 1,
+            )
+        )
+        their_cached = (
+            list(their_combinations())
+            if their_count <= MAX_CACHED_COMBINATIONS
+            else None
+        )
 
         if self.debug_print:
             log("Trade algorithm: starting trade generation", severityNum=5)
 
-        # pre_checks = [
-        #     self.min_rap_gain,
-        #     self.min_value_gain,
-        #     self.min_overall_gain,
-        #     self.min_algo_gain,
-        # ]
         invalid_reasons = {
             "value_gain": 0,
             "min_rap_of_trade": 0,
@@ -339,7 +414,6 @@ class TradeMaker:
         for self_side in self.generate_combinations(
             self_keys, self.min_items_self, self.max_items_self
         ):
-            # print(time.perf_counter() - start_time, timeout, "first scope")
             if (
                 self.trade_timeout
                 and time.perf_counter() - start_time > self.trade_timeout
@@ -348,35 +422,29 @@ class TradeMaker:
                     f"Timeout reached while generating trades. invalid reasons: {invalid_reasons}"
                 )
                 break
-            # Create a set for the current self_side to check against
             self_side_item_ids = {self_inventory[key]["item_id"] for key in self_side}
+            (
+                self_value,
+                self_rap,
+                self_rap_algo,
+                self_demand,
+                self_overall_value,
+                self_volume,
+            ) = get_total_values(self_side, self_item_totals)
 
-            for their_side in self.generate_combinations(
-                their_keys, self.min_items_their, self.max_items_their
+            for their_side, their_side_item_ids, their_totals in (
+                their_cached if their_cached is not None else their_combinations()
             ):
                 if len(self_side) == 1 and len(their_side) == 1:
                     continue
-                # print(time.perf_counter() - start_time, timeout)
                 if (
                     self.trade_timeout
                     and time.perf_counter() - start_time > self.trade_timeout
                 ):
                     break
 
-                their_side_item_ids = {
-                    their_inventory[key]["item_id"] for key in their_side
-                }
-
                 # Ensure no overlapping item IDs
                 if self_side_item_ids.isdisjoint(their_side_item_ids):
-                    (
-                        self_value,
-                        self_rap,
-                        self_rap_algo,
-                        self_demand,
-                        self_overall_value,
-                        self_volume,
-                    ) = get_total_values(self_side, self_inventory)
                     (
                         their_value,
                         their_rap,
@@ -384,7 +452,7 @@ class TradeMaker:
                         their_demand,
                         their_overall_value,
                         their_volume,
-                    ) = get_total_values(their_side, their_inventory)
+                    ) = their_totals
 
                     # fast continue
                     # max_possible_gain = max((x for x in pre_checks if x is not None), default=-999999999)

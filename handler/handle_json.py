@@ -14,6 +14,10 @@ from handler.exceptions_types import DataFileError
 
 
 class JsonHandler:
+    # filename -> ((mtime_ns, size), data): shared read-only snapshots
+    _snapshots: dict = {}
+    _snapshots_lock = threading.Lock()
+
     def __init__(self, filename):
         self.filename = filename
         # RLock so read_data can call write_data while holding it
@@ -34,6 +38,26 @@ class JsonHandler:
         if self.filename == "cookies.json":
             return {"roblox_accounts": []}
         return {}
+
+    def read_cached(self) -> dict:
+        """
+        Read-only snapshot of the file, kept in memory and re-read only when the
+        file changes on disk. Much faster for hot paths (pricing reads the
+        projected data hundreds of times a minute). Never modify what this
+        returns: use read_data() + write_data() to change the file.
+        """
+        try:
+            stat = os.stat(self.filename)
+        except OSError:
+            return self.read_data()
+        version = (stat.st_mtime_ns, stat.st_size)
+        cached = JsonHandler._snapshots.get(self.filename)
+        if cached and cached[0] == version:
+            return cached[1]
+        data = self.read_data()
+        with JsonHandler._snapshots_lock:
+            JsonHandler._snapshots[self.filename] = (version, data)
+        return data
 
     def read_data(self) -> dict:
         """
@@ -75,6 +99,8 @@ class JsonHandler:
 
     def write_data(self, data: dict) -> None:
         """Safely Writes data to the JSON file."""
+        with JsonHandler._snapshots_lock:
+            JsonHandler._snapshots.pop(self.filename, None)
         temp_file = self.filename + ".tmp"  # Temporary file for atomic writing
 
         # Unhide the file if needed (Windows)

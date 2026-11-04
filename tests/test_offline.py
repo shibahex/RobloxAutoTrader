@@ -1026,7 +1026,26 @@ def inbound(router, account):
     account.inbound_trader = checker
     account.config.projected_detection["Detect_Rolimons_Projecteds"] = False
     account.config.inbounds["Dont_Counter_Wins"] = True
-    account.rolimon.projected_json.write_data({})
+    # 1:1 is a RAP item that sells well (volume and gap pass the filters)
+    account.rolimon.projected_json.write_data(
+        {
+            "1:1": {
+                "is_projected": False,
+                "volume": 50,
+                "average_gap": 0.1,
+                "timestamp": 9e18,
+            }
+        }
+    )
+    account.config.filter_items.update(
+        {
+            "NFR": [],
+            "MinDemand": None,
+            "MinDailySales": 1,
+            "MaxSalesGap": 5,
+            "Maximum_Amount_of_Trader_Duplicate_Items": 1,
+        }
+    )
     account.refresh_self_inventory = lambda: None
 
     router.set(INBOUND_LIST, inbound_list(70))
@@ -1210,3 +1229,125 @@ def test_inbound_check_interval_setting(tmp_path):
     assert ConfigHandler(str(cfg)).inbounds["Check_Every_Minutes"] == 10
     cfg.write_text("[Inbound Settings]\n")
     assert ConfigHandler(str(cfg)).inbounds["Check_Every_Minutes"] == 30
+
+
+# --- inbound accepts obey the same item filters as our own trades --------------------
+
+
+@pytest.mark.parametrize(
+    "change, reason",
+    [
+        (lambda acc: acc.config.filter_items.update(NFR=["1:1"]), "NFR"),
+        (
+            lambda acc: acc.rolimon.item_data["1:1"].update(asset_type="asset:18"),
+            "face",
+        ),
+        (
+            lambda acc: acc.rolimon.item_data["1:1"].update(asset_type="asset:19"),
+            "gear",
+        ),
+        (lambda acc: acc.config.filter_items.update(MinDemand=4), "demand"),
+        (lambda acc: acc.config.filter_items.update(MinDailySales=100), "sells"),
+        (lambda acc: acc.config.filter_items.update(MaxSalesGap=0.01), "gap"),
+        (lambda acc: acc.rolimon.projected_json.write_data({}), "no sales data"),
+    ],
+)
+def test_inbound_item_filters_block_accepting(router, inbound, change, reason):
+    change(inbound)
+    trade = inbound.format_trade_api(inbound_trade_json(["1:2"], ["1:1"]))
+    assert reason in (inbound._inbound_reject_reason(trade) or "")
+
+
+def test_inbound_item_filters_pass_a_good_item(router, inbound):
+    trade = inbound.format_trade_api(inbound_trade_json(["1:2"], ["1:1"]))
+    assert inbound._inbound_item_filter_reason(trade["their_side_item_ids"]) is None
+
+
+def test_inbound_too_many_copies_from_one_trader(router, inbound):
+    assert "copies" in inbound._inbound_item_filter_reason(["1:1", "1:1", "1:1"])
+    assert inbound._inbound_item_filter_reason(["1:1", "1:1"]) is None
+
+
+def test_valued_items_skip_sales_volume_checks(router, inbound):
+    inbound.rolimon.item_data["1:2"]["value"] = 600
+    inbound.rolimon.projected_json.write_data({})
+    assert inbound._inbound_item_filter_reason(["1:2"]) is None
+
+
+# --- config + speed fixes -------------------------------------------------------------
+
+
+@pytest.mark.parametrize("typed", ["10m", "0", "-5", ""])
+def test_bad_inbound_interval_falls_back_to_30(tmp_path, typed):
+    from handler.handle_config import ConfigHandler
+
+    cfg = tmp_path / "c.cfg"
+    cfg.write_text(f"[Inbound Settings]\nCheck Inbounds Every Minutes = {typed}\n")
+    assert ConfigHandler(str(cfg)).inbounds["Check_Every_Minutes"] == 30
+
+
+def test_unknown_select_option_falls_back(router):
+    from trade_algorithm import SELECT_TRADE_OPTIONS, TradeMaker
+
+    assert "closest_score" not in SELECT_TRADE_OPTIONS
+    maker = object.__new__(TradeMaker)
+    trades = [
+        {"self_rap": 1, "their_rap": 5, "demand": 1},
+        {"self_rap": 1, "their_rap": 3, "demand": 1},
+    ]
+    maker.select_by = "closest_score"
+    # generate_trade's picker falls back to the default instead of crashing
+    picked = maker.select_trade(trades, select_by="lowest_rap_gain")
+    assert picked in trades
+
+
+def test_editor_only_offers_supported_pick_options():
+    import inspect
+
+    from handler import account_settings
+
+    assert "SELECT_TRADE_OPTIONS" in inspect.getsource(account_settings)
+
+
+def test_read_cached_reuses_until_the_file_changes(tmp_path, monkeypatch):
+    from handler.handle_json import JsonHandler
+
+    monkeypatch.chdir(tmp_path)
+    jh = JsonHandler("p.json")
+    jh.write_data({"a": 1})
+    first = jh.read_cached()
+    assert jh.read_cached() is first  # no re-read
+    jh.write_data({"a": 2})
+    assert jh.read_cached() == {"a": 2}  # a write is seen immediately
+    other = JsonHandler("p.json")  # another handler for the same file
+    other.write_data({"a": 3})
+    assert jh.read_cached() == {"a": 3}
+
+
+def test_valued_item_algo_setting_survives_scan_data(router):
+    from rolimons_api import RolimonAPI
+
+    rol = RolimonAPI()
+    rol.item_data["1:2"].update(value=600, total_value=600)
+    rol.projected_json.write_data(
+        {
+            "1:2": {
+                "is_projected": False,
+                "value": 999,
+                "volume": 50,
+                "average_gap": 0.1,
+                "timestamp": __import__("time").time(),
+                "last_price": rol.item_data["1:2"]["best_price"],
+            }
+        }
+    )
+    for mode, expected in [
+        ("rolimon_value", 600),
+        ("zero_value", 0),
+        ("rap_algo", 999),
+    ]:
+        rol.config.trading["Rap_Algo_For_Valued"] = mode
+        out = rol.add_data_to_inventory(
+            {"u": {"item_id": "1:2", "collectibleItemId": "c"}}, is_self=True
+        )
+        assert out["u"]["rap_algorithm"] == expected, mode

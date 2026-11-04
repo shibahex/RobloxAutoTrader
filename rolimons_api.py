@@ -249,7 +249,7 @@ class RolimonAPI:
                 difference = abs(current_price - last_price)
                 return difference / last_price >= threshold
 
-            projected_data = self.projected_json.read_data()
+            projected_data = self.projected_json.read_cached()
             projected_ids = projected_data.keys()
 
             if str(asset_id) in projected_ids:
@@ -307,19 +307,7 @@ class RolimonAPI:
                 except TradebotError as e:
                     log(f"Projected check failed for {asset_id}: {e}", severityNum=2)
 
-            if value != 0:
-                if rap_algo_for_valued.lower() == "rolimon_value":
-                    rap_algo_value = value
-                elif rap_algo_for_valued.lower() == "zero_value":
-                    rap_algo_value = 0
-                elif rap_algo_for_valued.lower() == "rap_algo":
-                    rap_algo_value = rap_algo_value
-                else:
-                    log(
-                        "RAP Algorithm for Valued Items, isn't set right; using default of rap_algo"
-                    )
-
-            projected_data = self.projected_json.read_data()
+            projected_data = self.projected_json.read_cached()
 
             projected_entry = projected_data.get(asset_id)
             if projected_entry is not None:
@@ -333,6 +321,19 @@ class RolimonAPI:
                         f"Projected data for {asset_id} is incomplete ({e}), skipping item"
                     )
                     continue
+
+            # Applied after the scan data so the setting isn't overwritten by
+            # the scanned algorithm value
+            if value != 0:
+                mode = (rap_algo_for_valued or "rap_algo").lower()
+                if mode == "rolimon_value":
+                    rap_algo_value = value
+                elif mode == "zero_value":
+                    rap_algo_value = 0
+                elif mode != "rap_algo":
+                    log(
+                        "RAP Algorithm for Valued Items, isn't set right; using default of rap_algo"
+                    )
 
             if not is_self:
                 if (

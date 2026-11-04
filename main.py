@@ -651,7 +651,7 @@ class Doggo:
         embed_fields, total_profit = self.discord_webhook.embed_fields_from_trade(
             generated_trade,
             self.rolimons.item_data,
-            self.rolimons.projected_json.read_data(),
+            self.rolimons.projected_json.read_cached(),
         )
         embed = self.discord_webhook.setup_embed(
             title=f"Sent a trade with {total_profit} total profit",

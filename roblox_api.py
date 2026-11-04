@@ -601,6 +601,64 @@ class RobloxAPI:
                 return item_id
         return None
 
+    def _inbound_item_filter_reason(self, item_ids):
+        """
+        The same item filters our own trades use (fetch_inventory and
+        add_data_to_inventory), applied to what we'd receive: NFR list, faces and
+        gears, minimum demand, sales volume and gaps for RAP items, and how many
+        copies of one item we'd take from them.
+        """
+        filters = self.config.filter_items
+        trading = self.config.trading
+        nfr = filters.get("NFR") or []
+        min_demand = filters.get("MinDemand")
+        min_sales = filters.get("MinDailySales")
+        max_gap = filters.get("MaxSalesGap")
+        max_copies = filters.get("Maximum_Amount_of_Trader_Duplicate_Items")
+        projected_data = self.rolimon.projected_json.read_cached()
+
+        for item_id in set(map(str, item_ids)):
+            item = self.rolimon.item_data.get(item_id) or {}
+            if item_id in nfr:
+                return f"{item_id} is on the NFR list"
+            if item.get("asset_type") == "asset:18" and not trading.get(
+                "TradeForFaces"
+            ):
+                return f"{item_id} is a face (Trade For Faces is off)"
+            if item.get("asset_type") == "asset:19" and not trading.get(
+                "TradeForGears"
+            ):
+                return f"{item_id} is a gear (Trade For Gears is off)"
+            demand = item.get("demand")
+            if (
+                isinstance(min_demand, int)
+                and demand is not None
+                and int(demand) < min_demand
+            ):
+                return f"{item_id} demand {demand} is below {min_demand}"
+
+            if not item.get("value"):  # RAP items need proof they actually sell
+                scan = projected_data.get(item_id) or {}
+                volume, gap = scan.get("volume"), scan.get("average_gap")
+                if volume is None:
+                    return f"{item_id} has no sales data yet"
+                if isinstance(min_sales, (int, float)) and float(volume) < min_sales:
+                    return f"{item_id} sells {volume}/day, below {min_sales}"
+                if (
+                    isinstance(max_gap, (int, float))
+                    and gap is not None
+                    and float(gap) > max_gap
+                ):
+                    return f"{item_id} sales gap {gap} is above {max_gap}"
+
+        if isinstance(max_copies, int):
+            ids = [str(i) for i in item_ids]
+            for item_id in set(ids):
+                # same rule as fetch_inventory: the first copy plus max_copies more
+                if ids.count(item_id) > max_copies + 1:
+                    return f"too many copies of {item_id} from one trader"
+        return None
+
     def _inbound_reject_reason(self, trade):
         """Why an inbound shouldn't be accepted, or None if it passes the config."""
         if trade.get("self_robux"):
@@ -613,6 +671,10 @@ class RobloxAPI:
         duplicate = self._too_many_duplicates(trade["their_side_item_ids"])
         if duplicate is not None:
             return f"too many duplicates of {duplicate}"
+
+        filtered = self._inbound_item_filter_reason(trade["their_side_item_ids"])
+        if filtered:
+            return filtered
 
         valid, reason = self.inbound_trader.validate_trade(
             self_rap=trade["self_rap"],
@@ -646,7 +708,9 @@ class RobloxAPI:
                 validation_headers = self.validate_2fa(e.response)
                 time.sleep(10)
             except BadRequest as e:
-                log(f"[INBOUND] Roblox refused to accept {trade_id}: {e}", severityNum=2)
+                log(
+                    f"[INBOUND] Roblox refused to accept {trade_id}: {e}", severityNum=2
+                )
                 return False
             finally:
                 time.sleep(1)
@@ -973,7 +1037,7 @@ class RobloxAPI:
         embed_fields, total_profit = self.discord_webhook.embed_fields_from_trade(
             formatted_trade,
             self.rolimon.item_data,
-            self.rolimon.projected_json.read_data(),
+            self.rolimon.projected_json.read_cached(),
         )
         embed = self.discord_webhook.setup_embed(
             title=f"Trade Completed ({total_profit} profit)",
@@ -1000,7 +1064,7 @@ class RobloxAPI:
         account_value = 0
         account_algorithm_value = 0
         account_overall_value = 0
-        projected_data = self.rolimon.projected_json.read_data()
+        projected_data = self.rolimon.projected_json.read_cached()
 
         for item in item_ids:
             item_data = self.rolimon.item_data.get(str(item))
@@ -1108,7 +1172,7 @@ class RobloxAPI:
         Re-scans price history for items whose projected/algorithm data is
         older than OUTBOUND_RESCAN_AGE_SECONDS. Returns True if any were rescanned.
         """
-        projected_data = self.rolimon.projected_json.read_data()
+        projected_data = self.rolimon.projected_json.read_cached()
         rescanned = False
         for item_id in set(map(str, item_ids)):
             entry = projected_data.get(item_id) or {}
@@ -1128,7 +1192,7 @@ class RobloxAPI:
         use_rolimons_flag = self.config.projected_detection[
             "Detect_Rolimons_Projecteds"
         ]
-        projected_data = self.rolimon.projected_json.read_data()
+        projected_data = self.rolimon.projected_json.read_cached()
         projected = []
         for item_id in map(str, item_ids):
             rolimons_flag = (self.rolimon.item_data.get(item_id) or {}).get("projected")
