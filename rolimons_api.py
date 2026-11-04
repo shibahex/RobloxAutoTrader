@@ -336,15 +336,21 @@ class RolimonAPI:
                     )
 
             if not is_self:
+                # Sales checks only apply to RAP items (value 0); None = no limit
+                too_few_sales = (
+                    isinstance(minimum_daily_sales, (int, float))
+                    and float(item_volume or 0) < minimum_daily_sales
+                )
+                too_slow = (
+                    isinstance(max_sales_gap, (int, float))
+                    and sale_gap is not None
+                    and float(sale_gap) > max_sales_gap
+                )
                 if (
                     is_projected
                     or item_volume is None
-                    or minimum_daily_sales is None
                     or value == 0
-                    and float(item_volume) < minimum_daily_sales
-                    or value == 0
-                    and sale_gap is not None
-                    and float(sale_gap) > max_sales_gap
+                    and (too_few_sales or too_slow)
                 ):
                     continue
 

@@ -65,38 +65,64 @@ if that didn't work you can manually input the 2fa authorzation secret and cooki
 
 
 # Config Guide
-In this repo ive given basic configs, but if you want to make your own heres the important notes:
+The bot reads `config.cfg`. Every setting has a note above it explaining what it does.
+
+### Picking a config
+`configs/` has ready-made presets. To use one: **Config Manager > Change Config**, then pick a preset. It's copied over your `config.cfg`.
+
+| Preset | Trades for |
+|---|---|
+| `rap_config.cfg` | RAP items only |
+| `rap_algorithm.cfg` | RAP items, judged by the RAP Algorithm. Don't use with valued items |
+| `small_value.cfg` | Inventories worth about 10–30k, with valued and RAP items |
+| `big_value.cfg` | Inventories with lots of valued items (50k+ Value) |
+| `rap_to_value.cfg` | Trading RAP items into valued items |
+| `value_to_rap.cfg` | Trading valued items for RAP wins |
+
+To give one account different trading settings from the rest, use **Config Manager > Add Account Configs**. Account configs only replace the `[Trading Settings]` section.
+
+### The 4 numbers
+| | What it is |
+|---|---|
+| **RAP** | Roblox's recent average price |
+| **Value** | The Rolimons value. Items without one count as **0** |
+| **Overall Value** | The Rolimons value if the item has one, otherwise its RAP |
+| **RAP Algorithm** | The bot's estimate of what an item really sells for, from its sales history |
+
+**Gain** = what you receive minus what you give. A trade is only sent if it passes **every** gain setting, and each one is checked on its own. A trade of RAP items can be +3000 RAP and still be 0 Value gain, so `Minimum Value Gain = 1` means only trades with valued items get sent.
+
+A gain between -1 and 1 is a percentage of your side: `0.1` = 10%.
+
+### Rules that trip people up
+- `None` turns a setting off, but only where the note says so. Settings marked **whole number** must be a whole number, or the bot won't start.
+- The stricter the config, the fewer trades get sent. Start loose, then tighten.
+- `Accept Valid Trades` accepts inbound trades automatically, which can't be undone. Leave it off until your minimum gains are set the way you want.
+- Changing your config can cancel outbound trades that don't pass the new settings. `Only Cancel Losing Trades After Config Change = True` stops that.
+
+### No trades getting sent?
+If the bot prints `Couldnt find valid_trades heres invalid trades reasons:`, it checked every trade with that person and none passed. The numbers show which setting blocked them most:
+
+| Reason | Setting to loosen |
+|---|---|
+| `rap_gain` | Minimum / Maximum RAP Gain |
+| `value_gain` | Minimum / Maximum Value Gain |
+| `overall_gain` | Minimum / Maximum Overall Value Gain |
+| `algo_gain` | Minimum / Maximum Rap Algorithm Gain |
+| `overall_close_percentage` | Min / Max Overall Value Score Percentage |
+| `rap_close_percentage` | Min / Max RAP Score Percentage |
+| `min_value_of_trade` | Minimum Value Sum Of Trade |
+| `min_rap_of_trade` | Minimum Rap Sum Of Trade |
+
+If one reason is far ahead of the rest on every user, that setting is too strict for your inventory. If the counts are all low, most of your items are probably on trade hold.
+
+### Testing a config
+Set these in `[debug]`, run the bot, and watch what it would send:
 ```
-Minimum RAP Gain = 150
-Maximum RAP Gain = None
-
-#NOTE: The way its calculate: Shaggy overall value would be its RAP (instead of being 0 because it has no value like in value gain)
-# and Dominus Emp: Overall Value = its value (Because its valued)
-Minimum Overall Value Gain = 0
-Maximum Overall Value Gain = 300
-
-Minimum Value Gain = 0
-Maximum Value Gain = None
+Dont Send Trades = True
+Dont Check Outbounds = True
 ```
-> [!WARNING] 
-> a trade is only sent if it meets ALL THREE gain requirements simultaneously. 
-> 
-> THESE values are all INDEPENDANT when calculating the total profit. Meaning you can profit 0 value and 3000 RAP because there is no value items in the trade.
->
-> An example of this would be that if min value gain was 1, it could ONLY send trades with VALUED items.
+`Dont Check Outbounds` matters: without it, your real outbound trades get checked against the test config and can be cancelled.
 
-
-Set most these values to None, because if your config is strict or not possible it wont send trades.
-
-`RAP Algorithm for Valued Items = ""` 
-
-This setting is for how the RAP algorithm is applied to different items, should it apply to RAP items only? or Valued Items, if you dont understand this setting the RAP algorithm could be unpredictable.
-
-When the bot prints `Couldnt find valid_trades heres invalid trades reasons:` it means its went through all the trades and couldn't generate one based on the values above, and it will have a count. 
-
-For example if its invalid reason value_gain: 900 it means your value gain was impossible to satisfy,
-
-if one value keeps coming up and you get no trades that means either most of your items are trade-locked or that value is impossible to be met in that case, and you NEED to change your config.
 # Credits
 Source code for RAP algorithm taken from https://github.com/pydlv/otb-legacy
 

@@ -30,6 +30,19 @@ def _positive_number(value, default):
     return default
 
 
+def _item_ids(values):
+    """NFT/NFR entries as Rolimons IDs: "1029025" becomes "1:1029025" (bundles
+    need the "2:" prefix written out)."""
+    ids = []
+    for value in values or []:
+        value = str(value).strip()
+        if value.isdigit():
+            value = f"1:{value}"
+        if value:
+            ids.append(value)
+    return ids
+
+
 class ConfigHandler:
     def __init__(self, filename="config.cfg"):
         self.config = configparser.ConfigParser()
@@ -183,8 +196,8 @@ class ConfigHandler:
 
     def load_filter_items(self):
         return {
-            "NFT": self.get_list("Filtering Items", "NFT"),
-            "NFR": self.get_list("Filtering Items", "NFR"),
+            "NFT": _item_ids(self.get_list("Filtering Items", "NFT")),
+            "NFR": _item_ids(self.get_list("Filtering Items", "NFR")),
             "Maximum_Amount_of_Duplicate_Items": self.get_int(
                 "Filtering Items", "Maximum Amount of Duplicate Items"
             ),

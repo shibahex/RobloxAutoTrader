@@ -5,6 +5,7 @@ the `router` fixture's fake responses.
 
 import threading
 import os
+import re
 import types
 
 import pytest
@@ -1380,3 +1381,92 @@ def test_no_accounts_opens_account_manager(doggo, monkeypatch, saved, expected):
     doggo.start_trader()
     assert opened == [1]
     assert expected in shown[0]
+
+
+# --- preset configs ------------------------------------------------------------------
+
+PRESETS = sorted(
+    p
+    for p in os.listdir(os.path.join(os.path.dirname(__file__), "..", "configs"))
+    if p.endswith(".cfg")
+)
+
+
+def preset_path(name):
+    return os.path.join(os.path.dirname(__file__), "..", "configs", name)
+
+
+@pytest.mark.parametrize("name", PRESETS)
+def test_preset_loads_without_unreadable_values(name):
+    from handler.handle_config import ConfigHandler
+
+    config = ConfigHandler(preset_path(name))  # validate_config runs here
+    for section in [
+        "scan_items",
+        "filter_users",
+        "filter_items",
+        "filter_generated",
+        "trading",
+        "debug",
+        "inbounds",
+        "outbound",
+        "projected_detection",
+    ]:
+        for key, value in getattr(config, section).items():
+            assert value != "Not Set", f"{name}: {section}.{key} can't be read"
+
+
+@pytest.mark.parametrize("name", PRESETS)
+def test_every_preset_setting_is_read_by_the_bot(name):
+    """A setting in the wrong section (or one the code never reads) does nothing."""
+    import configparser
+    import inspect
+
+    from handler import handle_config
+
+    source = inspect.getsource(handle_config)
+    used = set(re.findall(r'"([^"]+)",\s*"([^"]+)"', source))
+    raw = configparser.ConfigParser(interpolation=None)
+    raw.optionxform = str
+    raw.read(preset_path(name))
+    for section in raw.sections():
+        if section in ("Info", "Community Values"):
+            continue
+        for key in raw[section]:
+            assert (section, key) in used or (section.lower(), key) in used, (
+                f"{name}: [{section}] {key} isn't read by the bot"
+            )
+
+
+def test_nft_and_nfr_accept_plain_item_ids(tmp_path):
+    from handler.handle_config import ConfigHandler
+
+    cfg = tmp_path / "c.cfg"
+    cfg.write_text("[Filtering Items]\nNFT = 1029025, 2:939596\nNFR = None\n")
+    config = ConfigHandler(str(cfg))
+    assert config.filter_items["NFT"] == ["1:1029025", "2:939596"]
+    assert config.filter_items["NFR"] == []
+
+
+@pytest.mark.parametrize(
+    "sales, gap, kept", [(None, None, True), (100, None, False), (None, 0.01, False)]
+)
+def test_sales_limits_none_means_no_limit(router, sales, gap, kept):
+    from rolimons_api import RolimonAPI
+
+    rol = RolimonAPI()
+    rol.config.filter_items.update(MinDailySales=sales, MaxSalesGap=gap)
+    rol.projected_json.write_data(
+        {
+            "1:1": {
+                "is_projected": False,
+                "value": 1000,
+                "volume": 2,
+                "average_gap": 1,
+                "timestamp": __import__("time").time(),
+                "last_price": rol.item_data["1:1"]["best_price"],
+            }
+        }
+    )
+    out = rol.add_data_to_inventory({"u": {"item_id": "1:1", "collectibleItemId": "c"}})
+    assert bool(out) is kept
