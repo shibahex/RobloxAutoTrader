@@ -23,3 +23,6 @@ threading
 time
 traceback
 webhooks
+
+# Roblox cookie for live tests
+tests/.roblox_cookie
