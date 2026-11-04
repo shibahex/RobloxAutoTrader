@@ -1,9 +1,11 @@
 import requests
 from datetime import datetime, timedelta
 import time
+import threading
 import pyotp
 import json
 import base64
+import hashlib
 import rolimons_api
 from handler.handle_requests import RequestsHandler
 from handler.handle_discord import DiscordHandler
@@ -37,6 +39,8 @@ from handler.price_algorithm import SalesVolumeAnalyzer
 SECONDS_IN_DAY = 86400
 SELF_INVENTORY_ATTEMPTS = 3
 SEND_TRADE_ATTEMPTS = 3
+# Outbound checker re-scans an item's price history if it's older than this
+OUTBOUND_RESCAN_AGE_SECONDS = 6 * 60 * 60
 
 # Roblox trade error codes
 TRADE_CODE_ITEMS_UNAVAILABLE = 12
@@ -51,6 +55,16 @@ def read_json(response):
         raise InvalidResponse(f"Response wasn't JSON: {e}", response.url) from e
 
 
+def parse_created(created) -> float | None:
+    """Roblox ISO time ("2026-11-01T12:00:00.123Z") to a unix timestamp, or None."""
+    if not created:
+        return None
+    try:
+        return datetime.fromisoformat(str(created).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
 class RobloxAPI:
     """
     Pass in Cookie if you want it to be an account
@@ -58,6 +72,12 @@ class RobloxAPI:
 
     def __init__(self, cookie: dict = None, auth_secret=None, Proxies=False):
         self.all_cached_traders = set()
+        # trade_id -> trade JSON of our open outbounds, so they can be re-priced
+        # on every Rolimons update without calling Roblox again
+        self.outbound_cache = {}
+        self.outbound_lock = threading.Lock()
+        # When this account's trading config last changed (see _config_changed_at)
+        self.config_changed_at = None
         self.auth_secret = auth_secret
         self.counter_timer = time.time()
 
@@ -105,8 +125,15 @@ class RobloxAPI:
 
             # log("getting self")
             self.self_duplicates = {}
-            self.refresh_self_inventory()
-            # log("done getting self")
+            self.account_inventory = None
+            try:
+                self.refresh_self_inventory()
+            except InventoryUnavailable as e:
+                # Not fatal: the trading loop refreshes it again every round
+                log(
+                    f"Couldn't load {self.username}'s inventory yet, will retry: {e.cause}",
+                    severityNum=2,
+                )
 
             self.account_robux = 0
             self.get_robux()
@@ -151,7 +178,8 @@ class RobloxAPI:
                     f"Couldn't get {self.username}'s inventory (attempt {attempt}/{SELF_INVENTORY_ATTEMPTS}): {e.cause}",
                     severityNum=2,
                 )
-                time.sleep(10 * attempt)
+                if attempt < SELF_INVENTORY_ATTEMPTS:
+                    time.sleep(10 * attempt)
                 continue
 
             # NOTE: False = no tradeable inventory
@@ -176,10 +204,10 @@ class RobloxAPI:
         except (Forbidden, exceptions_types.AuthError) as e:
             raise CookieInvalid(e.response, f"Couldn't log in with cookie: {e}") from e
 
+        data = read_json(auth_response)
         try:
-            data = auth_response.json()
             return data["id"], data["name"]
-        except (ValueError, KeyError) as e:
+        except (KeyError, TypeError) as e:
             raise InvalidResponse(
                 f"No id/name in authenticated user response: {e}", url
             ) from e
@@ -203,20 +231,30 @@ class RobloxAPI:
         trader_duplicates = {}
 
         is_self = False
+
+        # Without Rolimons data every item would be skipped and the inventory
+        # would look empty, which benches the account. Fail loudly instead.
+        if not self.rolimon.item_data:
+            try:
+                self.rolimon.update_data()
+            except exceptions_types.RolimonsError as e:
+                raise InventoryUnavailable(userid, e) from e
+
         while cursor is not None:
             # NOTE: 100 sometimes has internal server error.
             inventory_API = f"https://trades.roblox.com/v2/users/{userid}/tradableItems?sortBy=CreationTime&sortOrder=2&limit=50&cursor={cursor}"
 
             try:
-                response = self.request_handler.requestAPI(inventory_API)
-                page = response.json()
+                page = read_json(self.request_handler.requestAPI(inventory_API))
                 cursor = page.get("nextPageCursor")
                 items = page["items"]
-            except RobloxAPIError as e:
+            except (
+                RobloxAPIError,
+                exceptions_types.NetworkError,
+                InvalidResponse,
+            ) as e:
                 raise InventoryUnavailable(userid, e) from e
-            except exceptions_types.NetworkError as e:
-                raise InventoryUnavailable(userid, e) from e
-            except (ValueError, KeyError, AttributeError) as e:
+            except (KeyError, AttributeError) as e:
                 raise InventoryUnavailable(
                     userid, InvalidResponse(f"Bad inventory page: {e}", inventory_API)
                 ) from e
@@ -436,12 +474,11 @@ class RobloxAPI:
 
             # Assuming the URL already has page limit = 100
             url = f"{page_url}&cursor={cursor}"
-            response = self.request_handler.requestAPI(url)
+            page = read_json(self.request_handler.requestAPI(url))
             try:
-                page = response.json()
                 data = page.get("data") or []
                 cursor = page.get("nextPageCursor")
-            except (ValueError, AttributeError) as e:
+            except AttributeError as e:
                 raise InvalidResponse(f"Bad trades page: {e}", url) from e
 
             trades.update(self.return_trade_details(data))
@@ -565,17 +602,19 @@ class RobloxAPI:
                 )
             except ChallengeRequired as e:
                 last_error = e
+                if attempt == SEND_TRADE_ATTEMPTS:
+                    raise
                 log(f"Trade needs 2FA, solving (attempt {attempt})", dontPrint=True)
                 validation_headers = self.validate_2fa(e.response)
                 time.sleep(10)
                 continue
             except BadRequest as e:
                 rejection = self._classify_trade_rejection(e)
-                if isinstance(rejection, InsufficientRobux) and robux > 0:
-                    # Robux changed since we last checked; refresh and retry
-                    last_error = rejection
+                if isinstance(rejection, InsufficientRobux):
+                    # Refresh so the next generated trade uses the real balance.
+                    # Don't resend this one with less robux: it would no longer
+                    # match the trade that was generated and logged.
                     self.get_robux()
-                    continue
                 if isinstance(rejection, ItemsUnavailable):
                     try:
                         self.check_completeds()
@@ -587,8 +626,8 @@ class RobloxAPI:
                 time.sleep(1)
 
             try:
-                trade_id = trade_response.json()["tradeId"]
-            except (ValueError, KeyError) as e:
+                trade_id = read_json(trade_response)["tradeId"]
+            except (KeyError, TypeError) as e:
                 raise InvalidResponse(
                     f"Trade sent but no tradeId: {e}", trade_api
                 ) from e
@@ -858,25 +897,55 @@ class RobloxAPI:
             "https://trades.roblox.com/v1/trades/outbound?limit=100&sortOrder=Asc"
         )
 
-        def return_items(user_assets):
-            asset_ids = []
-            for asset in user_assets:
-                asset_ids.append(asset["assetId"])
-            return asset_ids
+        self.config_changed_at = self._config_changed_at()
 
-        # Loop through outbounds
-        for trade_id, trade_info in trades.items():
-            trader_id = trade_info["user_id"]
-            if trader_id not in self.all_cached_traders:
-                self.all_cached_traders.add(trader_id)
+        with self.outbound_lock:
+            # Forget trades that were accepted, declined or expired
+            for gone in set(self.outbound_cache) - set(trades):
+                self.outbound_cache.pop(gone, None)
 
-            try:
-                self._check_one_outbound(trade_info["trade_id"])
-            except CookieInvalid:
-                raise
-            except TradebotError as e:
-                log(f"Skipping outbound {trade_id}: {e}", severityNum=2)
-                time.sleep(2)
+            for trade_id, trade_info in trades.items():
+                trader_id = trade_info["user_id"]
+                if trader_id not in self.all_cached_traders:
+                    self.all_cached_traders.add(trader_id)
+
+                try:
+                    self._check_one_outbound(
+                        trade_info["trade_id"], parse_created(trade_info.get("created"))
+                    )
+                except CookieInvalid:
+                    raise
+                except TradebotError as e:
+                    log(f"Skipping outbound {trade_id}: {e}", severityNum=2)
+                    time.sleep(2)
+
+    def recheck_cached_outbounds(self) -> int:
+        """
+        Re-prices the outbounds saved by the last full check using the current
+        Rolimons data. Makes no Roblox calls except to decline a losing trade,
+        so it's safe to run on every Rolimons update. Returns how many were declined.
+        Skips if a full check is running right now.
+        """
+        if not self.outbound_lock.acquire(blocking=False):
+            return 0
+        try:
+            declined = 0
+            for trade_id, cached in list(self.outbound_cache.items()):
+                try:
+                    if self._evaluate_outbound(
+                        trade_id,
+                        cached["json"],
+                        allow_rescan=False,
+                        created=cached["created"],
+                    ):
+                        declined += 1
+                except CookieInvalid:
+                    raise
+                except TradebotError as e:
+                    log(f"Couldn't re-price outbound {trade_id}: {e}", dontPrint=True)
+            return declined
+        finally:
+            self.outbound_lock.release()
 
     def _decline_trade(self, trade_id) -> bool:
         """Declines a trade. A 400 means it's already gone, which counts as done."""
@@ -892,11 +961,131 @@ class RobloxAPI:
         finally:
             time.sleep(1.5)
 
-    def _check_one_outbound(self, trade_id):
+    def _rescan_stale_items(self, item_ids) -> bool:
+        """
+        Re-scans price history for items whose projected/algorithm data is
+        older than OUTBOUND_RESCAN_AGE_SECONDS. Returns True if any were rescanned.
+        """
+        projected_data = self.rolimon.projected_json.read_data()
+        rescanned = False
+        for item_id in set(map(str, item_ids)):
+            entry = projected_data.get(item_id) or {}
+            collectible_id = entry.get("collectible_item_id")
+            scanned_at = entry.get("timestamp") or 0
+            if not collectible_id:
+                continue  # scanned before IDs were saved; next inventory scan adds it
+            if time.time() - scanned_at < OUTBOUND_RESCAN_AGE_SECONDS:
+                continue
+            log(f"[OUTBOUND] Re-scanning {item_id}, data is stale", dontPrint=True)
+            self.is_projected_api(collectibleId=collectible_id, item_id=item_id)
+            rescanned = True
+        return rescanned
+
+    def _projected_items(self, item_ids) -> list:
+        """Items that are projected now, by Rolimons' flag (if enabled) or our own scan."""
+        use_rolimons_flag = self.config.projected_detection[
+            "Detect_Rolimons_Projecteds"
+        ]
+        projected_data = self.rolimon.projected_json.read_data()
+        projected = []
+        for item_id in map(str, item_ids):
+            rolimons_flag = (self.rolimon.item_data.get(item_id) or {}).get("projected")
+            scanned_flag = (projected_data.get(item_id) or {}).get("is_projected")
+            if scanned_flag or (use_rolimons_flag and rolimons_flag):
+                projected.append(item_id)
+        return projected
+
+    def _config_fingerprint(self) -> str:
+        """Hash of every setting the outbound checker or trade generator uses."""
+        settings = {
+            "trading": self.config.trading,
+            "filter_items": self.config.filter_items,
+            "projected_detection": self.config.projected_detection,
+        }
+        raw = json.dumps(settings, sort_keys=True, default=str)
+        return hashlib.sha256(raw.encode()).hexdigest()
+
+    def _config_changed_at(self) -> float:
+        """
+        Returns when this account's config last changed, as a unix timestamp.
+        Saved in outbound_config_state.json so it survives restarts.
+        The first time an account is seen counts as a change, so outbounds that
+        already exist are treated as sent under an older config.
+        """
+        state_file = JsonHandler("outbound_config_state.json")
+        state = state_file.read_data()
+        key = str(self.account_id)
+        fingerprint = self._config_fingerprint()
+        entry = state.get(key) or {}
+        if entry.get("fingerprint") != fingerprint:
+            entry = {"fingerprint": fingerprint, "changed_at": time.time()}
+            state[key] = entry
+            state_file.write_data(state)
+            log(f"[OUTBOUND] Config changed for {self.username}", dontPrint=True)
+        return entry["changed_at"]
+
+    def _sent_before_config_change(self, created) -> bool:
+        """True if the option is on and this trade predates the current config."""
+        if not self.config.outbound["Only_Cancel_Losing_After_Config_Change"]:
+            return False
+        if created is None or self.config_changed_at is None:
+            return False
+        return created < self.config_changed_at
+
+    def _check_one_outbound(self, trade_id, created=None):
         trade_info_req = self.request_handler.requestAPI(
             f"https://trades.roblox.com/v2/trades/{trade_id}"
         )
-        formatted_trade = self.format_trade_api(read_json(trade_info_req))
+        trade_json = read_json(trade_info_req)
+        self.outbound_cache[trade_id] = {"json": trade_json, "created": created}
+        self._evaluate_outbound(
+            trade_id, trade_json, allow_rescan=True, created=created
+        )
+
+    def _cancel_outbound(self, trade_id) -> bool:
+        """Declines and forgets the trade. Returns True if it's gone."""
+        if self._decline_trade(trade_id):
+            self.outbound_cache.pop(trade_id, None)
+            return True
+        return False
+
+    def _evaluate_outbound(
+        self, trade_id, trade_json, allow_rescan, created=None
+    ) -> bool:
+        """
+        Decides if an outbound should be cancelled and cancels it.
+        allow_rescan: re-scan stale price history first (costs Roblox API calls).
+        Returns True if the trade was cancelled.
+        """
+        formatted_trade = self.format_trade_api(trade_json)
+
+        # Make sure what we'd receive is valued on fresh data before judging
+        if allow_rescan and self._rescan_stale_items(
+            formatted_trade["their_side_item_ids"]
+        ):
+            formatted_trade = self.format_trade_api(trade_json)
+
+        # Projected = price is being manipulated and likely to drop
+        projected = self._projected_items(formatted_trade["their_side_item_ids"])
+        if projected:
+            if self._cancel_outbound(trade_id):
+                log(f"[OUTBOUND] Cancel trade: receiving projected {projected}")
+                return True
+            return False
+
+        # Sent under an older config: only a real loss is a reason to cancel
+        if self._sent_before_config_change(created):
+            profit = (
+                formatted_trade["their_overall_value"]
+                - formatted_trade["self_overall_value"]
+                - (formatted_trade["self_robux"] or 0)
+            )
+            if profit < 0:
+                log(
+                    f"[OUTBOUND] Canceling trade from before config change, losing {profit} overall"
+                )
+                return self._cancel_outbound(trade_id)
+            return False
 
         # NOTE: Check for duplicates
         for itemId in formatted_trade["their_side_item_ids"]:
@@ -905,9 +1094,10 @@ class RobloxAPI:
                 and self.self_duplicates[str(itemId)]
                 >= self.config.filter_items["Maximum_Amount_of_Duplicate_Items"]
             ):
-                if self._decline_trade(trade_id):
+                if self._cancel_outbound(trade_id):
                     log(f"[OUTBOUND] Cancel trade: {itemId} [duplicates]")
-                    return
+                    return True
+                return False
 
         valid_trade, reason = self.outbound_trader.validate_trade(
             self_rap=formatted_trade["self_rap"],
@@ -945,8 +1135,10 @@ class RobloxAPI:
                 }, Trader: {formatted_trade['their_overall_value']}"
             )
 
-            if self._decline_trade(trade_id):
+            if self._cancel_outbound(trade_id):
                 log("Cleared losing outbound...")
+                return True
+        return False
 
     def check_can_trade(self, userid):
         """
@@ -956,20 +1148,23 @@ class RobloxAPI:
         if int(userid) not in self.all_cached_traders:
             self.all_cached_traders.add(int(userid))
 
+        url = f"https://www.roblox.com/users/{userid}/trade"
         try:
-            can_trade = self.request_handler.requestAPI(
-                f"https://www.roblox.com/users/{userid}/trade"
-            )
-        except ChallengeRequired as e:
-            log(
-                f"Can-trade check wants 2FA for {userid}", severityNum=5, dontPrint=True
-            )
             try:
-                self.validate_2fa(e.response)
-            except TwoFactorError as tfa_error:
+                can_trade = self.request_handler.requestAPI(url)
+            except ChallengeRequired as e:
                 log(
-                    f"Couldn't solve 2FA on can-trade check: {tfa_error}", severityNum=2
+                    f"Can-trade check wants 2FA for {userid}",
+                    severityNum=5,
+                    dontPrint=True,
                 )
+                # Solve once and resend with the verification headers
+                validation_headers = self.validate_2fa(e.response)
+                can_trade = self.request_handler.requestAPI(
+                    url, additional_headers=validation_headers
+                )
+        except (ChallengeRequired, TwoFactorError) as e:
+            log(f"Couldn't pass 2FA on can-trade check: {e}", severityNum=2)
             return False
         except (Forbidden, NotFound, BadRequest):
             return False
@@ -1110,6 +1305,9 @@ class RobloxAPI:
                     "timestamp": result_timestamp,
                     "last_price": self.rolimon.item_data[item_id]["best_price"],
                     "average_gap": average_gap,
+                    # Trade responses don't include it; the outbound checker
+                    # needs it to re-scan items it's about to receive
+                    "collectible_item_id": collectibleId,
                 }
             }
         )

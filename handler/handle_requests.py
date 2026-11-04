@@ -223,6 +223,12 @@ class RequestsHandler:
                     f"Auth failure debug: {status} {Response.url} {Response.text[:300]}",
                     dontPrint=True,
                 )
+                # 2FA is detected by header, never by message text (Roblox changes
+                # the wording). Checked first so a challenge is never mistaken
+                # for a CSRF failure.
+                if "rblx-challenge-id" in Response.headers:
+                    raise exceptions_types.ChallengeRequired(Response)
+
                 if self._is_csrf_failure(Response) or (
                     status == 403 and "x-csrf-token" in Response.headers
                 ):
@@ -240,9 +246,6 @@ class RequestsHandler:
                             dontPrint=True,
                         )
                     continue
-
-                if "rblx-challenge-id" in Response.headers:
-                    raise exceptions_types.ChallengeRequired(Response)
 
                 if status == 401:
                     if self.cookie:

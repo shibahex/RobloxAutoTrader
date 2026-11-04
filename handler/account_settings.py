@@ -6,17 +6,103 @@ import os
 import time
 
 
-# from handle_confing import ConfigHandler
+NONE_WORDS = {"none", "null"}
+UNSET = (None, "Not Set")
+
+
+def parse_config_value(text: str):
+    """
+    Turns what the user typed into a Python value:
+    "None" -> None, "true"/"false" -> bool, "100" -> 100, "0.5" -> 0.5,
+    anything else stays a string.
+    """
+    cleaned = str(text).strip()
+    lowered = cleaned.lower()
+    if lowered in NONE_WORDS:
+        return None
+    if lowered in ("true", "false"):
+        return lowered == "true"
+    try:
+        return int(cleaned)
+    except ValueError:
+        pass
+    try:
+        return float(cleaned)
+    except ValueError:
+        return cleaned
+
+
+def coerce_config_value(value, expected_type, text=None):
+    """
+    Checks a parsed value against the type the setting needs.
+    Whole-number settings need a whole number; decimal settings take either
+    (gains like 0.1 are percentages). None is allowed for number settings (means "no limit"), not for true/false
+    or text settings. Raises ValueError with a readable reason.
+    """
+    if expected_type is None:
+        return value
+    if expected_type is bool:
+        if isinstance(value, bool):
+            return value
+        raise ValueError("expected true or false")
+    if expected_type in (int, float):
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("expected a number or None")
+        if expected_type is int:
+            if isinstance(value, float) and not value.is_integer():
+                raise ValueError("expected a whole number or None")
+            return int(value)
+        return value
+    if expected_type is str:
+        if value is None:
+            raise ValueError("this setting can't be None")
+        return str(text if text is not None else value)
+    return value
+
+
 class HandleConfigs:
     def __init__(self):
         self.acc_configs = JsonHandler("account_configs.jsonc")
         self.cookies = JsonHandler("cookies.json")
         self.default_config = ConfigHandler().trading
 
+    def expected_type(self, key, current_value=None):
+        """
+        The type a setting should have: from the main config's default if it's
+        set, otherwise from the saved value. None means "anything goes".
+        """
+        default = self.default_config.get(key)
+        for candidate in (default, current_value):
+            if candidate not in UNSET:
+                return type(candidate)
+        return None
+
     def get_config(self, user_id):
-        """Retrieve the configuration for a specific user ID."""
+        """
+        Retrieve the configuration for a specific user ID.
+        Repairs values saved as text by older versions (e.g. "100" -> 100).
+        """
         data = self.acc_configs.read_data()
-        return data.get(user_id, {})
+        config = dict(data.get(user_id, {}))
+        for key, value in config.items():
+            if not isinstance(value, str):
+                continue
+            expected = self.expected_type(key)
+            if expected is str:
+                continue
+            if expected is None:
+                # No known type: still undo "None"/"100"/"true" saved as text
+                config[key] = parse_config_value(value)
+                continue
+            try:
+                config[key] = coerce_config_value(parse_config_value(value), expected)
+            except ValueError:
+                log(
+                    f"Account config {key} = {value!r} isn't a valid {expected.__name__}"
+                )
+        return config
 
     def check_for_updates(self):
         self.acc_configs.update_missing_config(self.default_config)
@@ -234,24 +320,23 @@ class HandleConfigs:
             except ValueError:
                 log("Invalid input. Keeping current value.")
         else:
+            expected = self.expected_type(key, current_value)
+            hint = {
+                bool: "true/false",
+                int: "a whole number, or None for no limit",
+                float: "a number, or None for no limit",
+                str: "text",
+            }.get(expected, "a value, or None")
             new_value = input(
-                f"Enter new value for {key} (current: {current_value}): "
+                f"Enter new value for {key} [{hint}] (current: {current_value}): "
             ).strip()
-            if new_value:
-                try:
-                    data_config[key] = self.convert_value_type(
-                        new_value, type(current_value)
-                    )
-                    log(f"{key} updated to {data_config[key]}.")
-                except ValueError:
-                    log("Invalid input type. Keeping current value.")
-            else:
+            if not new_value:
                 log(f"Keeping current value for {key}: {current_value}")
-
-    def convert_value_type(self, value, expected_type):
-        """Convert input value to the expected type."""
-        if expected_type is int:
-            return int(value)
-        elif expected_type is float:
-            return float(value)
-        return value
+                return
+            try:
+                data_config[key] = coerce_config_value(
+                    parse_config_value(new_value), expected, text=new_value
+                )
+                log(f"{key} updated to {data_config[key]!r}.")
+            except ValueError as e:
+                log(f"Invalid value for {key} ({e}). Keeping current value.")

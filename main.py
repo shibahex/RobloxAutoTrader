@@ -233,24 +233,53 @@ class Doggo:
                 if roblox_account.config.debug["show_scanning_users"]:
                     log(f"fetched inventory for {owner}")
 
+                # The round may have ended while we were fetching; this inventory
+                # was screened for this account, so don't hand it to the next one
+                if stop_event.is_set():
+                    return
                 self.user_queue[owner] = inventory
 
     def merge_lists(self, list1, list2):
         # Use set to merge and remove duplicates
         return list(set(list1) | set(list2))
 
-    def update_data_thread(self):
+    def update_data_thread(self, roblox_accounts=()):
         """
         Updates the table self.rolimons.data whenever rolimons updates.
         If Rolimons is down the old data is kept.
+        After each update, re-prices every account's saved outbounds so a
+        value drop is caught within ~2 minutes instead of the 30 minute check.
         """
         while True:
             try:
                 self.rolimons.update_data()
                 self.last_updated_rolimons = time.time()
+                self.recheck_outbounds(roblox_accounts)
             except exceptions_types.RolimonsError as e:
                 log(f"Rolimons update failed, keeping old data: {e}", severityNum=2)
             time.sleep(120)
+
+    def recheck_outbounds(self, roblox_accounts):
+        """No Roblox calls unless a trade has to be declined."""
+        for account in roblox_accounts:
+            if (
+                self.is_disabled(account)
+                or account.config.debug["dont_check_outbounds"]
+            ):
+                continue
+            try:
+                declined = account.recheck_cached_outbounds()
+                if declined:
+                    log(
+                        f"[OUTBOUND] {account.username}: cancelled {declined} after a price change"
+                    )
+            except exceptions_types.CookieInvalid as e:
+                self.disable_account(account, e)
+            except exceptions_types.TradebotError as e:
+                log(
+                    f"Outbound recheck failed for {account.username}: {e}",
+                    severityNum=2,
+                )
 
     def check_outbound_thread(self, roblox_accounts):
         def check_oubounds():
@@ -330,7 +359,7 @@ class Doggo:
             "Outbound checker", self.check_outbound_thread, roblox_accounts
         )
         self.start_thread("Counter trades", self.counter_trade_thread, roblox_accounts)
-        self.start_thread("Rolimons updater", self.update_data_thread)
+        self.start_thread("Rolimons updater", self.update_data_thread, roblox_accounts)
 
         time.sleep(1)
         while True:
@@ -433,8 +462,10 @@ class Doggo:
         log("Fetched recent traders")
         # TODO: add max days inactive in cfg and parse as arg
 
-        # Fresh stop signal per round so the last account's scanner can't keep running
+        # Fresh stop signal per round so the last account's scanner can't keep running,
+        # and drop users that were screened for the previous account
         self.stop_event = threading.Event()
+        self.user_queue.clear()
         self.start_thread(
             f"Queue traders ({current_account.username})",
             self.queue_traders,

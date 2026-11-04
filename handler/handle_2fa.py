@@ -47,12 +47,14 @@ class AuthHandler:
         last_problem = "no attempts made"
 
         while retry_count < max_retries:
-            retry_count += 1
-
-            if self.is_ratelimited:
-                log(f"2FA rate limited, waiting 1 second (attempt {retry_count})")
+            # Another thread is backing off from a 2FA rate limit. Wait it out
+            # (up to 90s) without using up our own attempts.
+            waited = 0
+            while self.is_ratelimited and waited < 90:
                 time.sleep(1)
-                continue
+                waited += 1
+
+            retry_count += 1
 
             try:
                 response = req_handler.Session.post(

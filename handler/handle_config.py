@@ -20,6 +20,7 @@ class ConfigHandler:
         self.inbounds = self.load_inbounds()
         self.debug = self.load_debug()
         self.discord_settings = self.load_discord()
+        self.outbound = self.load_outbound()
         # self.mass_sender = self.load_mass_sender()
         # Check if config is filled out
         self.validate_config()
@@ -87,6 +88,18 @@ class ConfigHandler:
         elif max_gain is not None:
             return max_profit <= max_gain
         return True
+
+    def load_outbound(self):
+        return {
+            # Trades sent before the config last changed are only cancelled if
+            # they're losing overall (or receive a projected item), not for
+            # failing the new config's rules
+            "Only_Cancel_Losing_After_Config_Change": bool(
+                self.get_boolean(
+                    "Outbound Settings", "Only Cancel Losing Trades After Config Change"
+                )
+            ),
+        }
 
     def load_discord(self):
         return {
