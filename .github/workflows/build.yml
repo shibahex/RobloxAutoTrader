@@ -97,6 +97,11 @@ jobs:
           cp configs/small_value.cfg "$name/config.cfg"
           cp -r docs/config "$name/docs/"
           cp README.md LICENSE "$name/"
+          # Linux setup scripts (e.g. scripts/waydroid/setup.sh), if the repo has any
+          if [ "${{ matrix.platform }}" = linux ] && [ -d scripts ]; then
+            cp -r scripts "$name/"
+            find "$name/scripts" -name '*.sh' -exec chmod +x {} +
+          fi
           if [ "${{ matrix.platform }}" = windows ]; then
             7z a -tzip "$name.zip" "$name" > /dev/null
             echo "file=$name.zip" >> "$GITHUB_OUTPUT"
