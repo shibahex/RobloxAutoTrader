@@ -1,3 +1,5 @@
+# Must run first: fixes for the packaged build (see handler/startup.py)
+import handler.startup  # noqa: F401
 import time
 import traceback
 from rolimons_api import RolimonAPI

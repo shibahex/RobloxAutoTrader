@@ -2312,3 +2312,30 @@ def test_version_strings(monkeypatch):
     assert version.release_tag() == "v2.0"
     monkeypatch.setattr(version, "edition", lambda: "-community")
     assert version.release_tag() == "v2.0-community"
+
+
+# --- packaged build -------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "env, expected",
+    [
+        # User had their own LD_LIBRARY_PATH: put it back
+        ({"LD_LIBRARY_PATH": "/bundle", "LD_LIBRARY_PATH_ORIG": "/mine"}, "/mine"),
+        # User had none: remove the bundle's
+        ({"LD_LIBRARY_PATH": "/bundle"}, None),
+    ],
+)
+def test_packaged_build_gives_child_programs_the_users_library_path(env, expected):
+    from handler.startup import restore_child_library_path
+
+    restore_child_library_path(env, frozen=True)
+    assert env.get("LD_LIBRARY_PATH") == expected
+
+
+def test_library_path_is_left_alone_when_running_from_source():
+    from handler.startup import restore_child_library_path
+
+    env = {"LD_LIBRARY_PATH": "/mine"}
+    restore_child_library_path(env, frozen=False)
+    assert env == {"LD_LIBRARY_PATH": "/mine"}
