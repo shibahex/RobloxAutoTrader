@@ -26,4 +26,4 @@ These config settings are invalid: [Filtering Items] Maximum Amount of Duplicate
 Usually it's `None` or a decimal in a whole-number setting, or a typo.
 
 ## All my outbound trades got cancelled after a config change
-Set `Only Cancel Losing Trades After Config Change = True` in [`[Outbound Settings]`](outbound-settings.md).
+Set `Keep Trades Sent Before Config Change = True` in [`[Outbound Settings]`](outbound-settings.md).

@@ -6,6 +6,7 @@ the `router` fixture's fake responses.
 import threading
 import os
 import re
+import time
 import types
 import pathlib
 
@@ -228,6 +229,9 @@ def account(router):
     acc.outbound_lock = threading.Lock()
     acc.config_changed_at = None
     acc.posted_accepts = set()
+    from handler.counter_history import CounterHistory
+
+    acc.counter_history = CounterHistory(path=None)
     # Never post to the webhooks in the real config.cfg
     acc.config.discord_settings = {
         "Send_Webhook": None,
@@ -2669,5 +2673,192 @@ def test_failed_field_lists_what_stopped_the_trades():
     text = failed_field({"value_gain": 43, "overall_gain": 1399, "rap_gain": 0})
     assert text.startswith("Tried 1,442 trades.")
     body = text.split("```")[1].strip().split("\n")
-    assert body == ["Overall Value gain      1,399", "Value gain                 43"]
+    assert body == [
+        "Overall Value gain      1,399",
+        "Value gain                 43",
+        "RAP gain                    0",
+    ]
     assert "No trades to try" in failed_field({})
+
+
+def test_keep_trades_setting_reads_new_and_old_name(tmp_path):
+    from handler.handle_config import ConfigHandler
+
+    cfg = tmp_path / "c.cfg"
+    key = "Only_Cancel_Losing_After_Config_Change"
+    for text, expected in (
+        ("Keep Trades Sent Before Config Change = True", True),
+        ("Keep Trades Sent Before Config Change = False", False),
+        ("Only Cancel Losing Trades After Config Change = True", True),
+        ("", False),
+    ):
+        cfg.write_text(f"[Outbound Settings]\n{text}\n")
+        assert ConfigHandler(str(cfg)).outbound[key] is expected, text
+
+
+# --- counter loops ---------------------------------------------------------------
+
+
+def test_counter_history_remembers_counters_and_replies(tmp_path):
+    from handler.counter_history import CounterHistory, trade_signature
+
+    now = [1000.0]
+    path = str(tmp_path / "h.json")
+    history = CounterHistory(path, "1", memory_hours=1, clock=lambda: now[0])
+    sig = trade_signature(["1:2", "1:1"], ["1:3"])
+    assert sig == trade_signature(["1:1", "1:2"], ["1:3"], 0)  # order doesn't matter
+
+    history.record_counter(5, sig)
+    assert history.sent(5) == {sig} and history.counters(5) == 1
+    assert history.note_inbound(5, 70, 1010) == 10
+    assert history.note_inbound(5, 70, 1010) == 10  # counted once
+    assert history.note_inbound(5, 71, 500) is None  # sent before our counter
+    assert history.instant_replies(5, 60) == 1
+
+    # Saved per account, and forgotten after the memory runs out
+    again = CounterHistory(path, "1", memory_hours=1, clock=lambda: now[0])
+    assert again.counters(5) == 1
+    assert CounterHistory(path, "2", clock=lambda: now[0]).counters(5) == 0
+    now[0] += 3601
+    assert again.counters(5) == 0 and again.instant_replies(5, 60) == 0
+
+
+def test_instant_streak_breaks_on_a_slow_reply():
+    from handler.counter_history import CounterHistory
+
+    now = [0.0]
+    history = CounterHistory(None, clock=lambda: now[0])
+    for n, delay in enumerate((5, 500, 5, 5)):
+        now[0] += 1000
+        history.record_counter(9, f"sig{n}")
+        history.note_inbound(9, n, now[0] + delay)
+    assert history.instant_replies(9, 60) == 2
+
+
+def counter_maker():
+    from handler.handle_config import ConfigHandler
+    from trade_algorithm import TradeMaker
+
+    maker = TradeMaker(ConfigHandler("configs/small_value.cfg"))
+    for name in (
+        "min_rap_gain max_rap_gain min_overall_gain max_overall_gain min_algo_gain "
+        "max_algo_gain min_value_gain max_value_gain min_rap_score_percentage "
+        "max_rap_score_percentage min_overall_score_percentage "
+        "max_overall_score_percentage max_valid_trades"
+    ).split():
+        setattr(maker, name, None)
+    maker.min_overall_gain = 1
+    maker.min_value_of_trade = maker.min_rap_of_trade = 0
+    maker.min_items_self = maker.min_items_their = 1
+    maker.max_items_self = maker.max_items_their = 2
+    maker.trade_robux = False
+    maker.trade_timeout = 10
+
+    def item(item_id, value):
+        return {
+            "item_id": item_id, "value": value, "rap": value, "demand": 2,
+            "rap_algorithm": value, "total_value": value, "item_volume": 5,
+        }
+
+    mine = {f"m{i}": item(f"1:{i}", 100 * i) for i in range(1, 4)}
+    theirs = {f"t{i}": item(f"1:{20 + i}", 110 * i) for i in range(1, 4)}
+    return maker, mine, theirs
+
+
+def test_counter_is_never_sent_twice():
+    from handler.counter_history import trade_signature
+
+    maker, mine, theirs = counter_maker()
+
+    def signature(trade):
+        return trade_signature(
+            [mine[k]["item_id"] for k in trade["self_side"]],
+            [theirs[k]["item_id"] for k in trade["their_side"]],
+            trade["self_robux"],
+        )
+
+    sent = set()
+    while True:
+        trade = maker.generate_trade(mine, theirs, counter_trade=True, avoid=sent)
+        if trade is None:
+            break
+        assert signature(trade) not in sent
+        sent.add(signature(trade))
+    assert sent and maker.last_failed["already_sent"] == len(sent)
+
+
+def loop_account(router, inbound, monkeypatch):
+    monkeypatch.setattr("roblox_api.time.sleep", lambda s: None)
+    inbound.config.inbounds.update(
+        Max_Counters_Per_Trader=3,
+        Instant_Reply_Seconds=60,
+        Instant_Replies_For_Bot=2,
+        Counter_Memory_Hours=24,
+    )
+    router.set(TRADE_URL, resp(200, inbound_trade_json(["1:1"], ["1:2"])))
+    router.set(DECLINE_URL, resp(200, {}))
+    return inbound
+
+
+def test_trader_countered_too_often_is_declined(router, inbound, monkeypatch):
+    account = loop_account(router, inbound, monkeypatch)
+    for n in range(3):
+        account.counter_history.record_counter(2, f"sig{n}")
+    results = account.handle_inbounds(accept=True, counter=True)
+    assert account.countered == [] and results["declined"] == 1
+    assert declined(router) == [DECLINE_URL + "70/decline"]
+
+
+def test_instant_counter_backs_are_declined_as_a_bot(router, inbound, monkeypatch):
+    account = loop_account(router, inbound, monkeypatch)
+    sent_at = parse_created_ts("2026-11-01T00:00:00Z") - 5  # inbound 70: 5s later
+    now = [sent_at - 1000]
+    history = account.counter_history
+    history.clock = lambda: now[0]
+    history.record_counter(2, "sig0")
+    history.note_inbound(2, 1, now[0] + 3)  # an earlier instant reply
+    now[0] = sent_at
+    history.record_counter(2, "sig1")
+    results = account.handle_inbounds(accept=True, counter=True)
+    assert account.countered == [] and results["declined"] == 1
+
+
+def test_slow_trader_under_the_limit_is_still_countered(router, inbound, monkeypatch):
+    account = loop_account(router, inbound, monkeypatch)
+    account.counter_history.record_counter(2, "sig0")
+    account.handle_inbounds(accept=True, counter=True)
+    assert account.countered == [70]
+
+
+def parse_created_ts(text):
+    from roblox_api import parse_created
+
+    return parse_created(text)
+
+
+def test_counter_loop_settings_defaults_and_off(tmp_path):
+    from handler.handle_config import ConfigHandler
+
+    cfg = tmp_path / "c.cfg"
+    cfg.write_text("[Inbound Settings]\n")
+    inbounds = ConfigHandler(str(cfg)).inbounds
+    assert inbounds["Max_Counters_Per_Trader"] == 3
+    assert inbounds["Instant_Replies_For_Bot"] == 3
+    assert inbounds["Instant_Reply_Seconds"] == 20 * 60
+    assert inbounds["Counter_Memory_Hours"] == 24
+    cfg.write_text(
+        "[Inbound Settings]\nMax Counters Per Trader = 0\n"
+        "Instant Replies To Call It A Bot = None\n"
+    )
+    inbounds = ConfigHandler(str(cfg)).inbounds
+    assert inbounds["Max_Counters_Per_Trader"] == 0
+    assert inbounds["Instant_Replies_For_Bot"] == 0
+
+
+def test_log_clock_is_12_hour_and_same_width(monkeypatch):
+    from handler import handle_logs
+
+    for hour, shown in ((3, " 3:08:32 PM"), (11, "11:08:32 AM")):
+        fake = time.struct_time((2026, 11, 6, hour + (12 if shown.endswith("PM") else 0), 8, 32, 4, 310, 0))
+        monkeypatch.setattr(handle_logs.time, "localtime", lambda *a, f=fake: f)
+        assert handle_logs.clock_time() == shown

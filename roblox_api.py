@@ -8,6 +8,7 @@ import base64
 import hashlib
 import rolimons_api
 from handler.handle_requests import RequestsHandler
+from handler.counter_history import CounterHistory, trade_signature
 from handler.handle_discord import DiscordHandler
 from handler.handle_config import ConfigHandler
 from handler.handle_json import JsonHandler
@@ -149,6 +150,10 @@ class RobloxAPI:
                 config=self.config, is_inbound_checker=True, gains=inbound_gains
             )
             self.counter_maker = TradeMaker(config=self.config, gains=inbound_gains)
+            self.counter_history = CounterHistory(
+                account_id=self.account_id,
+                memory_hours=self.config.inbounds["Counter_Memory_Hours"],
+            )
 
             # log("getting self")
             self.self_duplicates = {}
@@ -531,7 +536,11 @@ class RobloxAPI:
             trade_id = trade_info["trade_id"]
             try:
                 outcome = self._handle_one_inbound(
-                    trade_id, trade_info["user_id"], accept, counter
+                    trade_id,
+                    trade_info["user_id"],
+                    accept,
+                    counter,
+                    created=parse_created(trade_info.get("created")),
                 )
             except exceptions_types.TradeLimit as e:
                 log(f"[INBOUND] Trade limit hit, only accepting from now on: {e}")
@@ -556,8 +565,13 @@ class RobloxAPI:
             raise trade_limit
         return results
 
-    def _handle_one_inbound(self, trade_id, trader_id, accept, counter) -> str:
-        """Returns "accepted", "countered", "kept" or "failed"."""
+    def _handle_one_inbound(
+        self, trade_id, trader_id, accept, counter, created=None
+    ) -> str:
+        """
+        Returns "accepted", "countered", "declined", "kept" or "failed".
+        created: when they sent it (a timestamp), to spot instant counter-backs.
+        """
         trade_json = read_json(
             self.request_handler.requestAPI(
                 f"https://trades.roblox.com/v2/trades/{trade_id}"
@@ -565,6 +579,12 @@ class RobloxAPI:
         )
         trade = self.format_trade_api(trade_json)
         reason = "Accept Valid Trades is off"
+        reply = self.counter_history.note_inbound(trader_id, trade_id, created)
+        if reply is not None:
+            log(
+                f"[INBOUND] {trader_id} countered back {reply:.0f}s after our counter",
+                dontPrint=True,
+            )
 
         if accept:
             reason = self._inbound_reject_reason(trade)
@@ -607,6 +627,23 @@ class RobloxAPI:
 
         if not counter:
             return "kept"
+
+        loop = self._counter_loop_reason(trader_id)
+        if loop:
+            if not self._decline_trade(trade_id):
+                return "failed"
+            log(f"[INBOUND] Declined {trade_id} from {trader_id}: {loop}")
+            self.post_trade_webhook(
+                "Send_Webhook",
+                trade,
+                "Declined a trade: counter loop ({profit} profit)",
+                color=0,
+                extra_fields={
+                    "Not accepted": (reason_text(reason), False),
+                    "Why no counter": (loop[0].upper() + loop[1:], False),
+                },
+            )
+            return "declined"
 
         outcome = self._counter_trade(trade_id, trader_id, trade)
         if outcome == "declined":
@@ -758,6 +795,32 @@ class RobloxAPI:
                 time.sleep(1)
         return False
 
+    def _counter_loop_reason(self, trader_id) -> str | None:
+        """
+        Why this trader shouldn't be countered again, or None:
+        Max Counters Per Trader reached, or they counter back instantly every
+        time (Instant Replies To Call It A Bot).
+        """
+        settings = self.config.inbounds
+        hours = settings["Counter_Memory_Hours"]
+        limit = settings["Max_Counters_Per_Trader"]
+        sent = self.counter_history.counters(trader_id)
+        if limit and sent >= limit:
+            return (
+                f"already countered them {sent} times in {hours:g} hours "
+                "(Max Counters Per Trader)"
+            )
+        bot = settings["Instant_Replies_For_Bot"]
+        seconds = settings["Instant_Reply_Seconds"]
+        streak = self.counter_history.instant_replies(trader_id, seconds)
+        if bot and streak >= bot:
+            return (
+                f"they countered back within {seconds / 60:g} minutes {streak} times "
+                "in a row, "
+                "likely a bot (Instant Replies To Call It A Bot)"
+            )
+        return None
+
     def _counter_trade(self, trade_id, trader_id, trade=None) -> str:
         """
         Generates a trade from our config and sends it as a counter.
@@ -791,6 +854,8 @@ class RobloxAPI:
                 if trade
                 else None
             ),
+            # Never the same counter twice
+            avoid=self.counter_history.sent(trader_id),
         )
         if not generated_trade:
             if not self.config.inbounds["Decline_If_No_Counter"]:
@@ -810,6 +875,14 @@ class RobloxAPI:
             self_robux=generated_trade["self_robux"],
         )
         log(f"[INBOUND] Countered trade {trade_id}")
+        self.counter_history.record_counter(
+            trader_id,
+            trade_signature(
+                [self.account_inventory[k]["item_id"] for k in generated_trade["self_side"]],
+                [trader_inventory[k]["item_id"] for k in generated_trade["their_side"]],
+                generated_trade["self_robux"],
+            ),
+        )
         counter = dict(
             generated_trade,
             their_id=trader_id,

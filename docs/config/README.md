@@ -92,7 +92,7 @@ From that history:
 | **Sales gap** | The average number of days between days that had sales. |
 
 ## Settings that do nothing
-Older configs (maybe yours) have settings the bot loads but never uses. They don't change any trades and can be deleted. Two side effects while they're there: an invalid value still stops the bot from starting, and changing one counts as a config change for `Only Cancel Losing Trades After Config Change`.
+Older configs (maybe yours) have settings the bot loads but never uses. They don't change any trades and can be deleted. Two side effects while they're there: an invalid value still stops the bot from starting, and changing one counts as a config change for `Keep Trades Sent Before Config Change`.
 
 | Setting | Section |
 |---|---|

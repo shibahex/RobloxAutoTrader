@@ -1,4 +1,5 @@
 from collections import Counter
+from handler.counter_history import trade_signature
 from handler.handle_config import ConfigHandler
 from itertools import combinations
 import math
@@ -64,9 +65,9 @@ REASON_NAMES = {
     "algo_gain": "RAP Algorithm gain",
     "min_value_of_trade": "Value sum of trade",
     "min_rap_of_trade": "RAP sum of trade",
-    "close_perc": "score %",
     "overall_close_percentage": "Overall Value score %",
     "rap_close_percentage": "RAP score %",
+    "already_sent": "Already sent to them",
 }
 
 
@@ -84,22 +85,42 @@ def gain_text(gain) -> str:
     return f"{gain:,g}"
 
 
+def failed_counts(invalid_reasons: dict) -> list:
+    """Every reason with how many trades it stopped, biggest first."""
+    return sorted(invalid_reasons.items(), key=lambda item: -item[1])
+
+
+def failed_counts(invalid_reasons: dict) -> list:
+    """Every reason with how many trades it stopped, biggest first."""
+    return sorted(invalid_reasons.items(), key=lambda item: -item[1])
+
+
 def failed_text(invalid_reasons: dict) -> str:
-    """How many trades each setting stopped, biggest first."""
-    failed = sorted(((n, r) for r, n in invalid_reasons.items() if n), reverse=True)
-    if not failed:
+    """
+    How many trades each setting stopped, every setting, biggest first, as a
+    two-column table under a "Tried N trades" line.
+    """
+    counts = failed_counts(invalid_reasons)
+    total = sum(n for _, n in counts)
+    if not total:
         return "Nothing to try with these items."
-    return "Stopped by: " + ", ".join(f"{reason_text(r)} ({n:,})" for n, r in failed)
+    cells = [f"{reason_text(r):<22}{n:>9,}" for r, n in counts]
+    half = (len(cells) + 1) // 2
+    rows = [
+        "  " + left + ("     " + right if right else "")
+        for left, right in zip(cells[:half], cells[half:] + [""])
+    ]
+    return f"Tried {total:,} trades. What stopped them:\n" + "\n".join(rows)
 
 
 def failed_field(invalid_reasons: dict) -> str:
     """A Discord field: how many tries each setting stopped, as a lined-up list."""
-    failed = sorted(((n, r) for r, n in invalid_reasons.items() if n), reverse=True)
-    if not failed:
+    counts = failed_counts(invalid_reasons)
+    total = sum(n for _, n in counts)
+    if not total:
         return "No trades to try with these items (item limits or filters)."
-    width = max(len(reason_text(r)) for _, r in failed)
-    lines = [f"{reason_text(r):<{width}}  {n:>9,}" for n, r in failed]
-    total = sum(n for n, _ in failed)
+    width = max(len(reason_text(r)) for r, _ in counts)
+    lines = [f"{reason_text(r):<{width}}  {n:>9,}" for r, n in counts]
     return (
         f"Tried {total:,} trades. What stopped them:\n```\n"
         + "\n".join(lines)
@@ -413,6 +434,7 @@ class TradeMaker:
         counter_trade=False,
         offered=None,
         original=None,
+        avoid=None,
     ):
         """
         Algorithm responsible for generating combinations and validating them..
@@ -421,6 +443,8 @@ class TradeMaker:
         original: for a counter, the trade they sent, as item ids
         {"self": [...], "their": [...]}. Its items are tried first and the
         counter that changes the fewest items wins.
+        avoid: signatures (trade_signature) of trades not to send again, like
+        counters this trader already got.
         """
         valid_trades = []
         self.last_failed = {}
@@ -432,6 +456,12 @@ class TradeMaker:
                 if original
                 else self.prefer_unoffered(valid_trades, offered)
             )
+            if avoid:
+                fresh = [t for t in candidates if signature(t) not in avoid]
+                self.last_failed["already_sent"] = len(candidates) - len(fresh)
+                candidates = fresh
+                if not candidates:
+                    return None
             if original:
                 fewest = min(t["changes"] for t in candidates)
                 candidates = [t for t in candidates if t["changes"] == fewest]
@@ -449,6 +479,13 @@ class TradeMaker:
                 )
                 select_by = DEFAULT_SELECT_TRADE
             return self.select_trade(candidates, select_by=select_by)
+
+        def signature(trade):
+            return trade_signature(
+                [self_inventory[key]["item_id"] for key in trade["self_side"]],
+                [their_inventory[key]["item_id"] for key in trade["their_side"]],
+                trade["self_robux"],
+            )
 
         start_time = time.perf_counter()  # Use perf_counter for better precision
 
@@ -546,7 +583,6 @@ class TradeMaker:
             "value_gain": 0,
             "min_rap_of_trade": 0,
             "min_value_of_trade": 0,
-            "close_perc": 0,
             "rap_gain": 0,
             "algo_gain": 0,
             "overall_gain": 0,

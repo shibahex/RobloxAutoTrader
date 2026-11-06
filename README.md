@@ -106,7 +106,7 @@ A gain between -1 and 1 is a percentage of your side: `0.1` = 10%.
 - `None` turns a setting off, but only where the note says so. Settings marked **whole number** must be a whole number, or the bot won't start.
 - The stricter the config, the fewer trades get sent. Start loose, then tighten.
 - `Accept Valid Trades` accepts inbound trades automatically, which can't be undone. Leave it off until your minimum gains are set the way you want.
-- Changing your config can cancel outbound trades that don't pass the new settings. `Only Cancel Losing Trades After Config Change = True` stops that.
+- Changing your config can cancel outbound trades that don't pass the new settings. `Keep Trades Sent Before Config Change = True` stops that.
 
 ### No trades getting sent?
 If the bot prints `Couldnt find valid_trades heres invalid trades reasons:`, it checked every trade with that person and none passed. The numbers show which setting blocked them most:

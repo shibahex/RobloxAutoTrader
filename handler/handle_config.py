@@ -240,9 +240,15 @@ class ConfigHandler:
         return {
             # Trades sent before the config last changed are only cancelled if
             # they're losing overall (or receive a projected item), not for
-            # failing the new config's rules
+            # failing the new config's rules. Older configs use the old name.
             "Only_Cancel_Losing_After_Config_Change": bool(
                 self.get_boolean(
+                    "Outbound Settings", "Keep Trades Sent Before Config Change"
+                )
+                if self.config.has_option(
+                    "Outbound Settings", "Keep Trades Sent Before Config Change"
+                )
+                else self.get_boolean(
                     "Outbound Settings", "Only Cancel Losing Trades After Config Change"
                 )
             ),
@@ -448,7 +454,32 @@ class ConfigHandler:
                 self.get_float("Inbound Settings", "Check Inbounds Every Minutes"), 30
             ),
             "Gains": self.load_inbound_gains(),
+            # Counter loops (missing = these defaults, 0 = off)
+            "Max_Counters_Per_Trader": self._whole_number(
+                "Inbound Settings", "Max Counters Per Trader", 3
+            ),
+            "Instant_Reply_Seconds": 60
+            * _positive_number(
+                self.get_float_default("Inbound Settings", "Instant Reply Minutes", 20),
+                20,
+            ),
+            "Instant_Replies_For_Bot": self._whole_number(
+                "Inbound Settings", "Instant Replies To Call It A Bot", 3
+            ),
+            "Counter_Memory_Hours": _positive_number(
+                self.get_float_default("Inbound Settings", "Counter Memory Hours", 24),
+                24,
+            ),
         }
+
+    def _whole_number(self, section, option, default) -> int:
+        """A whole number setting: missing = default, None = 0 (off)."""
+        if not self.config.has_option(section, option):
+            return default
+        if str(self.get_string(section, option)).strip().lower() in ("none", "false"):
+            return 0
+        value = self.get_int(section, option)
+        return value if isinstance(value, int) and value >= 0 else default
 
     def load_inbound_gains(self) -> dict:
         """

@@ -3,8 +3,8 @@ Prints and saves the bot's messages.
 
 Every line reads the same in any terminal, with or without color:
 
-    13:02:11  Inbound    tisiallyyy: countered 5, declined 12, kept 1
-    13:02:15  Requests   WARNING: Roblox is rate limiting, waiting 20s
+     1:02:11 PM  Inbound      tisiallyyy: countered 5, declined 12, kept 1
+     1:02:15 PM  Requests     WARNING: Roblox is rate limiting, waiting 20s
 
 A message that starts with a tag like "[INBOUND]" gets it moved into the tag
 column. Warnings and errors always say so in words; color only adds to that.
@@ -44,6 +44,11 @@ def use_color(stream=None) -> bool:
         return False
 
 
+def clock_time() -> str:
+    """12-hour time, same width all day: ' 3:08:32 PM', '11:08:32 AM'."""
+    return time.strftime("%I:%M:%S %p", time.localtime()).lstrip("0").rjust(11)
+
+
 def split_tag(msg: str):
     """'[INBOUND] text' -> ('Inbound', 'text'). Shouting tags are calmed down."""
     match = TAG.match(msg)
@@ -61,7 +66,7 @@ def format_line(msg, severity=0, color=False, clock=None) -> str:
     word, level_color = LEVELS.get(level, ("", ""))
     if level == 5 and tag.lower() in ("debug", "debugging"):
         tag = ""
-    stamp = clock or time.strftime("%H:%M:%S")
+    stamp = clock or clock_time()
     lead = f"{stamp}  {tag:<{TAG_WIDTH}} "
     if word:
         text = f"{word}: {text}"
@@ -108,7 +113,9 @@ class Logging:
                 encoding = getattr(sys.stdout, "encoding", None) or "ascii"
                 print(line.encode(encoding, "replace").decode(encoding), flush=True)
 
-        saved = format_line(msg, severityNum, clock=time.strftime("%Y-%m-%d %H:%M:%S"))
+        saved = format_line(
+            msg, severityNum, clock=time.strftime("%Y-%m-%d ") + clock_time().strip()
+        )
         logging.info(saved)
 
     @staticmethod
