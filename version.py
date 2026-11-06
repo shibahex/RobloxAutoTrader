@@ -9,7 +9,7 @@ import sys
 
 VERSION = "2.0"
 # "BETA", or "" for a stable release
-STAGE = ""
+STAGE = "BETA"
 
 
 def edition() -> str:
