@@ -135,10 +135,12 @@ class AccountManager:
                 break
 
     def manually_add_account(self):
-        auth_secret = self.cli.input_prompt("Enter the authorization key")
+        auth_secret = self.cli.input_prompt("Enter 2FA Secret Code")
 
         if not AuthHandler().verify_auth_secret(auth_secret):
-            self.cli.print_error("Auth secret isn't right Skipping account...")
+            self.cli.print_error(
+                "That 2FA Secret Code isn't valid, skipping account..."
+            )
             return None
 
         acc_cookie = self.cli.input_prompt("Enter Cookie (include warning)")
@@ -165,10 +167,12 @@ class AccountManager:
         )
 
     def add_account(self):
-        auth_secret = self.cli.input_prompt("Enter the authorization key")
+        auth_secret = self.cli.input_prompt("Enter 2FA Secret Code")
 
         if not AuthHandler().verify_auth_secret(auth_secret):
-            self.cli.print_error("AUTH CODE INVALID, skipping")
+            self.cli.print_error(
+                "That 2FA Secret Code isn't valid, skipping account..."
+            )
             return None
 
         firefox = FirefoxLogin()
