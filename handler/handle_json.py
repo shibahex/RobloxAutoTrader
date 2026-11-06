@@ -69,7 +69,7 @@ class JsonHandler:
                 with open(self.filename, "r", encoding="utf-8") as file:
                     return json.load(file)
             except FileNotFoundError:
-                log(f"{self.filename} is missing, creating an empty one", severityNum=2)
+                log(f"[FILES] {self.filename} is missing, creating an empty one", severityNum=2)
                 initial_data = self._empty_data()
                 self.write_data(initial_data)
                 return initial_data
@@ -82,7 +82,7 @@ class JsonHandler:
                         f"{self.filename} is corrupt ({e}) and couldn't be backed up: {move_error}"
                     ) from e
                 log(
-                    f"{self.filename} was corrupt ({e}). Backed it up to {backup} and started fresh.",
+                    f"[FILES] {self.filename} was corrupt ({e}). Backed it up to {backup} and started fresh.",
                     severityNum=4,
                 )
                 initial_data = self._empty_data()
@@ -196,21 +196,13 @@ class JsonHandler:
                 try:
                     timestamp_date = datetime.fromisoformat(ratelimit_timestamp)
                 except (TypeError, ValueError):
-                    log(f"Bad ratelimit timestamp {ratelimit_timestamp!r}, ignoring it")
+                    log(f"[FILES] Bad trade limit time {ratelimit_timestamp!r}, ignoring it")
                     return False
 
                 if current_date - timestamp_date >= timedelta(hours=6):
                     # greater than 6 hours
                     account["ratelimit_timestamp"] = None
                     self.write_data(data)
-                    print(
-                        "wrote data for timestamp",
-                        current_date,
-                        "minus",
-                        timestamp_date,
-                        ">=",
-                        timedelta(hours=6),
-                    )
                     return False
 
         return True
@@ -247,7 +239,7 @@ class JsonHandler:
                 try:
                     timestamp_date = datetime.fromisoformat(ratelimit_timestamp)
                 except (TypeError, ValueError):
-                    log(f"Bad ratelimit timestamp {ratelimit_timestamp!r}, ignoring it")
+                    log(f"[FILES] Bad trade limit time {ratelimit_timestamp!r}, ignoring it")
                     return False
 
                 current_date = datetime.now()

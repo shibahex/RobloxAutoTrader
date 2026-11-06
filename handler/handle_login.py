@@ -64,7 +64,7 @@ class FirefoxLogin:
         while True:
             try:
                 totp = pyotp.TOTP(totp_secret)
-                log(f"[Debug] Current Auth Code: {totp.now()}")
+                log(f"[Debug] Current Auth Code: {totp.now()}", dontPrint=True)
                 # Wait for the modal to be visible
                 modal = WebDriverWait(self.browser, 360).until(
                     EC.visibility_of_element_located(
@@ -77,7 +77,7 @@ class FirefoxLogin:
                         (By.CSS_SELECTOR, "#two-step-verification-code-input")
                     )
                 )
-                log("Two-step verification input detected.")
+                log("[LOGIN] 2-step verification box found")
                 time.sleep(0.1)
 
                 # Generate the TOTP code
@@ -85,7 +85,7 @@ class FirefoxLogin:
 
                 # Input the auth code into the verification field
                 code_input.send_keys(auth_code)
-                log(f"Generated Auth Code: {auth_code}")
+                log(f"Generated Auth Code: {auth_code}", dontPrint=True)
 
                 # Click the Verify button
                 verify_button = modal.find_element(
@@ -95,7 +95,7 @@ class FirefoxLogin:
                 return True
             except WebDriverException as e:
                 # Includes TimeoutException; keep waiting for the 2FA prompt
-                log(f"Error while waiting for the two-step verification input: {e}")
+                log(f"[LOGIN] Error waiting for the 2-step verification box: {e}")
 
     def roblox_login(self, totp_secret):
         """Logs in to Roblox and captures network requests."""
@@ -105,7 +105,7 @@ class FirefoxLogin:
         # Store the initial URL
         initial_url = self.browser.current_url
 
-        log("Waiting for user to log in...")
+        log("[LOGIN] Waiting for you to log in...")
 
         try:
             # Wait for the user to log in by checking if the URL changes
@@ -113,12 +113,12 @@ class FirefoxLogin:
                 current_url = self.browser.current_url
                 enter_auth = self.enter_auth(totp_secret)
                 if enter_auth:
-                    log("Valid Login")
+                    log("[LOGIN] Logged in")
                     break
 
                 # Check if the URL has changed from the login page
                 if current_url != initial_url:
-                    log("Login detected. Capturing network requests...")
+                    log("[LOGIN] Login found, reading the account...")
                     break
 
                 # Short sleep to prevent busy-waiting
@@ -158,7 +158,7 @@ class FirefoxLogin:
                                 raise ValueError("No ticket found in the response.")
 
                         except (UnicodeDecodeError, json.JSONDecodeError):
-                            log("Error processing the login API response.")
+                            log("[LOGIN] Couldn't read the login response")
 
                         # log("-" * 60)
         finally:

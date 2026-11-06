@@ -7,6 +7,7 @@ import threading
 import os
 import re
 import types
+import pathlib
 
 import pytest
 import requests
@@ -226,7 +227,32 @@ def account(router):
     acc.outbound_cache = {}
     acc.outbound_lock = threading.Lock()
     acc.config_changed_at = None
+    acc.posted_accepts = set()
+    # Never post to the webhooks in the real config.cfg
+    acc.config.discord_settings = {
+        "Send_Webhook": None,
+        "Completed_Webhook": None,
+        "Error_Webhook": None,
+    }
+    acc.discord_webhook = FakeDiscord()
     return acc
+
+
+class FakeDiscord:
+    """Records webhook posts instead of sending them: (url, title, color)."""
+
+    def __init__(self):
+        self.posts = []
+
+    def embed_fields_from_trade(self, trade, rolimon_data, projected_data):
+        return {}, 5
+
+    def setup_embed(self, title, color, user_id, embed_fields, footer, description=""):
+        return (title, color)
+
+    def send_webhook(self, embed, url):
+        self.posts.append((url, *embed))
+        return True
 
 
 def test_send_trade_success(router, account):
@@ -1054,8 +1080,8 @@ def inbound(router, account):
     router.set(ACCEPT_URL, resp(200, {}))
 
     account.countered = []
-    account._counter_trade = lambda trade_id, trader_id: (
-        account.countered.append(trade_id) or True
+    account._counter_trade = lambda trade_id, trader_id, trade=None: (
+        account.countered.append(trade_id) or "countered"
     )
     return account
 
@@ -1155,7 +1181,7 @@ def test_trade_limit_stops_countering_but_keeps_accepting(router, inbound):
     )
     router.set(TRADE_URL + "71", resp(200, inbound_trade_json(["1:2"], ["1:1"])))
 
-    def limited(trade_id, trader_id):
+    def limited(trade_id, trader_id, trade=None):
         raise E.TradeLimit(resp(429, {}))
 
     inbound._counter_trade = limited
@@ -1230,6 +1256,48 @@ def test_inbound_check_interval_setting(tmp_path):
     assert ConfigHandler(str(cfg)).inbounds["Check_Every_Minutes"] == 10
     cfg.write_text("[Inbound Settings]\n")
     assert ConfigHandler(str(cfg)).inbounds["Check_Every_Minutes"] == 30
+
+
+def no_counter_account(router, inbound, decline):
+    """A losing inbound where no counter passes the config."""
+    del inbound._counter_trade
+    inbound.config.inbounds["Decline_If_No_Counter"] = decline
+    inbound.check_can_trade = lambda trader_id: True
+    inbound.account_inventory = {"x": {}}
+    inbound.fetch_inventory = lambda trader_id: {"y": {}}
+    inbound.offered_item_counts = lambda: {}
+    inbound.counter_maker = types.SimpleNamespace(generate_trade=lambda *a, **k: None)
+    router.set(TRADE_URL, resp(200, inbound_trade_json(["1:1"], ["1:2"])))
+    router.set(DECLINE_URL, resp(200, {}))
+    return inbound
+
+
+def declined(router):
+    return [url for method, url in router.calls if url.endswith("/decline")]
+
+
+def test_inbound_without_a_counter_is_declined(router, inbound, monkeypatch):
+    monkeypatch.setattr("roblox_api.time.sleep", lambda s: None)
+    account = no_counter_account(router, inbound, decline=True)
+    results = account.handle_inbounds(accept=True, counter=True)
+    assert declined(router) == [DECLINE_URL + "70/decline"]
+    assert results["declined"] == 1
+
+
+def test_inbound_without_a_counter_is_left_when_declining_is_off(router, inbound):
+    account = no_counter_account(router, inbound, decline=False)
+    results = account.handle_inbounds(accept=True, counter=True)
+    assert declined(router) == [] and results["declined"] == 0
+
+
+def test_decline_if_no_counter_defaults_on(tmp_path):
+    from handler.handle_config import ConfigHandler
+
+    cfg = tmp_path / "c.cfg"
+    cfg.write_text("[Inbound Settings]\n")
+    assert ConfigHandler(str(cfg)).inbounds["Decline_If_No_Counter"] is True
+    cfg.write_text("[Inbound Settings]\nDecline If No Counter = False\n")
+    assert ConfigHandler(str(cfg)).inbounds["Decline_If_No_Counter"] is False
 
 
 # --- inbound accepts obey the same item filters as our own trades --------------------
@@ -2417,3 +2485,189 @@ def test_cookie_falls_back_to_exactly_what_was_pasted(monkeypatch):
 def test_invalid_cookie_is_not_saved(monkeypatch):
     tried, saved = manual_add(monkeypatch, TOKEN, accepted=set())
     assert len(tried) == 2 and saved == []
+
+
+# --- inbound gains and close counters -------------------------------------------
+
+
+def test_inbound_gains_replace_trading_gains_only_when_set(tmp_path):
+    from handler.handle_config import ConfigHandler
+    from trade_algorithm import TradeMaker
+
+    cfg = tmp_path / "c.cfg"
+    preset = pathlib.Path(__file__).parent.parent / "configs" / "small_value.cfg"
+    trading, inbound = preset.read_text().split("[Inbound Settings]\n")
+    inbound = re.sub(r"^(Minimum|Maximum) [A-Za-z ]+ Gain = .*\n", "", inbound, flags=re.M)
+    cfg.write_text(
+        trading
+        + "[Inbound Settings]\nMinimum Overall Value Gain = 7\n"
+        + "Maximum Value Gain = None\n"
+        + inbound
+    )
+    config = ConfigHandler(str(cfg))
+    assert config.inbounds["Gains"] == {
+        "Minimum_Overall_Gain": 7,
+        "Maximum_Value_Gain": None,
+    }
+    normal = TradeMaker(config)
+    counter = TradeMaker(config, gains=config.inbounds["Gains"])
+    assert counter.min_overall_gain == 7
+    assert counter.max_value_gain is None
+    assert counter.min_rap_gain == normal.min_rap_gain  # not set: trading's
+
+
+def test_counter_keeps_their_trade_items():
+    from handler.handle_config import ConfigHandler
+    from trade_algorithm import TradeMaker
+
+    maker = TradeMaker(ConfigHandler("configs/small_value.cfg"))
+    for name in (
+        "min_rap_gain max_rap_gain min_overall_gain max_overall_gain min_algo_gain "
+        "max_algo_gain min_value_gain max_value_gain min_rap_score_percentage "
+        "max_rap_score_percentage min_overall_score_percentage "
+        "max_overall_score_percentage max_valid_trades"
+    ).split():
+        setattr(maker, name, None)
+    maker.min_overall_gain = 1
+    maker.min_value_of_trade = maker.min_rap_of_trade = 0
+    maker.min_items_self = maker.min_items_their = 1
+    maker.max_items_self = maker.max_items_their = 2
+    maker.trade_robux = False
+    maker.trade_timeout = 10
+
+    def item(item_id, value):
+        return {
+            "item_id": item_id,
+            "value": value,
+            "rap": value,
+            "demand": 2,
+            "rap_algorithm": value,
+            "total_value": value,
+            "item_volume": 5,
+        }
+
+    mine = {f"m{i}": item(f"1:{i}", 100 * i) for i in range(1, 6)}
+    theirs = {f"t{i}": item(f"1:{20 + i}", 110 * i) for i in range(1, 6)}
+    # They asked for our 1:3 and offered 1:22 (220 for 300: a loss for us)
+    original = {"self": ["1:3"], "their": ["1:22"]}
+    for _ in range(20):
+        trade = maker.generate_trade(
+            mine, theirs, counter_trade=True, original=original
+        )
+        # One item changed: they add one, or we swap ours for a smaller one
+        assert trade["changes"] == 1
+
+
+# --- inbound webhooks ----------------------------------------------------------
+
+
+def webhooks_on(account):
+    account.config.discord_settings.update(
+        Send_Webhook="send-url", Completed_Webhook="completed-url"
+    )
+    return account.discord_webhook.posts
+
+
+def test_accepted_inbound_is_posted_to_completed_once(router, inbound):
+    posts = webhooks_on(inbound)
+    inbound.handle_inbounds(accept=True, counter=True)
+    assert posts == [("completed-url", "Accepted an inbound trade (5 profit)", 2)]
+    assert inbound.posted_accepts == {"70"}
+
+    # The completed-trades check skips it instead of posting it again
+    inbound._post_completed_trade = lambda trade_id: posts.append(trade_id)
+    inbound.get_trades = lambda *a, **k: {"70": {}, "60": {}}
+    inbound.last_completed_scanned = "60"
+    inbound.json = types.SimpleNamespace(update_last_completed=lambda *a: None)
+    inbound.check_completeds()
+    assert len(posts) == 1 and inbound.posted_accepts == set()
+
+
+def test_declined_inbound_is_posted_red_to_send(router, inbound, monkeypatch):
+    monkeypatch.setattr("roblox_api.time.sleep", lambda s: None)
+    account = no_counter_account(router, inbound, decline=True)
+    posts = webhooks_on(account)
+    account.handle_inbounds(accept=True, counter=True)
+    assert posts == [
+        (
+            "send-url",
+            "Declined a trade: no counter passed your gains (5 profit)",
+            0,
+        )
+    ]
+
+
+def test_counter_is_posted_yellow_to_send(router, inbound):
+    del inbound._counter_trade
+    posts = webhooks_on(inbound)
+    inbound.check_can_trade = lambda trader_id: True
+    inbound.account_inventory = {"m": {"item_id": "1:1"}}
+    inbound.fetch_inventory = lambda trader_id: {"t": {"item_id": "1:2"}}
+    inbound.offered_item_counts = lambda: {}
+    inbound.counter_maker = types.SimpleNamespace(
+        generate_trade=lambda *a, **k: {
+            "self_side": ("m",),
+            "their_side": ("t",),
+            "self_robux": 0,
+        }
+    )
+    inbound.send_trade = lambda *a, **k: 99
+    router.set(TRADE_URL, resp(200, inbound_trade_json(["1:1"], ["1:2"])))
+    results = inbound.handle_inbounds(accept=True, counter=True)
+    assert results["countered"] == 1
+    assert posts == [("send-url", "Countered a trade (5 profit)", 3)]
+
+
+# --- console output ------------------------------------------------------------
+
+
+def test_log_lines_read_without_color():
+    from handler.handle_logs import format_line
+
+    assert format_line("[INBOUND] Countered", clock="13:02:11") == (
+        "13:02:11  Inbound      Countered"
+    )
+    warning = format_line("[REQUESTS] slow", 2, clock="13:02:11")
+    assert warning.endswith("WARNING: slow") and "\033" not in warning
+    # Continuation lines line up under the message
+    first, second = format_line("[BOT] a\nb", clock="13:02:11").split("\n")
+    assert second.index("b") == first.index("a")
+    assert format_line("no tag", clock="1").startswith("1  " + " " * 12)
+
+
+def test_log_color_only_on_terminals(monkeypatch):
+    from handler.handle_logs import format_line, use_color
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    assert use_color() is False
+    assert "\033[33m" in format_line("[BOT] x", 2, color=True)
+
+
+def test_gains_table_shows_every_gain_and_the_failed_one():
+    from trade_algorithm import gains_table
+
+    maker = types.SimpleNamespace(
+        min_overall_gain=450, max_overall_gain=1200, min_value_gain=None,
+        max_value_gain=None, min_rap_gain=None, max_rap_gain=None,
+        min_algo_gain=0, max_algo_gain=None,
+    )
+    trade = dict(
+        their_overall_value=7000, self_overall_value=6900, their_value=3500,
+        self_value=4000, their_rap=4000, self_rap=3000, their_rap_algo=3900,
+        self_rap_algo=2800, self_robux=50,
+    )
+    table = gains_table(trade, maker, "overall_gain").split("\n")
+    overall = next(line for line in table if "Overall Value" in line)
+    assert "+50" in overall and "450" in overall and "1,200" in overall
+    assert overall.endswith("<- failed")
+    assert table[-1] == "  (Robux in the trade: -50)"
+
+
+def test_failed_field_lists_what_stopped_the_trades():
+    from trade_algorithm import failed_field
+
+    text = failed_field({"value_gain": 43, "overall_gain": 1399, "rap_gain": 0})
+    assert text.startswith("Tried 1,442 trades.")
+    body = text.split("```")[1].strip().split("\n")
+    assert body == ["Overall Value gain      1,399", "Value gain                 43"]
+    assert "No trades to try" in failed_field({})

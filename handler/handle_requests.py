@@ -52,7 +52,7 @@ class RequestsHandler:
         """
         Add proxy to timeout and waits.
         """
-        log(f"Rate limit hit for proxy {proxy}, switching proxy...")
+        log(f"[REQUESTS] Proxy {proxy} is rate limited, switching proxy")
         self.proxy_timeout[proxy] = time.time() + self.timeout_duration
 
     def blacklist_proxy(self, proxy):
@@ -86,7 +86,7 @@ class RequestsHandler:
                 "https://auth.roblox.com/v2/login", data={}, timeout=30
             )
         except requests.RequestException as e:
-            log(f"Failed to post for a csrf token: {e}", severityNum=3)
+            log(f"[REQUESTS] Couldn't get a CSRF token: {e}", severityNum=3)
             return False
 
         token = response.headers.get("x-csrf-token")
@@ -95,7 +95,7 @@ class RequestsHandler:
             return True
 
         log(
-            f"No csrf token returned, cookie may be invalid; {response.headers}",
+            "[REQUESTS] Roblox didn't return a CSRF token, the cookie may be invalid",
             severityNum=3,
         )
         return False
@@ -154,7 +154,7 @@ class RequestsHandler:
 
             proxy_dict = self.return_proxy() if self.use_proxies else None
             if proxy_dict is None and self.use_proxies:
-                log("No available proxies, waiting...")
+                log("[REQUESTS] No proxies free, waiting...")
                 time.sleep(self.timeout_duration)
                 continue
 
@@ -166,11 +166,11 @@ class RequestsHandler:
                     raise exceptions_types.NetworkError(URL, e) from e
 
                 if self.use_proxies:
-                    log(f"Proxy error {proxy_dict['http']}, putting it on timeout")
+                    log(f"[REQUESTS] Proxy {proxy_dict['http']} failed, pausing it")
                     self.rate_limit(proxy_dict["http"])
                 else:
                     log(
-                        f"Network error on {URL} ({network_failures}/{MAX_NETWORK_RETRIES}): {e}",
+                        f"[REQUESTS] Network error on {URL.split('?')[0]} ({network_failures}/{MAX_NETWORK_RETRIES}): {e}",
                         severityNum=2,
                     )
                     self.Session.close()
@@ -205,7 +205,7 @@ class RequestsHandler:
                     raise error
 
                 wait_time = 10 * (2**consecutive_rate_limits)
-                log(f"Rate limited {URL} without proxies, waiting {wait_time} secs.")
+                log(f"[REQUESTS] Roblox is rate limiting, waiting {wait_time:g}s ({URL.split('?')[0]})")
                 time.sleep(wait_time)
                 continue
 
@@ -277,7 +277,7 @@ class RequestsHandler:
                 continue
 
             log(
-                f"Unknown status code on {URL} {status} {Response.text[:300]}",
+                f"[REQUESTS] Unexpected {status} from {URL.split('?')[0]}: {Response.text[:300]}",
                 severityNum=3,
             )
             raise exceptions_types.RobloxAPIError(Response)
@@ -289,7 +289,7 @@ class RequestsHandler:
                     "http://" + line.strip() for line in file if line.strip()
                 ]
         except OSError as e:
-            log(f"No proxy file, not using proxies. {e}")
+            log("[REQUESTS] No proxy file, not using proxies")
 
     def refresh_proxies(self, file_path="proxies.txt"):
         self.load_proxies(file_path)

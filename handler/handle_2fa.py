@@ -27,7 +27,7 @@ class AuthHandler:
             totp = pyotp.TOTP(auth_secret)
             totp.now()
         except (ValueError, TypeError, binascii.Error) as e:
-            log(f"Invalid auth secret: {e}")
+            log(f"[2FA] Invalid auth secret: {e}")
             return False
         return True
 
@@ -40,7 +40,7 @@ class AuthHandler:
         Returns the verification token.
         Raises TwoFactorError if Roblox refuses the code or retries run out.
         """
-        log(f"Starting 2FA verification for user {user_id}")
+        log(f"[2FA] Solving 2-step verification for {user_id}")
 
         max_retries = 10  # Prevent infinite loops
         retry_count = 0
@@ -69,7 +69,7 @@ class AuthHandler:
                 )
             except requests.RequestException as e:
                 last_problem = f"network error: {e}"
-                log(f"2FA request failed: {e}", severityNum=2)
+                log(f"[2FA] Request failed: {e}", severityNum=2)
                 time.sleep(5)
                 continue
 
@@ -84,12 +84,12 @@ class AuthHandler:
                     raise TwoFactorError(
                         f"No verification token in 2FA response for {user_id}"
                     )
-                log(f"Successfully obtained verification token for user {user_id}")
+                log(f"[2FA] Got a verification token for {user_id}", dontPrint=True)
                 return verification_token
 
             if response.status_code == 429:
                 last_problem = "rate limited"
-                log(f"2FA rate limit hit, waiting 75 seconds for user {user_id}")
+                log(f"[2FA] Rate limited, waiting 75 seconds ({user_id})")
                 self.is_ratelimited = True
                 try:
                     time.sleep(75)
@@ -113,7 +113,7 @@ class AuthHandler:
             # Authenticator code already used, wait for the next one
             if 18 in codes:
                 log(
-                    f"Authenticator code already used for {user_id}, waiting 30 seconds"
+                    f"[2FA] Authenticator code already used for {user_id}, waiting 30 seconds"
                 )
                 time.sleep(30)
                 continue

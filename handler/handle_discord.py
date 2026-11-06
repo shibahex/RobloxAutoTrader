@@ -158,17 +158,17 @@ class DiscordHandler:
                 if getattr(response, "status_code", None) == 429 or "429" in str(
                     response
                 ):
-                    log("Webhook ratelimited waiting 15 secs")
+                    log("[WEBHOOK] Rate limited, waiting 15 seconds", dontPrint=True)
                     time.sleep(15)
                     continue
                 time.sleep(0.5)
                 log(f"[DOGGO] {response}", dontPrint=True)
                 return True
 
-            log("Gave up sending webhook after repeated rate limits", severityNum=2)
+            log("[WEBHOOK] Gave up after repeated rate limits", severityNum=2)
             return False
         except (requests.RequestException, ValueError, TypeError) as e:
-            log(f"Failed to send webhook: {e}", severityNum=2)
+            log(f"[WEBHOOK] Couldn't send: {e}", severityNum=2)
             return False
 
     def send_error(self, webhook_url: str, title: str, details: str) -> bool:

@@ -43,6 +43,19 @@ def _item_ids(values):
     return ids
 
 
+# [Inbound Settings] gain -> the [Trading Settings] key it replaces for inbounds
+INBOUND_GAINS = {
+    ("Inbound Settings", "Minimum RAP Gain"): "Minimum_RAP_Gain",
+    ("Inbound Settings", "Maximum RAP Gain"): "Maximum_RAP_Gain",
+    ("Inbound Settings", "Minimum Value Gain"): "Minimum_Value_Gain",
+    ("Inbound Settings", "Maximum Value Gain"): "Maximum_Value_Gain",
+    ("Inbound Settings", "Minimum Overall Value Gain"): "Minimum_Overall_Gain",
+    ("Inbound Settings", "Maximum Overall Value Gain"): "Maximum_Overall_Gain",
+    ("Inbound Settings", "Minimum Rap Algorithm Gain"): "Minimum_Algo_Gain",
+    ("Inbound Settings", "Maximum Rap Algorithm Gain"): "Maximum_Algo_Gain",
+}
+
+
 class ConfigHandler:
     def __init__(self, filename="config.cfg"):
         self.config = configparser.ConfigParser()
@@ -422,6 +435,11 @@ class ConfigHandler:
             "Dont_Counter_Wins": self.get_boolean(
                 "Inbound Settings", "Dont Counter Wins"
             ),
+            # On unless set to False
+            "Decline_If_No_Counter": self.get_boolean(
+                "Inbound Settings", "Decline If No Counter"
+            )
+            is not False,
             # Off unless set: accepting a trade can't be undone
             "Accept_Valid_Trades": bool(
                 self.get_boolean("Inbound Settings", "Accept Valid Trades")
@@ -429,6 +447,18 @@ class ConfigHandler:
             "Check_Every_Minutes": _positive_number(
                 self.get_float("Inbound Settings", "Check Inbounds Every Minutes"), 30
             ),
+            "Gains": self.load_inbound_gains(),
+        }
+
+    def load_inbound_gains(self) -> dict:
+        """
+        [Inbound Settings] gains, for accepting and countering. Only the ones
+        that are set: the rest use [Trading Settings] (or the account's config).
+        """
+        return {
+            key: self.get_float(section, option)
+            for (section, option), key in INBOUND_GAINS.items()
+            if self.config.has_option(section, option)
         }
 
     def load_projected_detection(self):
@@ -465,7 +495,7 @@ class ConfigHandler:
                 else None
             )
         except (ValueError, TypeError) as e:
-            log(f"Error retrieving integer for [{section}] {option}: {e}")
+            log(f"[CONFIG] [{section}] {option} must be a whole number: {e}")
             self.invalid_settings.append(
                 f"[{section}] {option} (must be a whole number)"
             )
@@ -505,7 +535,7 @@ class ConfigHandler:
                 else None
             )
         except (ValueError, TypeError) as e:
-            log(f"Error retrieving string for [{section}] {option}: {e}")
+            log(f"[CONFIG] Couldn't read [{section}] {option}: {e}")
             self.invalid_settings.append(f"[{section}] {option}")
             return "Not Set"
 
@@ -517,7 +547,7 @@ class ConfigHandler:
                 else None
             )
         except (ValueError, TypeError) as e:
-            log(f"Error retrieving boolean for [{section}] {option}: {e}")
+            log(f"[CONFIG] [{section}] {option} must be True or False: {e}")
             self.invalid_settings.append(
                 f"[{section}] {option} (must be True or False)"
             )
@@ -534,7 +564,7 @@ class ConfigHandler:
                 return valid_values
             return []
         except (ValueError, TypeError) as e:
-            log(f"Error retrieving list of integers for [{section}] {option}: {e}")
+            log(f"[CONFIG] [{section}] {option} must be a list of whole numbers: {e}")
             return []
 
     def validate_config(self):

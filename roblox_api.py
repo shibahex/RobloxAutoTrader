@@ -12,7 +12,7 @@ from handler.handle_discord import DiscordHandler
 from handler.handle_config import ConfigHandler
 from handler.handle_json import JsonHandler
 from handler.handle_2fa import AuthHandler
-from trade_algorithm import TradeMaker
+from trade_algorithm import TradeMaker, failed_field, gains_table, reason_text
 from handler.account_settings import HandleConfigs
 from handler.handle_logs import log
 from handler import exceptions_types
@@ -105,6 +105,8 @@ class RobloxAPI:
         self.rolimons_cookie = None
         # 0 = check inbounds as soon as the bot starts
         self.counter_timer = 0
+        # Accepted inbounds already posted to the Completed webhook
+        self.posted_accepts = set()
 
         self.account_configs = HandleConfigs()
 
@@ -141,9 +143,12 @@ class RobloxAPI:
             self.outbound_trader = TradeMaker(
                 config=self.config, is_outbound_checker=True
             )
+            # Inbound trades use the [Inbound Settings] gains, when set
+            inbound_gains = self.config.inbounds.get("Gains")
             self.inbound_trader = TradeMaker(
-                config=self.config, is_inbound_checker=True
+                config=self.config, is_inbound_checker=True, gains=inbound_gains
             )
+            self.counter_maker = TradeMaker(config=self.config, gains=inbound_gains)
 
             # log("getting self")
             self.self_duplicates = {}
@@ -153,7 +158,7 @@ class RobloxAPI:
             except InventoryUnavailable as e:
                 # Not fatal: the trading loop refreshes it again every round
                 log(
-                    f"Couldn't load {self.username}'s inventory yet, will retry: {e.cause}",
+                    f"[ACCOUNT] Couldn't load {self.username}'s inventory yet, will retry: {e.cause}",
                     severityNum=2,
                 )
 
@@ -164,7 +169,7 @@ class RobloxAPI:
                 self.check_completeds()
             except TradebotError as e:
                 log(
-                    f"Couldn't check completed trades for {self.username}: {e}",
+                    f"[ACCOUNT] Couldn't check completed trades for {self.username}: {e}",
                     severityNum=2,
                 )
 
@@ -197,7 +202,7 @@ class RobloxAPI:
             except InventoryUnavailable as e:
                 last_error = e
                 log(
-                    f"Couldn't get {self.username}'s inventory (attempt {attempt}/{SELF_INVENTORY_ATTEMPTS}): {e.cause}",
+                    f"[ACCOUNT] Couldn't get {self.username}'s inventory (try {attempt}/{SELF_INVENTORY_ATTEMPTS}): {e.cause}",
                     severityNum=2,
                 )
                 if attempt < SELF_INVENTORY_ATTEMPTS:
@@ -206,7 +211,7 @@ class RobloxAPI:
 
             # NOTE: False = no tradeable inventory
             if self.account_inventory is False:
-                log(f"{self.username} Has no tradeable inventory")
+                log(f"[TRADING] {self.username} has no items it can trade")
                 return False
             return self.account_inventory
 
@@ -301,7 +306,7 @@ class RobloxAPI:
                 item_data = self.rolimon.item_data.get(itemId)
                 if item_data is None:
                     if self.config.debug["show_scanning_inventory"]:
-                        log(f"{itemId} not on Rolimons yet, skipping it")
+                        log(f"[INVENTORY] {itemId} isn't on Rolimons yet, skipping it", dontPrint=True)
                     continue
                 current_demand = item_data["demand"]
 
@@ -334,7 +339,7 @@ class RobloxAPI:
 
                     if nft_list and itemId in nft_list:
                         if self.config.debug["show_scanning_inventory"]:
-                            log(f"{itemId} in NFT list, skipping it")
+                            log(f"[INVENTORY] {itemId} is in your NFT list, skipping it")
                         continue
 
                     inventory[uaid] = {
@@ -368,7 +373,7 @@ class RobloxAPI:
                     ):
                         if self.config.debug["show_scanning_inventory"]:
                             log(
-                                f"[Inventory {userid}] Not trading for {itemId} (duplicates setting)"
+                                f"[INVENTORY] {userid}: not trading for {itemId} (duplicates setting)"
                             )
                         continue
 
@@ -381,7 +386,7 @@ class RobloxAPI:
                     ):
                         if self.config.debug["show_scanning_inventory"]:
                             log(
-                                f"[Inventory {userid}] Not allowing to trade for another {itemId}"
+                                f"[INVENTORY] {userid}: not trading for another {itemId}"
                             )
                         continue
 
@@ -393,13 +398,13 @@ class RobloxAPI:
                         }
                     else:
                         if self.config.debug["show_scanning_inventory"]:
-                            log(f"{itemId} in NFR list, skipping it")
+                            log(f"[INVENTORY] {itemId} is in your NFR list, skipping it")
 
         minimum_items = self.config.filter_users["Minimum_Total_Items"]
         if not is_self:
             if len(inventory.keys()) < minimum_items:
                 if self.config.debug["show_scanning_inventory"]:
-                    log(f"[Inventory {userid}] User doesn't match minimum items")
+                    log(f"[INVENTORY] {userid} doesn't have enough tradeable items", dontPrint=True)
 
                 return False
 
@@ -518,7 +523,7 @@ class RobloxAPI:
         trades = self.get_trades(
             "https://trades.roblox.com/v1/trades/inbound?limit=100&sortOrder=Desc"
         )
-        results = {"accepted": 0, "countered": 0, "kept": 0}
+        results = {"accepted": 0, "countered": 0, "declined": 0, "kept": 0}
         trade_limit = None
         for trade_info in trades.values():
             if not accept and not counter:
@@ -545,7 +550,7 @@ class RobloxAPI:
             try:
                 self.refresh_self_inventory()
             except InventoryUnavailable as e:
-                log(f"Couldn't refresh inventory after accepting: {e}", severityNum=2)
+                log(f"[INBOUND] Couldn't reload inventory after accepting: {e}", severityNum=2)
 
         if trade_limit is not None:
             raise trade_limit
@@ -559,6 +564,7 @@ class RobloxAPI:
             )
         )
         trade = self.format_trade_api(trade_json)
+        reason = "Accept Valid Trades is off"
 
         if accept:
             reason = self._inbound_reject_reason(trade)
@@ -575,10 +581,17 @@ class RobloxAPI:
                         f"[INBOUND] Accepted trade {trade_id} from {trader_id} "
                         f"(overall {self._overall_profit(trade):+})"
                     )
+                    if self.post_trade_webhook(
+                        "Completed_Webhook",
+                        trade,
+                        "Accepted an inbound trade ({profit} profit)",
+                        color=2,
+                    ):
+                        self.posted_accepts.add(str(trade_id))
                     return "accepted"
                 return "failed"
             log(
-                f"[INBOUND] Not accepting {trade_id}: {reason}",
+                f"[INBOUND] Not accepting {trade_id}: {reason_text(reason)}",
                 dontPrint=True,
             )
 
@@ -595,7 +608,20 @@ class RobloxAPI:
         if not counter:
             return "kept"
 
-        return "countered" if self._counter_trade(trade_id, trader_id) else "failed"
+        outcome = self._counter_trade(trade_id, trader_id, trade)
+        if outcome == "declined":
+            failed = getattr(self.counter_maker, "last_failed", None) or {}
+            self.post_trade_webhook(
+                "Send_Webhook",
+                trade,
+                "Declined a trade: no counter passed your gains ({profit} profit)",
+                color=0,
+                extra_fields={
+                    "Not accepted": (reason_text(reason), False),
+                    "Why no counter": (failed_field(failed), False),
+                },
+            )
+        return outcome
 
     @staticmethod
     def _overall_profit(trade) -> int:
@@ -732,32 +758,48 @@ class RobloxAPI:
                 time.sleep(1)
         return False
 
-    def _counter_trade(self, trade_id, trader_id) -> bool:
-        """Generates a trade from our config and sends it as a counter."""
+    def _counter_trade(self, trade_id, trader_id, trade=None) -> str:
+        """
+        Generates a trade from our config and sends it as a counter.
+        When no trade passes the config, declines it (Decline If No Counter).
+        Returns "countered", "declined" or "failed".
+        """
         if not self.check_can_trade(trader_id):
-            return False
+            return "failed"
 
         if not self.account_inventory:
             log(
-                f"[DEBUG] In counter, {self.username} has no tradeable inv refreshing inventory"
-            )
+                f"[INBOUND] {self.username} has no tradeable items, reloading inventory to counter", dontPrint=True)
             self.refresh_self_inventory()
             if not self.account_inventory:
-                return False
+                return "failed"
 
         trader_inventory = self.fetch_inventory(trader_id)
         if not trader_inventory:
-            return False
+            return "failed"
 
-        generated_trade = self.trade_maker.generate_trade(
+        generated_trade = self.counter_maker.generate_trade(
             self.account_inventory,
             trader_inventory,
             counter_trade=True,
             offered=self.offered_item_counts(),
+            original=(
+                {
+                    "self": trade["self_side_item_ids"],
+                    "their": trade["their_side_item_ids"],
+                }
+                if trade
+                else None
+            ),
         )
         if not generated_trade:
-            log(f"[INBOUND] Couldn't generate a counter for {trade_id}")
-            return False
+            if not self.config.inbounds["Decline_If_No_Counter"]:
+                log(f"[INBOUND] Couldn't generate a counter for {trade_id}")
+                return "failed"
+            if self._decline_trade(trade_id):
+                log(f"[INBOUND] No counter passes your config, declined {trade_id}")
+                return "declined"
+            return "failed"
 
         self.send_trade(
             trader_id,
@@ -768,7 +810,53 @@ class RobloxAPI:
             self_robux=generated_trade["self_robux"],
         )
         log(f"[INBOUND] Countered trade {trade_id}")
-        return True
+        counter = dict(
+            generated_trade,
+            their_id=trader_id,
+            self_side_item_ids=[
+                self.account_inventory[key]["item_id"]
+                for key in generated_trade["self_side"]
+            ],
+            their_side_item_ids=[
+                trader_inventory[key]["item_id"]
+                for key in generated_trade["their_side"]
+            ],
+        )
+        self.post_trade_webhook(
+            "Send_Webhook", counter, "Countered a trade ({profit} profit)", color=3
+        )
+        return "countered"
+
+    def post_trade_webhook(
+        self, webhook, trade, title, color, extra_fields=None
+    ) -> bool:
+        """
+        Posts a trade to a [Discord] webhook ("Send_Webhook" or
+        "Completed_Webhook"). {profit} in the title becomes the overall profit.
+        extra_fields: more {name: (text, inline)} fields under the trade.
+        Never raises: the trade already happened. Returns True if posted.
+        """
+        url = self.config.discord_settings.get(webhook)
+        if not url:
+            return False
+        try:
+            fields, profit = self.discord_webhook.embed_fields_from_trade(
+                trade,
+                self.rolimon.item_data,
+                self.rolimon.projected_json.read_cached(),
+            )
+            fields.update(extra_fields or {})
+            embed = self.discord_webhook.setup_embed(
+                title=title.format(profit=profit),
+                color=color,
+                user_id=trade["their_id"],
+                embed_fields=fields,
+                footer=self.username,
+            )
+            return self.discord_webhook.send_webhook(embed, url)
+        except (TradebotError, KeyError, TypeError) as e:
+            log(f"[WEBHOOK] Couldn't post to the {webhook.replace('_', ' ')}: {e}", severityNum=2)
+            return False
 
     def send_trade(
         self,
@@ -837,7 +925,7 @@ class RobloxAPI:
                     try:
                         self.check_completeds()
                     except TradebotError as check_error:
-                        log(f"Couldn't check completeds: {check_error}", severityNum=2)
+                        log(f"[COMPLETED] Couldn't check completed trades: {check_error}", severityNum=2)
                 raise rejection from e
             finally:
                 # this is a very ratelimited API so dont spam
@@ -849,7 +937,7 @@ class RobloxAPI:
                 raise InvalidResponse(
                     f"Trade sent but no tradeId: {e}", trade_api
                 ) from e
-            log("Trade sent!")
+            log("[TRADING] Trade sent", dontPrint=True)
             self.note_sent_trade(trade_send)
             return trade_id
 
@@ -888,7 +976,7 @@ class RobloxAPI:
             self.account_robux = int(response.json()["robux"])
         except (TradebotError, ValueError, KeyError, TypeError) as e:
             log(
-                f"Couldn't get robux for {getattr(self, 'username', self.account_id)}: {e}",
+                f"[ACCOUNT] Couldn't get Robux for {getattr(self, 'username', self.account_id)}: {e}",
                 severityNum=2,
             )
             self.account_robux = 0
@@ -913,7 +1001,7 @@ class RobloxAPI:
                 raise
             except TradebotError as e:
                 log(
-                    f"Couldn't load recent traders from {url}, may re-trade some users: {e}",
+                    f"[TRADING] Couldn't load recent traders, may trade some players again: {e}",
                     severityNum=2,
                 )
                 continue
@@ -1029,18 +1117,21 @@ class RobloxAPI:
                 self.refresh_self_inventory()
             except InventoryUnavailable as e:
                 log(
-                    f"Couldn't refresh inventory after completed trades: {e}",
+                    f"[COMPLETED] Couldn't reload inventory after completed trades: {e}",
                     severityNum=2,
                 )
 
             for trade_id in unlogged_trades:
+                if str(trade_id) in self.posted_accepts:
+                    self.posted_accepts.discard(str(trade_id))
+                    continue  # already posted when it was accepted
                 try:
                     self._post_completed_trade(trade_id)
                 except CookieInvalid:
                     raise
                 except TradebotError as e:
                     log(
-                        f"Couldn't post completed trade {trade_id}, skipping: {e}",
+                        f"[COMPLETED] Couldn't post completed trade {trade_id}, skipping: {e}",
                         severityNum=2,
                     )
 
@@ -1176,7 +1267,7 @@ class RobloxAPI:
                 except CookieInvalid:
                     raise
                 except TradebotError as e:
-                    log(f"Skipping outbound {trade_id}: {e}", severityNum=2)
+                    log(f"[OUTBOUND] Skipping {trade_id}: {e}", severityNum=2)
                     time.sleep(2)
 
             # Trades sent before this check are in outbound_cache now
@@ -1223,7 +1314,7 @@ class RobloxAPI:
         except BadRequest:
             return True
         except TradebotError as e:
-            log(f"Failed to cancel outbound {trade_id}: {e}", dontPrint=True)
+            log(f"Failed to decline {trade_id}: {e}", dontPrint=True)
             return False
         finally:
             time.sleep(1.5)
@@ -1349,7 +1440,7 @@ class RobloxAPI:
             )
             if profit < 0:
                 log(
-                    f"[OUTBOUND] Canceling trade from before config change, losing {profit} overall"
+                    f"[OUTBOUND] Cancelled a trade sent before your config changed (losing {profit:,} overall)"
                 )
                 return self._cancel_outbound(trade_id)
             return False
@@ -1358,7 +1449,7 @@ class RobloxAPI:
         duplicate = self._too_many_duplicates(formatted_trade["their_side_item_ids"])
         if duplicate is not None:
             if self._cancel_outbound(trade_id):
-                log(f"[OUTBOUND] Cancel trade: {duplicate} [duplicates]")
+                log(f"[OUTBOUND] Cancelled a trade: too many of {duplicate} (duplicates setting)")
                 return True
             return False
 
@@ -1376,31 +1467,12 @@ class RobloxAPI:
         )
 
         if not valid_trade:
-            log(f"Canceling Outbound trade for reason: {reason}")
-
-            log(
-                f"Self RAP: {formatted_trade['self_rap']}, Trader RAP: {
-                    formatted_trade['their_rap']
-                } | Robux: {formatted_trade['self_robux']}"
-            )
-            log(
-                f"Self Algo: {formatted_trade['self_rap_algo']}, Their Algo: {
-                    formatted_trade['their_rap_algo']
-                }"
-            )
-            log(
-                f"Values - Self: {formatted_trade['self_value']}, Trader: {
-                    formatted_trade['their_value']
-                }"
-            )
-            log(
-                f"Overall Values - Self: {
-                    formatted_trade['self_overall_value']
-                }, Trader: {formatted_trade['their_overall_value']}"
-            )
-
             if self._cancel_outbound(trade_id):
-                log("Cleared losing outbound...")
+                log(
+                    f"[OUTBOUND] Cancelled trade {trade_id}: {reason_text(reason)} "
+                    "doesn't pass your config anymore\n"
+                    + gains_table(formatted_trade, self.outbound_trader, reason)
+                )
                 return True
         return False
 
@@ -1428,12 +1500,12 @@ class RobloxAPI:
                     url, additional_headers=validation_headers
                 )
         except (ChallengeRequired, TwoFactorError) as e:
-            log(f"Couldn't pass 2FA on can-trade check: {e}", severityNum=2)
+            log(f"[TRADING] Couldn't pass 2FA on the can-trade check: {e}", severityNum=2)
             return False
         except (Forbidden, NotFound, BadRequest):
             return False
         except (exceptions_types.ServerError, exceptions_types.NetworkError) as e:
-            log(f"Can-trade check failed for {userid}: {e}", severityNum=2)
+            log(f"[TRADING] Can-trade check failed for {userid}: {e}", severityNum=2)
             time.sleep(10)
             return False
 
@@ -1487,14 +1559,14 @@ class RobloxAPI:
                 resale_json = read_json(self.parse_handler.requestAPI(url))
                 break
             except RateLimited:
-                log(f"ratelimited resale data (attempt {attempt}/3)")
+                log(f"[ITEMS] Sales data rate limited (try {attempt}/3)", dontPrint=True)
                 time.sleep(30)
             except TradebotError as e:
-                log(f"Couldn't get resale data for {item_id}: {e}", severityNum=2)
+                log(f"[ITEMS] Couldn't get sales data for {item_id}: {e}", severityNum=2)
                 return
         if resale_json is None:
             log(
-                f"Gave up on resale data for {item_id} after rate limits", severityNum=2
+                f"[ITEMS] Gave up on sales data for {item_id} after rate limits", severityNum=2
             )
             return
 
@@ -1604,7 +1676,7 @@ class RobloxAPI:
                 return None
             # TODO: maybe resolve faces because thier ItemID makes this response fail
             except TradebotError as e:
-                log(f"Couldn't get owners of {item_id}: {e}", severityNum=2)
+                log(f"[OWNERS] Couldn't get owners of {item_id}: {e}", severityNum=2)
                 return None
 
             for asset in assets:
@@ -1613,7 +1685,7 @@ class RobloxAPI:
                 # log(asset['owner'])
                 if int(asset["owner"]["id"]) in self.all_cached_traders:
                     if self.config.debug["show_scanning_users"]:
-                        log("Already Traded with User, skipping.")
+                        log("[OWNERS] Already traded with this player, skipping", dontPrint=True)
                     continue
                 # else:
                 #     log("appending", asset['owner']['id'], "if date is good")
@@ -1640,7 +1712,7 @@ class RobloxAPI:
                     # log("Appending Active User")
                     owners.append(asset["owner"]["id"])
         if self.config.debug["show_scanning_users"]:
-            log(f"owners: {owners}")
+            log(f"[OWNERS] Owners: {owners}")
         return owners
 
 

@@ -1,3 +1,4 @@
+from collections import Counter
 from handler.handle_config import ConfigHandler
 from itertools import combinations
 import math
@@ -42,52 +43,149 @@ SELECT_TRADE_OPTIONS = (
 DEFAULT_SELECT_TRADE = "lowest_rap_gain"
 
 
+def items_first(keys, inventory, item_ids):
+    """keys with the ones whose item is in item_ids moved to the front."""
+    item_ids = set(item_ids)
+    return sorted(keys, key=lambda key: inventory[key]["item_id"] not in item_ids)
+
+
+def changed_items(side, inventory, item_ids) -> int:
+    """How many items were added to or removed from item_ids to get side."""
+    now = Counter(inventory[key]["item_id"] for key in side)
+    before = Counter(item_ids)
+    return sum(((now - before) + (before - now)).values())
+
+
+# validate_trade's reasons, as people read them
+REASON_NAMES = {
+    "value_gain": "Value gain",
+    "overall_gain": "Overall Value gain",
+    "rap_gain": "RAP gain",
+    "algo_gain": "RAP Algorithm gain",
+    "min_value_of_trade": "Value sum of trade",
+    "min_rap_of_trade": "RAP sum of trade",
+    "close_perc": "score %",
+    "overall_close_percentage": "Overall Value score %",
+    "rap_close_percentage": "RAP score %",
+}
+
+
+def reason_text(reason) -> str:
+    """'overall_gain' -> 'Overall Value gain' (anything else is left as is)."""
+    return REASON_NAMES.get(reason, str(reason))
+
+
+def gain_text(gain) -> str:
+    """A config gain: None -> off, 0.1 -> 10%, 450 -> 450."""
+    if gain is None or isinstance(gain, str):
+        return "off"
+    if -1 < gain < 1 and gain != 0:
+        return f"{gain * 100:g}%"
+    return f"{gain:,g}"
+
+
+def failed_text(invalid_reasons: dict) -> str:
+    """How many trades each setting stopped, biggest first."""
+    failed = sorted(((n, r) for r, n in invalid_reasons.items() if n), reverse=True)
+    if not failed:
+        return "Nothing to try with these items."
+    return "Stopped by: " + ", ".join(f"{reason_text(r)} ({n:,})" for n, r in failed)
+
+
+def failed_field(invalid_reasons: dict) -> str:
+    """A Discord field: how many tries each setting stopped, as a lined-up list."""
+    failed = sorted(((n, r) for r, n in invalid_reasons.items() if n), reverse=True)
+    if not failed:
+        return "No trades to try with these items (item limits or filters)."
+    width = max(len(reason_text(r)) for _, r in failed)
+    lines = [f"{reason_text(r):<{width}}  {n:>9,}" for n, r in failed]
+    total = sum(n for n, _ in failed)
+    return (
+        f"Tried {total:,} trades. What stopped them:\n```\n"
+        + "\n".join(lines)
+        + "\n```"
+    )
+
+
+def gains_table(trade: dict, maker, failed_reason=None) -> str:
+    """
+    Every gain of a trade next to what the config needs, as an indented table.
+    Robux counts toward every gain but Value, like when trades are checked.
+    """
+    robux = (trade.get("their_robux") or 0) - (trade.get("self_robux") or 0)
+    rows = [
+        ("overall_gain", "Overall Value",
+         trade["their_overall_value"] - trade["self_overall_value"] + robux,
+         maker.min_overall_gain, maker.max_overall_gain),
+        ("value_gain", "Value", trade["their_value"] - trade["self_value"],
+         maker.min_value_gain, maker.max_value_gain),
+        ("rap_gain", "RAP", trade["their_rap"] - trade["self_rap"] + robux,
+         maker.min_rap_gain, maker.max_rap_gain),
+        ("algo_gain", "RAP Algorithm",
+         trade["their_rap_algo"] - trade["self_rap_algo"] + robux,
+         maker.min_algo_gain, maker.max_algo_gain),
+    ]
+    lines = [f"  {'Gain':<16}{'Now':>10}   {'Min':>8}   {'Max':>8}"]
+    for reason, name, gain, low, high in rows:
+        mark = "   <- failed" if reason == failed_reason else ""
+        lines.append(
+            f"  {name:<16}{round(gain):>+10,}   {gain_text(low):>8}   "
+            f"{gain_text(high):>8}{mark}"
+        )
+    if robux:
+        lines.append(f"  (Robux in the trade: {robux:+,})")
+    return "\n".join(lines)
+
+
 class TradeMaker:
     def __init__(
         self,
         config=ConfigHandler("config.cfg"),
         is_outbound_checker=False,
         is_inbound_checker=False,
+        gains=None,
     ):
+        """gains: trading keys that replace the config's (the inbound gains)."""
         self.config = config
+        trading = {**self.config.trading, **(gains or {})}
 
-        self.min_rap_gain = self.config.trading["Minimum_RAP_Gain"]
-        self.max_rap_gain = self.config.trading["Maximum_RAP_Gain"]
+        self.min_rap_gain = trading["Minimum_RAP_Gain"]
+        self.max_rap_gain = trading["Maximum_RAP_Gain"]
 
-        self.min_overall_gain = self.config.trading["Minimum_Overall_Gain"]
-        self.max_overall_gain = self.config.trading["Maximum_Overall_Gain"]
+        self.min_overall_gain = trading["Minimum_Overall_Gain"]
+        self.max_overall_gain = trading["Maximum_Overall_Gain"]
 
-        self.min_algo_gain = self.config.trading["Minimum_Algo_Gain"]
-        self.max_algo_gain = self.config.trading["Maximum_Algo_Gain"]
+        self.min_algo_gain = trading["Minimum_Algo_Gain"]
+        self.max_algo_gain = trading["Maximum_Algo_Gain"]
 
         # print(self.min_rap_gain, self.max_rap_gain, "hay")
-        self.min_value_gain = self.config.trading["Minimum_Value_Gain"]
-        self.max_value_gain = self.config.trading["Maximum_Value_Gain"]
+        self.min_value_gain = trading["Minimum_Value_Gain"]
+        self.max_value_gain = trading["Maximum_Value_Gain"]
 
         self.min_rap_score_percentage = self.config.trading["MinRAPScorePercentage"]
         self.max_rap_score_percentage = self.config.trading["MaxRAPScorePercentage"]
 
-        self.min_overall_score_percentage = self.config.trading[
+        self.min_overall_score_percentage = trading[
             "MinOverallValueScorePercentage"
         ]
-        self.max_overall_score_percentage = self.config.trading[
+        self.max_overall_score_percentage = trading[
             "MaxOverallValueScorePercentage"
         ]
 
-        self.min_items_self = self.config.trading["MinimumItemsYourSide"]
-        self.max_items_self = self.config.trading["MaximumItemsYourSide"]
+        self.min_items_self = trading["MinimumItemsYourSide"]
+        self.max_items_self = trading["MaximumItemsYourSide"]
 
-        self.min_items_their = self.config.trading["MinimumItemsTheirSide"]
-        self.max_items_their = self.config.trading["MaximumItemsTheirSide"]
+        self.min_items_their = trading["MinimumItemsTheirSide"]
+        self.max_items_their = trading["MaximumItemsTheirSide"]
         self.select_by = self.config.filter_generated["Select_Trade_Using"]
         self.outbound_variety = self.config.filter_generated.get("Outbound_Variety")
 
-        self.max_robux = self.config.trading["MaxRobux"]
-        self.robux_divide = self.config.trading["RobuxDividePercentage"]
-        self.trade_robux = self.config.trading["TradeRobux"]
+        self.max_robux = trading["MaxRobux"]
+        self.robux_divide = trading["RobuxDividePercentage"]
+        self.trade_robux = trading["TradeRobux"]
 
-        self.min_value_of_trade = self.config.trading["MinimumValueOfTrade"]
-        self.min_rap_of_trade = self.config.trading["MinimumRapOfTrade"]
+        self.min_value_of_trade = trading["MinimumValueOfTrade"]
+        self.min_rap_of_trade = trading["MinimumRapOfTrade"]
 
         self.max_valid_trades = self.config.filter_generated["Max_Valid_Trades"]
         self.trade_timeout = self.config.filter_generated[
@@ -96,8 +194,8 @@ class TradeMaker:
 
         self.debug_print = self.config.debug["trading_debug"]
 
-        self.outbound_cancel_offset = self.config.trading["Outbound_Cancel_Offset"]
-        self.algo_outbound_offset = self.config.trading["Algo_Cancel_Offset"]
+        self.outbound_cancel_offset = trading["Outbound_Cancel_Offset"]
+        self.algo_outbound_offset = trading["Algo_Cancel_Offset"]
         if is_outbound_checker:
             if self.min_rap_gain is not None:
                 self.min_rap_gain = (
@@ -121,11 +219,10 @@ class TradeMaker:
                 )
 
             log(
-                f"Cancel trades that go below: [min algo gain: {
-                    self.min_algo_gain
-                }, min overall gain: {self.min_overall_gain}, min rap gain: {
-                    self.min_rap_gain
-                }]"
+                "[OUTBOUND] Cancelling sent trades that drop below: overall gain "
+                f"{gain_text(self.min_overall_gain)}, RAP Algorithm gain "
+                f"{gain_text(self.min_algo_gain)}, RAP gain {gain_text(self.min_rap_gain)}",
+                dontPrint=True,
             )
 
             self.max_rap_gain = None
@@ -310,17 +407,34 @@ class TradeMaker:
         return [trade for trade, r in zip(valid_trades, reuse) if r <= limit]
 
     def generate_trade(
-        self, self_inventory, their_inventory, counter_trade=False, offered=None
+        self,
+        self_inventory,
+        their_inventory,
+        counter_trade=False,
+        offered=None,
+        original=None,
     ):
         """
         Algorithm responsible for generating combinations and validating them..
         if its a counter trade it will select random trade to send back.
         offered: our items' open-outbound counts, for Outbound Variety.
+        original: for a counter, the trade they sent, as item ids
+        {"self": [...], "their": [...]}. Its items are tried first and the
+        counter that changes the fewest items wins.
         """
         valid_trades = []
+        self.last_failed = {}
 
         def pick_trade():
-            candidates = self.prefer_unoffered(valid_trades, offered)
+            # A counter stays close to their trade, so skip Outbound Variety
+            candidates = (
+                valid_trades
+                if original
+                else self.prefer_unoffered(valid_trades, offered)
+            )
+            if original:
+                fewest = min(t["changes"] for t in candidates)
+                candidates = [t for t in candidates if t["changes"] == fewest]
             # pick random trade to avoid sending the same counter trade
             if counter_trade:
                 trade = self.select_trade(candidates, select_by="random")
@@ -329,7 +443,7 @@ class TradeMaker:
             select_by = (self.select_by or DEFAULT_SELECT_TRADE).lower()
             if select_by not in SELECT_TRADE_OPTIONS:
                 log(
-                    f"Select Trade Using = {select_by} isn't a valid option, "
+                    f"[CONFIG] Select Trade Using = {select_by} isn't a valid option, "
                     f"using {DEFAULT_SELECT_TRADE}",
                     severityNum=2,
                 )
@@ -350,6 +464,10 @@ class TradeMaker:
 
         self_keys = list(self_inventory.keys())
         their_keys = list(their_inventory.keys())
+        if original:
+            # Their trade's items first, so close counters are found before a timeout
+            self_keys = items_first(self_keys, self_inventory, original["self"])
+            their_keys = items_first(their_keys, their_inventory, original["their"])
         if self.debug_print:
             log("Trade algorithm got keys", severityNum=5)
 
@@ -362,7 +480,7 @@ class TradeMaker:
                 def get_value(field):
                     if item.get(field) is not None:
                         return item[field]
-                    log(f"{item} doesnt have value {field}")
+                    log(f"[TRADING] {item.get('item_id', key)} has no {field}, counting it as 0", dontPrint=True)
                     return 0
 
                 totals[key] = (
@@ -423,7 +541,8 @@ class TradeMaker:
         if self.debug_print:
             log("Trade algorithm: starting trade generation", severityNum=5)
 
-        invalid_reasons = {
+        # How many tries each setting stopped, read by the declined webhook
+        self.last_failed = invalid_reasons = {
             "value_gain": 0,
             "min_rap_of_trade": 0,
             "min_value_of_trade": 0,
@@ -443,7 +562,8 @@ class TradeMaker:
                 and time.perf_counter() - start_time > self.trade_timeout
             ):
                 log(
-                    f"Timeout reached while generating trades. invalid reasons: {invalid_reasons}"
+                    "[TRADING] Ran out of time looking for a trade. "
+                    + failed_text(invalid_reasons)
                 )
                 break
             self_side_item_ids = {self_inventory[key]["item_id"] for key in self_side}
@@ -583,6 +703,16 @@ class TradeMaker:
                                 "num_items_their": num_items_their,
                                 "self_overall_value": self_overall_value,
                                 "their_overall_value": their_overall_value,
+                                "changes": (
+                                    changed_items(
+                                        self_side, self_inventory, original["self"]
+                                    )
+                                    + changed_items(
+                                        their_side, their_inventory, original["their"]
+                                    )
+                                    if original
+                                    else 0
+                                ),
                             }
                         )
 
@@ -590,7 +720,7 @@ class TradeMaker:
                             self.max_valid_trades
                             and len(valid_trades) > self.max_valid_trades
                         ):
-                            log("Trade algorithm: valid trade limits reached")
+                            log("[TRADING] Hit Max Valid Trades, picking from those", dontPrint=True)
                             return pick_trade()
 
                     else:
@@ -602,7 +732,7 @@ class TradeMaker:
             return pick_trade()
 
         log(
-            f"Couldnt find valid_trades heres invalid trades reasons: {invalid_reasons}"
+            "[TRADING] No trade passed your config. " + failed_text(invalid_reasons)
         )
         return None
 
@@ -723,17 +853,14 @@ class TradeMaker:
         Uses a generator to yield combinations one at a time.
         """
         if not keys:
-            log("Error: Keys list is empty.")
+            log("[TRADING] No items to make trades from", dontPrint=True)
             return
             # Returning an empty generator
 
         if len(keys) < min_items:
             log(
-                f"Error: Not enough keys to generate combinations. Keys: {
-                    keys
-                }, Min items: {min_items}"
-            )
-            log("Ignoring to send trades")
+                f"[TRADING] Only {len(keys)} item(s), but a side needs at least {min_items}", dontPrint=True)
+            log("[TRADING] Not sending trades with these items", dontPrint=True)
             # return
 
         # Adjust bounds for min_items and max_items

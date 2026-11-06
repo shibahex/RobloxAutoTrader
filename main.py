@@ -67,7 +67,7 @@ class Doggo:
             (2, "Config Manager"),
             (3, "Execute Trader"),
         )
-        log(f"Version: {full_version()}")
+        log(f"[BOT] Version {full_version()}")
         self.cli.print_menu("Main Menu", options)
         try:
             answer = int(self.cli.input_prompt("Enter Option"))
@@ -106,7 +106,7 @@ class Doggo:
             details += "\n" + "".join(
                 traceback.format_exception(type(error), error, error.__traceback__)
             )
-        log(f"{title} | {details}", severityNum=4 if with_traceback else 3)
+        log(f"[BOT] {title}: {details}", severityNum=4 if with_traceback else 3)
         webhook = self.rolimons.config.discord_settings.get("Error_Webhook")
         self.discord_webhook.send_error(webhook, title, f"```{details[-3900:]}```")
 
@@ -165,11 +165,11 @@ class Doggo:
             try:
                 random_item = self.rolimons.return_item_to_scan()
             except exceptions_types.NoItemsToScan as e:
-                log(str(e), severityNum=3)
+                log(f"[OWNERS] {e}", severityNum=3)
                 time.sleep(60)
                 continue
             except exceptions_types.RolimonsError as e:
-                log(f"Waiting for Rolimons data: {e}", severityNum=2)
+                log(f"[ROLIMONS] Waiting for Rolimons data: {e}", severityNum=2)
                 time.sleep(30)
                 continue
 
@@ -185,14 +185,14 @@ class Doggo:
                 continue
 
             if roblox_account.config.debug["show_scanning_users"]:
-                log(f"fetched new owners {owners} \n {'*' * 30}")
+                log(f"[OWNERS] Found {len(owners)} new owners: {owners}")
 
             for owner in owners:
                 if stop_event.is_set():
                     return
                 if int(owner) in roblox_account.all_cached_traders:
                     if roblox_account.config.debug["show_scanning_users"]:
-                        log("already traded with player, skipping")
+                        log("[OWNERS] Already traded with this player, skipping", dontPrint=True)
                     continue
 
                 roblox_account.all_cached_traders.add(owner)
@@ -200,7 +200,7 @@ class Doggo:
                     if not roblox_account.check_can_trade(owner):
                         continue
                     if roblox_account.config.debug["show_scanning_users"]:
-                        log(f"User: {owner} has trades on, checking invetory..")
+                        log(f"[OWNERS] {owner} has trades on, checking their inventory", dontPrint=True)
 
                     inventory = roblox_account.fetch_inventory(owner)
                 except exceptions_types.CookieInvalid as e:
@@ -210,17 +210,17 @@ class Doggo:
                     log(f"Skipping {owner}: {e.cause}", dontPrint=True)
                     continue
                 except exceptions_types.TradebotError as e:
-                    log(f"Skipping {owner}: {e}", severityNum=2)
+                    log(f"[OWNERS] Skipping {owner}: {e}", severityNum=2, dontPrint=True)
                     continue
                 finally:
                     time.sleep(0.15)
 
                 if not inventory:
-                    log(f"{owner} has no inventory skipping")
+                    log(f"[OWNERS] {owner} has no tradeable items, skipping", dontPrint=True)
                     continue
 
                 if roblox_account.config.debug["show_scanning_users"]:
-                    log(f"fetched inventory for {owner}")
+                    log(f"[OWNERS] Loaded {owner}'s inventory", dontPrint=True)
 
                 # The round may have ended while we were fetching; this inventory
                 # was screened for this account, so don't hand it to the next one
@@ -245,7 +245,7 @@ class Doggo:
                 self.last_updated_rolimons = time.time()
                 self.recheck_outbounds(roblox_accounts)
             except exceptions_types.RolimonsError as e:
-                log(f"Rolimons update failed, keeping old data: {e}", severityNum=2)
+                log(f"[ROLIMONS] Update failed, keeping old data: {e}", severityNum=2)
             time.sleep(120)
 
     def recheck_outbounds(self, roblox_accounts):
@@ -266,7 +266,7 @@ class Doggo:
                 self.disable_account(account, e)
             except exceptions_types.TradebotError as e:
                 log(
-                    f"Outbound recheck failed for {account.username}: {e}",
+                    f"[OUTBOUND] Recheck failed for {account.username}: {e}",
                     severityNum=2,
                 )
 
@@ -277,14 +277,14 @@ class Doggo:
                     continue
                 try:
                     if not account.config.debug["dont_check_outbounds"]:
-                        log("Outbound checker thread started")
+                        log("[OUTBOUND] Started checking the trades you sent")
                         account.outbound_api_checker()
                     account.check_completeds()
                 except exceptions_types.CookieInvalid as e:
                     self.disable_account(account, e)
                 except exceptions_types.TradebotError as e:
                     log(
-                        f"Outbound check failed for {account.username}, trying again next round: {e}",
+                        f"[OUTBOUND] Check failed for {account.username}, trying again next round: {e}",
                         severityNum=2,
                     )
 
@@ -311,22 +311,23 @@ class Doggo:
             results = account.handle_inbounds(accept=accept, counter=counter)
             log(
                 f"[INBOUND] {account.username}: accepted {results['accepted']}, "
-                f"countered {results['countered']}, kept {results['kept']}"
+                f"countered {results['countered']}, "
+                f"declined {results.get('declined', 0)}, kept {results['kept']}"
             )
             return results
         except exceptions_types.TradeLimit:
-            log(f"{account.username} hit the trade limit while countering")
+            log(f"[INBOUND] {account.username} hit the daily trade limit while countering")
             if not account.config.debug["ignore_limit"]:
                 self.json.add_ratelimit_timestamp(account.cookies[".ROBLOSECURITY"])
         except exceptions_types.CookieInvalid as e:
             self.disable_account(account, e)
         except exceptions_types.TradebotError as e:
-            log(f"Inbound check failed for {account.username}: {e}", severityNum=2)
+            log(f"[INBOUND] Check failed for {account.username}: {e}", severityNum=2)
         return None
 
     def counter_trade_thread(self, roblox_accounts):
         """Checks every account's inbound trades every Check Inbounds Every Minutes."""
-        log("inbound trade thread started")
+        log("[INBOUND] Started checking trades people send you")
         while True:
             for account in roblox_accounts:
                 if self.is_disabled(account):
@@ -416,7 +417,7 @@ class Doggo:
                     keep_going = True
                 except exceptions_types.TradebotError as e:
                     log(
-                        f"{current_account.username} round failed, moving to next account: {e}",
+                        f"[TRADING] {current_account.username}'s round failed, moving to the next account: {e}",
                         severityNum=2,
                     )
                     keep_going = True
@@ -440,7 +441,7 @@ class Doggo:
         trade-limited and the loop should start over after waiting.
         """
         if time.time() - current_account.last_generated_csrf_timer >= 900:
-            log("Refreshing csrf token")
+            log("[REQUESTS] Refreshing CSRF token", dontPrint=True)
             current_account.request_handler.generate_csrf()
             current_account.last_generated_csrf_timer = time.time()
 
@@ -449,7 +450,7 @@ class Doggo:
         if not current_account.config.debug["ignore_limit"]:
             if self.json.is_all_ratelimited():
                 log(
-                    "All cookies sent out 100 daily trades. Rechecking in 20 minutes..."
+                    "[TRADING] Every account hit its daily trade limit. Checking again in 20 minutes"
                 )
                 time.sleep(20 * 60)
                 return False
@@ -458,7 +459,7 @@ class Doggo:
                 current_account.cookies[".ROBLOSECURITY"]
             ):
                 log(
-                    f"{current_account.username} Hit 100 trade limit continuing to next acc"
+                    f"[TRADING] {current_account.username} hit its daily trade limit, moving to the next account"
                 )
                 return True
 
@@ -466,14 +467,14 @@ class Doggo:
             current_account.refresh_self_inventory()
         except exceptions_types.InventoryUnavailable as e:
             log(
-                f"Couldn't load {current_account.username}'s inventory, skipping this round: {e.cause}",
+                f"[TRADING] Couldn't load {current_account.username}'s inventory, skipping this round: {e.cause}",
                 severityNum=2,
             )
             time.sleep(5)
             return True
 
         if not current_account.account_inventory:
-            log(f"{current_account.username} has no tradeable inventory")
+            log(f"[TRADING] {current_account.username} has no items it can trade, skipping it")
             self.json.add_ratelimit_timestamp(current_account.cookies[".ROBLOSECURITY"])
             time.sleep(5)
             return True
@@ -484,20 +485,20 @@ class Doggo:
             raise
         except exceptions_types.TradebotError as e:
             log(
-                f"Couldn't check premium for {current_account.username}, skipping this round: {e}",
+                f"[TRADING] Couldn't check Premium for {current_account.username}, skipping this round: {e}",
                 severityNum=2,
             )
             time.sleep(5)
             return True
 
         if not is_premium:
-            log(f"{current_account.username} is not premium")
+            log(f"[TRADING] {current_account.username} doesn't have Premium, so it can't trade. Skipping it")
             self.json.add_ratelimit_timestamp(current_account.cookies[".ROBLOSECURITY"])
             time.sleep(5)
             return True
 
         current_account.get_recent_traders()
-        log("Fetched recent traders")
+        log("[TRADING] Loaded recent traders (they get skipped)")
         # TODO: add max days inactive in cfg and parse as arg
 
         # Fresh stop signal per round so the last account's scanner can't keep running,
@@ -512,9 +513,9 @@ class Doggo:
             stop_event=self.stop_event,
         )
 
-        log("All threads executed! Processing Trades...")
+        log("[BOT] Everything is running, trading now")
         self.process_trades_for_account(current_account)
-        log("Stopping threads...")
+        log("[BOT] Stopping...")
         return True
 
     def process_trades_for_account(self, account):
@@ -531,9 +532,9 @@ class Doggo:
                     return None
                 time.sleep(10)
 
-            log("Started trading...")
+            log("[TRADING] Started trading", dontPrint=True)
             if not account.account_inventory:
-                log("[Debug] process account inventory on hold breaking")
+                log("[DEBUG] process account inventory on hold breaking", dontPrint=True)
                 return None
 
             # Using list() creates a copy of the keys
@@ -544,20 +545,19 @@ class Doggo:
                 time_spent = time.time() - account.last_sent_trade
                 if time_spent > max_seconds:
                     log(
-                        f"Couldnt find any trades for {account.username} {max_seconds} seconds"
+                        f"[TRADING] No trades found for {account.username} in {max_seconds:g} seconds, moving on"
                     )
                     account.last_sent_trade = time.time()
                     return None
                 log(
-                    f"{time_spent} time spent trying to find trades with {account.username}"
-                )
+                    f"[TRADING] {account.username} has searched {time_spent:.0f}s for a trade", dontPrint=True)
 
-                log(f"searching for trades with {trader}")
+                log(f"[TRADING] Checking trader {trader}", dontPrint=True)
                 trader_inventory = self.user_queue.pop(trader, None)
                 account_inventory = account.account_inventory
 
                 if not account_inventory:
-                    log(f"{account.username} Doesn't have a tradeable inventory..")
+                    log(f"[TRADING] {account.username} has no items it can trade")
                     return None
                 if not trader_inventory:
                     continue
@@ -582,11 +582,10 @@ class Doggo:
                     return None
                 if result == "sent":
                     TradeDebugSent += 1
-                    log(f"Trades sent: {TradeDebugSent}")
+                    log(f"[TRADING] Trades sent this round: {TradeDebugSent}", dontPrint=True)
                 if result == "no_trade" and not account.account_inventory:
                     log(
-                        "[Debug] process account in trading inventory on hold returning"
-                    )
+                        "[DEBUG] process account in trading inventory on hold returning", dontPrint=True)
                     return None
 
     def trade_with(self, account, trader, account_inventory, trader_inventory) -> str:
@@ -594,13 +593,13 @@ class Doggo:
         Generates and sends one trade. Returns what happened:
         "sent", "no_trade", "skipped", "next_account" or "stop".
         """
-        log(f"generating trade for {account.username}")
+        log(f"[TRADING] Generating a trade for {account.username}", dontPrint=True)
         generated_trade = account.trade_maker.generate_trade(
             account_inventory, trader_inventory, offered=account.offered_item_counts()
         )
 
         if not generated_trade:
-            log(f"no generated trade for {account.username}")
+            log(f"[TRADING] No trade generated for {account.username}", dontPrint=True)
             return "no_trade"
 
         if account.config.debug["trading_debug"]:
@@ -615,21 +614,21 @@ class Doggo:
                 account.send_trade(trader, self_side, their_side, self_robux=self_robux)
             except exceptions_types.TradeLimit:
                 if account.config.debug["ignore_limit"]:
-                    log("Roblox account limited (ignore_limit is on, continuing)")
+                    log(f"[TRADING] {account.username} hit its daily trade limit (Ignore trade limit is on, continuing)")
                     return "skipped"
-                log("Roblox account limited")
+                log(f"[TRADING] {account.username} hit its daily trade limit")
                 self.json.add_ratelimit_timestamp(account.cookies[".ROBLOSECURITY"])
                 return "stop"
             except exceptions_types.ItemsUnavailable as e:
-                log(f"Some items in the trade are gone, refreshing inventory: {e}")
+                log(f"[TRADING] Some items in the trade are gone, reloading inventory: {e}")
                 try:
                     account.refresh_self_inventory()
                 except exceptions_types.InventoryUnavailable as inv_error:
-                    log(f"Couldn't refresh inventory: {inv_error.cause}", severityNum=2)
+                    log(f"[TRADING] Couldn't reload inventory: {inv_error.cause}", severityNum=2)
                     return "next_account"
                 return "skipped"
             except exceptions_types.UserCannotTrade as e:
-                log(f"{trader} can't trade right now: {e}")
+                log(f"[TRADING] {trader} can't trade right now: {e}", dontPrint=True)
                 return "skipped"
             except exceptions_types.TwoFactorError as e:
                 self.report_error(
@@ -637,13 +636,13 @@ class Doggo:
                 )
                 return "next_account"
             except exceptions_types.RateLimited as e:
-                log(f"Trade send rate limited, waiting a minute: {e}", severityNum=2)
+                log(f"[TRADING] Sending trades is rate limited, waiting a minute: {e}", severityNum=2)
                 time.sleep(60)
                 return "skipped"
             except exceptions_types.CookieInvalid:
                 raise
             except exceptions_types.TradebotError as e:
-                log(f"Couldn't send trade to {trader}: {e}", severityNum=2)
+                log(f"[TRADING] Couldn't send a trade to {trader}: {e}", severityNum=2)
                 return "skipped"
 
         account.last_sent_trade = time.time()
@@ -655,7 +654,7 @@ class Doggo:
             )
         except (exceptions_types.TradebotError, KeyError, TypeError) as e:
             log(
-                f"Trade sent to {trader} but couldn't post the webhook: {e}",
+                f"[WEBHOOK] Trade sent to {trader}, but couldn't post the webhook: {e}",
                 severityNum=2,
             )
         return "sent"
@@ -701,25 +700,24 @@ class Doggo:
         if isinstance(receive_items, tuple):
             receive_items = "\n".join(map(str, receive_items))
 
-        breakdown = embed_fields["Trade Breakdown"]
-        divider = "=" * 40
-
-        print("\n")
-        log(f"{divider}")
-        log("[TRADE INFO]".center(40, "="))
-        log(f"Total Profit: {total_profit}\n")
-        log(f"Sending: \n{send_items}")
-        log(f"\nRecieve: \n{receive_items}")
-        log(f"\n*** BREAKDOWN ***\n{breakdown}")
-        log(f"\n{divider}\n")
-        print("\n")
+        breakdown = embed_fields["Trade Breakdown"][0]
+        lines = [
+            f"[TRADING] {account.username} sent a trade to {trader} "
+            f"({total_profit:+,} overall)",
+            "  You give:",
+            *("    " + line for line in send_items.splitlines()),
+            "  You get:",
+            *("    " + line for line in receive_items.splitlines()),
+            "  " + breakdown,
+        ]
+        log("\n".join(lines))
 
     def load_roblox_accounts(self):
         """
         Returns a list of Roblox Classes that were made from the cookie json.
         Accounts that fail to load are reported and skipped.
         """
-        log("Loading roblox accounts...")
+        log("[BOT] Loading accounts...")
         cookie_json = self.json.read_data()
         roblox_accounts = []
 
@@ -735,7 +733,7 @@ class Doggo:
                 user_id = account["user_id"]
             except KeyError as e:
                 log(
-                    f"{name} in cookies.json is missing {e}, skipping it", severityNum=3
+                    f"[BOT] {name} in cookies.json is missing {e}, skipping it", severityNum=3
                 )
                 continue
 
@@ -773,11 +771,11 @@ if __name__ == "__main__":
         doggo.main()
 
     except KeyboardInterrupt:
-        log("Stopped by user")
+        log("[BOT] Stopped")
 
     except Exception as e:
         tb = traceback.format_exc()  # Capture the full traceback
-        log(f"Bot crashed: {e} {tb}", severityNum=4)
+        log(f"[BOT] Crashed: {e}\n{tb}", severityNum=4)
         input("Press enter to exit.")
 
     finally:

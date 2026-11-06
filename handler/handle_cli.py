@@ -1,12 +1,17 @@
 import colorama
 import time
 
+from handler.handle_logs import use_color
+
 colorama.init(autoreset=True)
 
-red = colorama.Fore.RED
-magenta = colorama.Fore.MAGENTA
-green = colorama.Fore.GREEN
-reset = colorama.Style.RESET_ALL
+# No color when NO_COLOR is set or the output isn't a terminal; every message
+# still says what it is in words ([ERROR], [SUCCESS], ...)
+COLOR = use_color()
+red = colorama.Fore.RED if COLOR else ""
+magenta = colorama.Fore.MAGENTA if COLOR else ""
+green = colorama.Fore.GREEN if COLOR else ""
+reset = colorama.Style.RESET_ALL if COLOR else ""
 
 
 class Terminal:
@@ -17,9 +22,7 @@ class Terminal:
     def print_menu(title, options):
         print(f"---{magenta + title + reset}---")
         for index, option in enumerate(options, 1):
-            print(
-                f"[{colorama.Fore.MAGENTA}{index}{colorama.Style.RESET_ALL}] {option[1]}"
-            )
+            print(f"[{magenta}{index}{reset}] {option[1]}")
 
     @staticmethod
     def print_error(message):

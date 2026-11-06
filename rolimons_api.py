@@ -136,7 +136,7 @@ class RolimonAPI:
             self.update_data()
         except RolimonsError as e:
             log(
-                f"Couldn't load Rolimons data at startup, will retry: {e}",
+                f"[ROLIMONS] Couldn't load Rolimons data at startup, will retry: {e}",
                 severityNum=3,
             )
         # ItemID: Timestamp
@@ -181,7 +181,7 @@ class RolimonAPI:
         ]
 
         if self.config.debug["show_scanning_users"]:
-            log(f"[DOGGO] Picking random item from list size: {len(filtered_items)}")
+            log(f"[OWNERS] Picking a random item out of {len(filtered_items)}", dontPrint=True)
 
         if not filtered_items:
             raise NoItemsToScan(
@@ -295,7 +295,7 @@ class RolimonAPI:
                         collectibleId=inventory[item]["collectibleItemId"],
                     )
                 except TradebotError as e:
-                    log(f"Projected check failed for {asset_id}: {e}", severityNum=2)
+                    log(f"[ITEMS] Projected check failed for {asset_id}: {e}", severityNum=2)
 
             projected_data = self.projected_json.read_cached()
 
@@ -308,7 +308,7 @@ class RolimonAPI:
                     sale_gap = projected_entry["average_gap"]
                 except (KeyError, TypeError) as e:
                     log(
-                        f"Projected data for {asset_id} is incomplete ({e}), skipping item"
+                        f"[ITEMS] Sales data for {asset_id} is incomplete ({e}), skipping the item"
                     )
                     continue
 
@@ -322,7 +322,7 @@ class RolimonAPI:
                     rap_algo_value = 0
                 elif mode != "rap_algo":
                     log(
-                        "RAP Algorithm for Valued Items, isn't set right; using default of rap_algo"
+                        "[CONFIG] RAP Algorithm for Valued Items isn't set right, using rap_algo"
                     )
 
             if not is_self:
