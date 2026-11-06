@@ -16,15 +16,19 @@ This bot used to be a paid service that im releasing, because I dont intend on u
 ### 🛠️ Quality of life
 - Multiple Cookie Management: Add multiple cookies to trade on and alert when premium expires.
 - Projected Detection: Identify potentially manipulated items
-- Outbound Checker: Cancel Losing outbounds
+- Outbound Checker: Cancels outbounds that turn into losses or would give you a projected item, re-checked every time Rolimons updates
 - Auto Account Setup: Can login through the browser and the bot will automatically take your cookie.
+- Clear Config Errors: A setting with a typo stops the bot at startup and tells you which one
+- Prebuilt Downloads: Windows .exe and Linux binary with every release
 
 ### 🔄 Trading Features
 - Value Trading: Integrates with Rolimons value data
 - RAP Trading: Integrates with Roblox Recent-Average-Price values
 - RAP Algorithm: Algorithm imported from [OTB](https://github.com/pydlv/otb-legacy) to determine the real recent RAP using an algorithm
 - 2FA Verifier: Solves 2FA challenge to allow trading
-- Inbound Checker: Can counter/accept inbound trades (Might have to enable it in source-code)
+- Inbound Checker: Accepts inbound trades that pass your config and counters the rest (both optional)
+- Rolimons Trade Ads: Posts trade ads for your accounts to bring in more inbounds
+- Outbound Variety: Spreads your items across outbounds, so one accepted trade doesn't make the rest invalid
 - Duplicate Control: Prevent accumulating too many identical items
 
 ### 📊 Advanced Filtering
@@ -34,7 +38,7 @@ This bot used to be a paid service that im releasing, because I dont intend on u
 
 
 #  Installation
-If you download the [exe](https://github.com/shibahex/RobloxAutoTrader/releases/tag/windows) skip these steps
+If you download the [latest release](https://github.com/shibahex/RobloxAutoTrader/releases/latest) (Windows .exe or Linux binary), skip these steps
 ### 1. Clone this repo
 ```bash
 git clone https://github.com/shibahex/RobloxAutoTrader.git
@@ -58,9 +62,9 @@ Video (skip to 0:12): https://youtu.be/2SdEivsw8yA?si=kvisNUJGlJV0dyZ9&t=12
 #### Adding an Account and 2FA Authorization Secret
 Theres two built-in ways of doing this in account manager, automatic browser login or manual setup, 
 
-for automatic login give it your 2fa authorzation secret from ROBLOX (shown in video) and then login to your account through the browser and it will add that account
+for automatic login give it your 2FA Secret Code from ROBLOX (shown in video) and then login to your account through the browser and it will add that account
 
-if that didn't work you can manually input the 2fa authorzation secret and cookie and it will make an entry into the json file.
+if that didn't work you can manually input the 2FA Secret Code and cookie and it will make an entry into the json file.
 
 
 
