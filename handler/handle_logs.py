@@ -3,8 +3,8 @@ Prints and saves the bot's messages.
 
 Every line reads the same in any terminal, with or without color:
 
-     1:02:11 PM  Inbound      tisiallyyy: countered 5, declined 12, kept 1
-     1:02:15 PM  Requests     WARNING: Roblox is rate limiting, waiting 20s
+     1:02:11 PM Inbound   tisiallyyy: countered 5, declined 12, kept 1
+     1:02:15 PM Requests  WARNING: Roblox is rate limiting, waiting 20s
 
 A message that starts with a tag like "[INBOUND]" gets it moved into the tag
 column. Warnings and errors always say so in words; color only adds to that.
@@ -14,10 +14,14 @@ Color is off when NO_COLOR is set or the output isn't a terminal.
 import logging
 import os
 import re
+import shutil
 import sys
+import textwrap
+import threading
 import time
 
-TAG_WIDTH = 12
+TAG_WIDTH = 9
+PRINT_LOCK = threading.Lock()
 
 # severityNum -> (word shown before the message, color)
 LEVELS = {
@@ -59,24 +63,61 @@ def split_tag(msg: str):
     return tag, msg[match.end() :]
 
 
-def format_line(msg, severity=0, color=False, clock=None) -> str:
-    """One console line (continuation lines are indented under the message)."""
+def wrap(text: str, width: int | None, indent: str) -> list[str]:
+    """Wraps each line to width; wrapped parts get the indent (plus their own)."""
+    if not width:
+        return text.split("\n")
+    out = []
+    for line in text.split("\n"):
+        own = " " * (len(line) - len(line.lstrip(" ")))
+        out += textwrap.wrap(
+            line,
+            width=max(20, width),
+            subsequent_indent=own + "  ",
+            break_long_words=False,
+            break_on_hyphens=False,
+        ) or [""]
+    return out
+
+
+def format_line(msg, severity=0, color=False, clock=None, width=None) -> str:
+    """
+    One message: "time  Tag       text". Lines after the first start under the
+    tag, so they stay readable on small terminals. width: wrap to this many
+    columns (the terminal's), None = don't wrap (log file).
+    """
     tag, text = split_tag(str(msg))
-    level = 5 if tag.lower() in ("debug", "debugging") else severity
+    if " " in tag:  # "[ACCOUNT two]" -> tag Account, "two: ..." in the text
+        tag, who = tag.split(" ", 1)
+        text = f"{who}: {text}"
+    level = severity
+    if tag.lower() in ("debug", "debugging"):
+        level, tag = 5, ""
     word, level_color = LEVELS.get(level, ("", ""))
-    if level == 5 and tag.lower() in ("debug", "debugging"):
-        tag = ""
     stamp = clock or clock_time()
-    lead = f"{stamp}  {tag:<{TAG_WIDTH}} "
     if word:
         text = f"{word}: {text}"
-    text = text.replace("\n", "\n" + " " * len(lead))
+
+    lead = f"{stamp} {tag:<{TAG_WIDTH}} "
+    indent = " " * (len(stamp) + 1)
+    first, *rest = text.split("\n")
+    lines = wrap(first, width and width - len(lead), "")
+    lines[1:] = [indent + line for line in lines[1:]]
+    for line in rest:
+        lines += [indent + part for part in wrap("  " + line, width and width - len(indent), "")]
+    body = lines[0] + "".join("\n" + line for line in lines[1:])
+
     if not color:
-        return lead + text
-    tag_part = f"{DIM}{stamp}{RESET}  {tag:<{TAG_WIDTH}} "
-    if level_color:
-        return tag_part + level_color + text + RESET
-    return tag_part + text
+        return lead + body
+    lead = f"{DIM}{stamp}{RESET} {tag:<{TAG_WIDTH}} "
+    return lead + (level_color + body + RESET if level_color else body)
+
+
+def terminal_width() -> int | None:
+    try:
+        return shutil.get_terminal_size((0, 0)).columns or None
+    except (OSError, ValueError):
+        return None
 
 
 class Logging:
@@ -105,13 +146,21 @@ class Logging:
             severityNum = 0
 
         if dontPrint is not True:
-            line = format_line(msg, severityNum, color=use_color())
-            try:
-                print(line, flush=True)
-            except UnicodeEncodeError:
-                # Old Windows consoles can't show some item names
-                encoding = getattr(sys.stdout, "encoding", None) or "ascii"
-                print(line.encode(encoding, "replace").decode(encoding), flush=True)
+            color = use_color()
+            line = format_line(
+                msg, severityNum, color=color, width=terminal_width() if color else None
+            )
+            # One write per message, so threads can't mix their lines
+            with PRINT_LOCK:
+                try:
+                    sys.stdout.write(line + "\n")
+                except UnicodeEncodeError:
+                    # Old Windows consoles can't show some item names
+                    encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+                    sys.stdout.write(
+                        line.encode(encoding, "replace").decode(encoding) + "\n"
+                    )
+                sys.stdout.flush()
 
         saved = format_line(
             msg, severityNum, clock=time.strftime("%Y-%m-%d ") + clock_time().strip()

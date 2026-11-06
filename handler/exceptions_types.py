@@ -78,6 +78,18 @@ class RobloxAPIError(TradebotError):
         return any(text in (msg or "").lower() for _, msg in self.errors)
 
 
+def short_error(error) -> str:
+    """
+    An error for the console: just Roblox's own message when it sent one
+    ("Trade value ratio is not sufficient."), without the status and URL.
+    """
+    errors = getattr(error, "errors", None)
+    messages = [m for _, m in errors or () if m]
+    if messages:
+        return "Roblox says: " + "; ".join(messages)
+    return str(error)
+
+
 class BadRequest(RobloxAPIError):
     """400: the payload was rejected."""
 

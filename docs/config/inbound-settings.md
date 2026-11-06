@@ -8,6 +8,8 @@ What to do with trades people send you. Checked every `Check Inbounds Every Minu
 |---|---|
 | `Accept Valid Trades` | Accepts trades that pass your config. Off by default. |
 | `Minimum/Maximum ... Gain` | RAP, Value, Overall Value and Rap Algorithm gains for inbounds, used to accept and to counter. They replace the `[Trading Settings]` gains (and account configs') for inbounds. A missing line uses the `[Trading Settings]` one. Accepting ignores the maximums. |
+| `Maximum Amount of Duplicate Items` | Extra copies of an item you're allowed to own, for trades people send you (accepting and countering). Replaces the [Filtering Items] one for inbounds. 2 = you can own up to 3. Default 2. |
+| `Maximum Amount of Trader Duplicate Items` | Extra copies of the same item you'll take from the person who sent the trade. 2 = up to 3 of one item. Default 2. |
 | `Counter Trades` | Counters trades that aren't accepted. The counter keeps as much of their trade as it can, changing as few items as possible to pass your inbound gains. |
 | `Dont Counter Wins` | Leaves trades that are already a win in Overall Value alone instead of countering. |
 | `Decline If No Counter` | When no counter passes your config, declines the trade (needs `Counter Trades`). False leaves it in your inbounds to be tried again next check. Missing counts as True. |

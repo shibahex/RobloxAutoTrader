@@ -1,3 +1,19 @@
+import re
+from urllib.parse import urlsplit
+
+ID_PART = re.compile(r"^(\d+|[0-9a-f]{8}-[0-9a-f-]{27,})$", re.I)
+
+
+def endpoint(url) -> str:
+    """
+    Which API a URL is, without IDs or query, e.g.
+    trades.roblox.com/v2/trades/123?x=1 -> trades.roblox.com/v2/trades/{id}
+    """
+    parts = urlsplit(str(url))
+    path = "/".join(
+        "{id}" if ID_PART.match(part) else part for part in parts.path.split("/")
+    )
+    return (parts.netloc + path) or str(url)
 import time
 
 import random
@@ -170,7 +186,7 @@ class RequestsHandler:
                     self.rate_limit(proxy_dict["http"])
                 else:
                     log(
-                        f"[REQUESTS] Network error on {URL.split('?')[0]} ({network_failures}/{MAX_NETWORK_RETRIES}): {e}",
+                        f"[REQUESTS] Network error on {endpoint(URL)} ({network_failures}/{MAX_NETWORK_RETRIES}): {e}",
                         severityNum=2,
                     )
                     self.Session.close()
@@ -205,7 +221,7 @@ class RequestsHandler:
                     raise error
 
                 wait_time = 10 * (2**consecutive_rate_limits)
-                log(f"[REQUESTS] Roblox is rate limiting, waiting {wait_time:g}s ({URL.split('?')[0]})")
+                log(f"[REQUESTS] Roblox is rate limiting, waiting {wait_time:g}s ({endpoint(URL)})")
                 time.sleep(wait_time)
                 continue
 

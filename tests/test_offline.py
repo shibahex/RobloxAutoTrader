@@ -1154,10 +1154,43 @@ def test_inbound_asking_for_robux_is_not_accepted(router, inbound):
 
 
 def test_inbound_with_too_many_duplicates_is_not_accepted(router, inbound):
-    inbound.config.filter_items["Maximum_Amount_of_Duplicate_Items"] = 1
+    inbound.config.inbounds["Max_Duplicates"] = 1
     inbound.self_duplicates = {"1:1": 1}
     inbound.handle_inbounds(accept=True, counter=False)
     assert accepted(router) == []
+
+
+def test_inbound_uses_its_own_duplicate_limit(router, inbound):
+    # [Filtering Items] would block it, the inbound limit (2) allows it
+    inbound.config.filter_items["Maximum_Amount_of_Duplicate_Items"] = 0
+    inbound.config.inbounds["Max_Duplicates"] = 2
+    inbound.self_duplicates = {"1:1": 1}
+    inbound.handle_inbounds(accept=True, counter=False)
+    assert len(accepted(router)) == 1
+
+
+def test_counter_we_sent_is_judged_by_inbound_settings(account):
+    from handler.counter_history import CounterHistory, trade_signature
+
+    account.counter_history = CounterHistory(None)
+    trade = {
+        "their_id": 2,
+        "self_side_item_ids": ["1:1"],
+        "their_side_item_ids": ["1:2"],
+        "self_robux": 0,
+    }
+    assert not account._is_our_counter(trade)
+    account.counter_history.record_counter(2, trade_signature(["1:1"], ["1:2"]))
+    assert account._is_our_counter(trade)
+
+
+def test_inbound_duplicate_settings_default_to_two(tmp_path):
+    from handler.handle_config import ConfigHandler
+
+    cfg = tmp_path / "c.cfg"
+    cfg.write_text("[Inbound Settings]\n")
+    inbounds = ConfigHandler(str(cfg)).inbounds
+    assert inbounds["Max_Duplicates"] == 2 and inbounds["Max_Trader_Duplicates"] == 2
 
 
 def test_accept_solves_2fa(router, inbound):
@@ -1268,7 +1301,7 @@ def no_counter_account(router, inbound, decline):
     inbound.config.inbounds["Decline_If_No_Counter"] = decline
     inbound.check_can_trade = lambda trader_id: True
     inbound.account_inventory = {"x": {}}
-    inbound.fetch_inventory = lambda trader_id: {"y": {}}
+    inbound.fetch_inventory = lambda trader_id, **k: {"y": {}}
     inbound.offered_item_counts = lambda: {}
     inbound.counter_maker = types.SimpleNamespace(generate_trade=lambda *a, **k: None)
     router.set(TRADE_URL, resp(200, inbound_trade_json(["1:1"], ["1:2"])))
@@ -2606,7 +2639,7 @@ def test_counter_is_posted_yellow_to_send(router, inbound):
     posts = webhooks_on(inbound)
     inbound.check_can_trade = lambda trader_id: True
     inbound.account_inventory = {"m": {"item_id": "1:1"}}
-    inbound.fetch_inventory = lambda trader_id: {"t": {"item_id": "1:2"}}
+    inbound.fetch_inventory = lambda trader_id, **k: {"t": {"item_id": "1:2"}}
     inbound.offered_item_counts = lambda: {}
     inbound.counter_maker = types.SimpleNamespace(
         generate_trade=lambda *a, **k: {
@@ -2628,15 +2661,27 @@ def test_counter_is_posted_yellow_to_send(router, inbound):
 def test_log_lines_read_without_color():
     from handler.handle_logs import format_line
 
-    assert format_line("[INBOUND] Countered", clock="13:02:11") == (
-        "13:02:11  Inbound      Countered"
+    assert format_line("[INBOUND] Countered", clock="1:02:11 PM") == (
+        "1:02:11 PM Inbound   Countered"
     )
-    warning = format_line("[REQUESTS] slow", 2, clock="13:02:11")
+    warning = format_line("[REQUESTS] slow", 2, clock="1:02:11 PM")
     assert warning.endswith("WARNING: slow") and "\033" not in warning
-    # Continuation lines line up under the message
-    first, second = format_line("[BOT] a\nb", clock="13:02:11").split("\n")
-    assert second.index("b") == first.index("a")
-    assert format_line("no tag", clock="1").startswith("1  " + " " * 12)
+    # Later lines start under the tag, indented a little
+    first, second = format_line("[BOT] a\nb", clock="1:02:11 PM").split("\n")
+    assert second == " " * 11 + "  b"
+    # A tag with a name: the name moves into the message
+    assert format_line("[ACCOUNT two] Joining", clock="1").endswith(
+        "Account   two: Joining"
+    )
+
+
+def test_log_lines_wrap_to_the_terminal():
+    from handler.handle_logs import format_line
+
+    text = "[TRADING] " + " ".join(["word"] * 40)
+    lines = format_line(text, clock="1:02:11 PM", width=60).split("\n")
+    assert len(lines) > 1 and all(len(line) <= 60 for line in lines)
+    assert format_line(text, clock="1:02:11 PM").count("\n") == 0  # log file
 
 
 def test_log_color_only_on_terminals(monkeypatch):
@@ -2664,7 +2709,7 @@ def test_gains_table_shows_every_gain_and_the_failed_one():
     overall = next(line for line in table if "Overall Value" in line)
     assert "+50" in overall and "450" in overall and "1,200" in overall
     assert overall.endswith("<- failed")
-    assert table[-1] == "  (Robux in the trade: -50)"
+    assert table[-1] == "(Robux in the trade: -50)"
 
 
 def test_failed_field_lists_what_stopped_the_trades():
@@ -2862,3 +2907,32 @@ def test_log_clock_is_12_hour_and_same_width(monkeypatch):
         fake = time.struct_time((2026, 11, 6, hour + (12 if shown.endswith("PM") else 0), 8, 32, 4, 310, 0))
         monkeypatch.setattr(handle_logs.time, "localtime", lambda *a, f=fake: f)
         assert handle_logs.clock_time() == shown
+
+
+def test_failed_table_fits_the_terminal():
+    from trade_algorithm import failed_text
+
+    reasons = {"overall_gain": 2355, "value_gain": 186, "rap_gain": 0, "algo_gain": 0}
+    wide = failed_text(reasons, width=120).split("\n")
+    assert wide[0] == "Tried 2,541 trades. What stopped them:"
+    assert len(wide) == 3 and " | " in wide[1]  # two columns
+    assert wide[1].startswith("Overall Value gain  2,355")
+    narrow = failed_text(reasons, width=50).split("\n")
+    assert len(narrow) == 5 and all(" | " not in row for row in narrow)
+
+
+def test_endpoint_hides_ids_and_query():
+    from handler.handle_requests import endpoint
+
+    assert endpoint("https://trades.roblox.com/v2/trades/1998757328879237/counter") == (
+        "trades.roblox.com/v2/trades/{id}/counter"
+    )
+    assert endpoint(
+        "https://inventory.roblox.com/v2/assets/37819953/owners?cursor=abc&limit=100"
+    ) == "inventory.roblox.com/v2/assets/{id}/owners"
+    assert endpoint(
+        "https://trades.roblox.com/v2/users/3249113585/tradableItems"
+    ) == "trades.roblox.com/v2/users/{id}/tradableItems"
+    assert endpoint(
+        "https://x.com/a/7792dea7-78d8-4f85-b608-8e5ad0d55541"
+    ) == "x.com/a/{id}"

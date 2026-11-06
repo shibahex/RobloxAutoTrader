@@ -466,6 +466,13 @@ class ConfigHandler:
             "Instant_Replies_For_Bot": self._whole_number(
                 "Inbound Settings", "Instant Replies To Call It A Bot", 3
             ),
+            # Duplicates for inbounds (accepting and counters); missing = 2
+            "Max_Duplicates": self._whole_number(
+                "Inbound Settings", "Maximum Amount of Duplicate Items", 2
+            ),
+            "Max_Trader_Duplicates": self._whole_number(
+                "Inbound Settings", "Maximum Amount of Trader Duplicate Items", 2
+            ),
             "Counter_Memory_Hours": _positive_number(
                 self.get_float_default("Inbound Settings", "Counter Memory Hours", 24),
                 24,

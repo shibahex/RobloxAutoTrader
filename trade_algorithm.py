@@ -5,7 +5,7 @@ from itertools import combinations
 import math
 import random
 import time
-from handler.handle_logs import log
+from handler.handle_logs import log, terminal_width
 
 
 # Their side's combinations are worked out once and reused when there are at
@@ -95,21 +95,35 @@ def failed_counts(invalid_reasons: dict) -> list:
     return sorted(invalid_reasons.items(), key=lambda item: -item[1])
 
 
-def failed_text(invalid_reasons: dict) -> str:
+def failed_text(invalid_reasons: dict, width=None) -> str:
     """
-    How many trades each setting stopped, every setting, biggest first, as a
-    two-column table under a "Tried N trades" line.
+    "Tried N trades. What stopped them:" then a table of every setting with how
+    many trades it stopped, biggest first. Two columns when the terminal fits
+    them, one when it's narrow. width: terminal columns (None = look it up).
     """
     counts = failed_counts(invalid_reasons)
     total = sum(n for _, n in counts)
     if not total:
-        return "Nothing to try with these items."
-    cells = [f"{reason_text(r):<22}{n:>9,}" for r, n in counts]
-    half = (len(cells) + 1) // 2
-    rows = [
-        "  " + left + ("     " + right if right else "")
-        for left, right in zip(cells[:half], cells[half:] + [""])
+        return "There were no trades to try with these items."
+    names = [reason_text(r) for r, _ in counts]
+    name_width = max(len(name) for name in names)
+    number_width = max(3, len(f"{counts[0][1]:,}"))
+    cells = [
+        f"{name:<{name_width}}  {n:>{number_width},}"
+        for name, (_, n) in zip(names, counts)
     ]
+    cell = name_width + 2 + number_width
+    if width is None:
+        width = terminal_width() or 100
+    # The log line puts the table under the tag column, 13 characters in
+    if width - 13 >= cell * 2 + 3:
+        half = (len(cells) + 1) // 2
+        rows = [
+            left + (" | " + right if right else "")
+            for left, right in zip(cells[:half], cells[half:] + [""])
+        ]
+    else:
+        rows = cells
     return f"Tried {total:,} trades. What stopped them:\n" + "\n".join(rows)
 
 
@@ -146,15 +160,15 @@ def gains_table(trade: dict, maker, failed_reason=None) -> str:
          trade["their_rap_algo"] - trade["self_rap_algo"] + robux,
          maker.min_algo_gain, maker.max_algo_gain),
     ]
-    lines = [f"  {'Gain':<16}{'Now':>10}   {'Min':>8}   {'Max':>8}"]
+    lines = [f"{'Gain':<16}{'Now':>9}  {'Min':>7}  {'Max':>7}"]
     for reason, name, gain, low, high in rows:
-        mark = "   <- failed" if reason == failed_reason else ""
+        mark = "  <- failed" if reason == failed_reason else ""
         lines.append(
-            f"  {name:<16}{round(gain):>+10,}   {gain_text(low):>8}   "
-            f"{gain_text(high):>8}{mark}"
+            f"{name:<16}{round(gain):>+9,}  {gain_text(low):>7}  "
+            f"{gain_text(high):>7}{mark}"
         )
     if robux:
-        lines.append(f"  (Robux in the trade: {robux:+,})")
+        lines.append(f"(Robux in the trade: {robux:+,})")
     return "\n".join(lines)
 
 
@@ -435,6 +449,7 @@ class TradeMaker:
         offered=None,
         original=None,
         avoid=None,
+        about="",
     ):
         """
         Algorithm responsible for generating combinations and validating them..
@@ -445,6 +460,8 @@ class TradeMaker:
         counter that changes the fewest items wins.
         avoid: signatures (trade_signature) of trades not to send again, like
         counters this trader already got.
+        about: who the trade is for, in the "no trade passed" message. Counters
+        don't log it (the inbound handler explains the decline instead).
         """
         valid_trades = []
         self.last_failed = {}
@@ -597,10 +614,11 @@ class TradeMaker:
                 self.trade_timeout
                 and time.perf_counter() - start_time > self.trade_timeout
             ):
-                log(
-                    "[TRADING] Ran out of time looking for a trade. "
-                    + failed_text(invalid_reasons)
-                )
+                if not counter_trade:
+                    log(
+                        f"[TRADING] {about}ran out of time looking for a trade.\n"
+                        + failed_text(invalid_reasons)
+                    )
                 break
             self_side_item_ids = {self_inventory[key]["item_id"] for key in self_side}
             (
@@ -768,7 +786,9 @@ class TradeMaker:
             return pick_trade()
 
         log(
-            "[TRADING] No trade passed your config. " + failed_text(invalid_reasons)
+            f"[TRADING] {about}no trade passed your config.\n"
+            + failed_text(invalid_reasons),
+            dontPrint=counter_trade,
         )
         return None
 

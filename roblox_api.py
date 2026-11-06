@@ -13,11 +13,18 @@ from handler.handle_discord import DiscordHandler
 from handler.handle_config import ConfigHandler
 from handler.handle_json import JsonHandler
 from handler.handle_2fa import AuthHandler
-from trade_algorithm import TradeMaker, failed_field, gains_table, reason_text
+from trade_algorithm import (
+    TradeMaker,
+    failed_field,
+    failed_text,
+    gains_table,
+    reason_text,
+)
 from handler.account_settings import HandleConfigs
 from handler.handle_logs import log
 from handler import exceptions_types
 from handler.exceptions_types import (
+    short_error,
     TradebotError,
     RobloxAPIError,
     BadRequest,
@@ -150,6 +157,10 @@ class RobloxAPI:
                 config=self.config, is_inbound_checker=True, gains=inbound_gains
             )
             self.counter_maker = TradeMaker(config=self.config, gains=inbound_gains)
+            # Counters we sent are judged by the inbound gains, not the trading ones
+            self.counter_checker = TradeMaker(
+                config=self.config, is_outbound_checker=True, gains=inbound_gains
+            )
             self.counter_history = CounterHistory(
                 account_id=self.account_id,
                 memory_hours=self.config.inbounds["Counter_Memory_Hours"],
@@ -244,11 +255,18 @@ class RobloxAPI:
                 f"No id/name in authenticated user response: {e}", url
             ) from e
 
-    def fetch_inventory(self, userid):
+    def fetch_inventory(self, userid, max_owned=None, max_from_trader=None):
         """
         Returns a dict of items from the user, will return False if there no scrapable items.
         Raises InventoryUnavailable if the inventory is private or the API keeps failing.
+        max_owned / max_from_trader: duplicate limits to use instead of
+        [Filtering Items] (counters use the [Inbound Settings] ones).
         """
+        filters = self.config.filter_items
+        if max_owned is None:
+            max_owned = filters["Maximum_Amount_of_Duplicate_Items"]
+        if max_from_trader is None:
+            max_from_trader = filters["Maximum_Amount_of_Trader_Duplicate_Items"]
 
         def add_to_duplicates(duplicates: dict, itemId: str):
             if itemId not in duplicates:
@@ -373,8 +391,7 @@ class RobloxAPI:
 
                     if (
                         str(itemId) in self.self_duplicates
-                        and self.self_duplicates[str(itemId)]
-                        >= self.config.filter_items["Maximum_Amount_of_Duplicate_Items"]
+                        and self.self_duplicates[str(itemId)] >= max_owned
                     ):
                         if self.config.debug["show_scanning_inventory"]:
                             log(
@@ -384,10 +401,7 @@ class RobloxAPI:
 
                     if (
                         str(itemId) in trader_duplicates
-                        and trader_duplicates[str(itemId)]
-                        > self.config.filter_items[
-                            "Maximum_Amount_of_Trader_Duplicate_Items"
-                        ]
+                        and trader_duplicates[str(itemId)] > max_from_trader
                     ):
                         if self.config.debug["show_scanning_inventory"]:
                             log(
@@ -550,7 +564,10 @@ class RobloxAPI:
             except CookieInvalid:
                 raise
             except TradebotError as e:
-                log(f"[INBOUND] Skipping trade {trade_id}: {e}", severityNum=2)
+                log(
+                    f"[INBOUND] Skipping trade {trade_id}: {short_error(e)}",
+                    severityNum=2,
+                )
                 continue
             if outcome in results:
                 results[outcome] += 1
@@ -632,7 +649,10 @@ class RobloxAPI:
         if loop:
             if not self._decline_trade(trade_id):
                 return "failed"
-            log(f"[INBOUND] Declined {trade_id} from {trader_id}: {loop}")
+            log(
+                f"[INBOUND] Declined {trade_id} from {trader_id}: {loop}\n"
+                f"Not accepted: {reason_text(reason)}"
+            )
             self.post_trade_webhook(
                 "Send_Webhook",
                 trade,
@@ -648,6 +668,11 @@ class RobloxAPI:
         outcome = self._counter_trade(trade_id, trader_id, trade)
         if outcome == "declined":
             failed = getattr(self.counter_maker, "last_failed", None) or {}
+            log(
+                f"[INBOUND] Declined {trade_id} from {trader_id}: no counter passed "
+                f"your config\nNot accepted: {reason_text(reason)}\n"
+                + failed_text(failed)
+            )
             self.post_trade_webhook(
                 "Send_Webhook",
                 trade,
@@ -670,16 +695,20 @@ class RobloxAPI:
             - (trade.get("self_robux") or 0)
         )
 
-    def _too_many_duplicates(self, item_ids):
-        """First item we'd receive that we already own too many of, or None."""
-        limit = self.config.filter_items["Maximum_Amount_of_Duplicate_Items"]
+    def _too_many_duplicates(self, item_ids, limit=None):
+        """
+        First item we'd receive that we already own too many of, or None.
+        limit: extra copies allowed (default [Filtering Items]).
+        """
+        if limit is None:
+            limit = self.config.filter_items["Maximum_Amount_of_Duplicate_Items"]
         for item_id in item_ids:
             owned = self.self_duplicates.get(str(item_id))
             if owned is not None and limit is not None and owned >= limit:
                 return item_id
         return None
 
-    def _inbound_item_filter_reason(self, item_ids):
+    def _inbound_item_filter_reason(self, item_ids, max_copies=None):
         """
         The same item filters our own trades use (fetch_inventory and
         add_data_to_inventory), applied to what we'd receive: NFR list, faces and
@@ -692,7 +721,8 @@ class RobloxAPI:
         min_demand = filters.get("MinDemand")
         min_sales = filters.get("MinDailySales")
         max_gap = filters.get("MaxSalesGap")
-        max_copies = filters.get("Maximum_Amount_of_Trader_Duplicate_Items")
+        if max_copies is None:
+            max_copies = filters.get("Maximum_Amount_of_Trader_Duplicate_Items")
         projected_data = self.rolimon.projected_json.read_cached()
 
         for item_id in set(map(str, item_ids)):
@@ -746,11 +776,16 @@ class RobloxAPI:
         if projected:
             return f"receiving projected {projected}"
 
-        duplicate = self._too_many_duplicates(trade["their_side_item_ids"])
+        inbounds = self.config.inbounds
+        duplicate = self._too_many_duplicates(
+            trade["their_side_item_ids"], inbounds["Max_Duplicates"]
+        )
         if duplicate is not None:
             return f"too many duplicates of {duplicate}"
 
-        filtered = self._inbound_item_filter_reason(trade["their_side_item_ids"])
+        filtered = self._inbound_item_filter_reason(
+            trade["their_side_item_ids"], inbounds["Max_Trader_Duplicates"]
+        )
         if filtered:
             return filtered
 
@@ -795,6 +830,18 @@ class RobloxAPI:
                 time.sleep(1)
         return False
 
+    def _is_our_counter(self, trade) -> bool:
+        """True if this outbound is a counter the bot sent (Counter Memory Hours)."""
+        history = getattr(self, "counter_history", None)
+        if history is None:
+            return False
+        signature = trade_signature(
+            trade["self_side_item_ids"],
+            trade["their_side_item_ids"],
+            trade.get("self_robux") or 0,
+        )
+        return signature in history.sent(trade["their_id"])
+
     def _counter_loop_reason(self, trader_id) -> str | None:
         """
         Why this trader shouldn't be countered again, or None:
@@ -837,7 +884,11 @@ class RobloxAPI:
             if not self.account_inventory:
                 return "failed"
 
-        trader_inventory = self.fetch_inventory(trader_id)
+        trader_inventory = self.fetch_inventory(
+            trader_id,
+            max_owned=self.config.inbounds["Max_Duplicates"],
+            max_from_trader=self.config.inbounds["Max_Trader_Duplicates"],
+        )
         if not trader_inventory:
             return "failed"
 
@@ -859,10 +910,12 @@ class RobloxAPI:
         )
         if not generated_trade:
             if not self.config.inbounds["Decline_If_No_Counter"]:
-                log(f"[INBOUND] Couldn't generate a counter for {trade_id}")
+                log(
+                    f"[INBOUND] No counter for {trade_id} passed your config, "
+                    "leaving it\n" + failed_text(getattr(self.counter_maker, "last_failed", {}))
+                )
                 return "failed"
             if self._decline_trade(trade_id):
-                log(f"[INBOUND] No counter passes your config, declined {trade_id}")
                 return "declined"
             return "failed"
 
@@ -1340,7 +1393,7 @@ class RobloxAPI:
                 except CookieInvalid:
                     raise
                 except TradebotError as e:
-                    log(f"[OUTBOUND] Skipping {trade_id}: {e}", severityNum=2)
+                    log(f"[OUTBOUND] Skipping {trade_id}: {short_error(e)}", severityNum=2)
                     time.sleep(2)
 
             # Trades sent before this check are in outbound_cache now
@@ -1519,14 +1572,20 @@ class RobloxAPI:
             return False
 
         # NOTE: Check for duplicates
-        duplicate = self._too_many_duplicates(formatted_trade["their_side_item_ids"])
+        # A counter we sent follows the [Inbound Settings] it was made with
+        is_counter = self._is_our_counter(formatted_trade)
+        duplicate = self._too_many_duplicates(
+            formatted_trade["their_side_item_ids"],
+            self.config.inbounds["Max_Duplicates"] if is_counter else None,
+        )
         if duplicate is not None:
             if self._cancel_outbound(trade_id):
                 log(f"[OUTBOUND] Cancelled a trade: too many of {duplicate} (duplicates setting)")
                 return True
             return False
 
-        valid_trade, reason = self.outbound_trader.validate_trade(
+        checker = self.counter_checker if is_counter else self.outbound_trader
+        valid_trade, reason = checker.validate_trade(
             self_rap=formatted_trade["self_rap"],
             self_rap_algo=formatted_trade["self_rap_algo"],
             self_value=formatted_trade["self_value"],
@@ -1544,7 +1603,7 @@ class RobloxAPI:
                 log(
                     f"[OUTBOUND] Cancelled trade {trade_id}: {reason_text(reason)} "
                     "doesn't pass your config anymore\n"
-                    + gains_table(formatted_trade, self.outbound_trader, reason)
+                    + gains_table(formatted_trade, checker, reason)
                 )
                 return True
         return False

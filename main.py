@@ -595,7 +595,10 @@ class Doggo:
         """
         log(f"[TRADING] Generating a trade for {account.username}", dontPrint=True)
         generated_trade = account.trade_maker.generate_trade(
-            account_inventory, trader_inventory, offered=account.offered_item_counts()
+            account_inventory,
+            trader_inventory,
+            offered=account.offered_item_counts(),
+            about=f"{account.username} -> {trader}: ",
         )
 
         if not generated_trade:
@@ -642,7 +645,7 @@ class Doggo:
             except exceptions_types.CookieInvalid:
                 raise
             except exceptions_types.TradebotError as e:
-                log(f"[TRADING] Couldn't send a trade to {trader}: {e}", severityNum=2)
+                log(f"[TRADING] Couldn't send a trade to {trader}: {exceptions_types.short_error(e)}", severityNum=2)
                 return "skipped"
 
         account.last_sent_trade = time.time()
@@ -704,11 +707,11 @@ class Doggo:
         lines = [
             f"[TRADING] {account.username} sent a trade to {trader} "
             f"({total_profit:+,} overall)",
-            "  You give:",
-            *("    " + line for line in send_items.splitlines()),
-            "  You get:",
-            *("    " + line for line in receive_items.splitlines()),
-            "  " + breakdown,
+            "You give:",
+            *("  " + line for line in send_items.splitlines()),
+            "You get:",
+            *("  " + line for line in receive_items.splitlines()),
+            breakdown,
         ]
         log("\n".join(lines))
 
