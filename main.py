@@ -64,7 +64,7 @@ class Doggo:
             (2, "Config Manager"),
             (3, "Execute Trader"),
         )
-        log("Version: 1.0 (BETA)")
+        log("Version: 2.0 (BETA)")
         self.cli.print_menu("Main Menu", options)
         try:
             answer = int(self.cli.input_prompt("Enter Option"))
