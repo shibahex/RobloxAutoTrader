@@ -73,6 +73,7 @@ jobs:
           pyinstaller --onefile --console --name TradebotRBX
           --collect-data seleniumwire
           --hidden-import jaraco.text --hidden-import jaraco.functools --hidden-import jaraco.context
+          --python-option "W ignore:pkg_resources is deprecated:UserWarning"
           main.py
 
       - name: Check it starts
