@@ -60,14 +60,20 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - run: pip install -r requirements.txt "pyinstaller==${PYINSTALLER_VERSION}"
+      # jaraco.*: pkg_resources (used by selenium-wire) needs them at runtime,
+      # and PyInstaller doesn't pick them up on its own on Windows
+      - run: pip install -r requirements.txt "pyinstaller==${PYINSTALLER_VERSION}" jaraco.text jaraco.functools jaraco.context
 
       - name: Read version
         id: version
         run: echo "tag=$(python -c 'import version; print(version.release_tag())')" >> "$GITHUB_OUTPUT"
 
       - name: Build
-        run: pyinstaller --onefile --console --name TradebotRBX --collect-data seleniumwire main.py
+        run: >-
+          pyinstaller --onefile --console --name TradebotRBX
+          --collect-data seleniumwire
+          --hidden-import jaraco.text --hidden-import jaraco.functools --hidden-import jaraco.context
+          main.py
 
       - name: Check it starts
         run: |
