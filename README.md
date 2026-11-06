@@ -65,7 +65,7 @@ if that didn't work you can manually input the 2fa authorzation secret and cooki
 
 
 # Config Guide
-**Full guide: [docs/CONFIG_GUIDE.md](docs/CONFIG_GUIDE.md)**, every section and setting explained.
+**Full guide: [docs/config/README.md](docs/config/README.md)**, every section and setting explained.
 
 The bot reads `config.cfg`. Every setting has a note above it explaining what it does.
 

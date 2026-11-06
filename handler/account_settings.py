@@ -109,7 +109,6 @@ class HandleConfigs:
 
     def select_user_id(self):
         """Prompt the user to select a user ID from available keys."""
-        # TODO: SHOW USERNAME
         # TODO: add option to reset a config to default
         data = self.acc_configs.read_data()
         user_ids = list(data.keys())

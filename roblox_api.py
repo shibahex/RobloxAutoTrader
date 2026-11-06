@@ -41,6 +41,7 @@ SELF_INVENTORY_ATTEMPTS = 3
 SEND_TRADE_ATTEMPTS = 3
 # Outbound checker re-scans an item's price history if it's older than this
 OUTBOUND_RESCAN_AGE_SECONDS = 6 * 60 * 60
+SECONDS_PER_DAY = 86400
 
 # Roblox trade error codes
 TRADE_CODE_ITEMS_UNAVAILABLE = 12
@@ -65,6 +66,24 @@ def parse_created(created) -> float | None:
         return None
 
 
+def price_swing_is_projected(current, past, max_rise, max_drop) -> bool:
+    """
+    [Projected Detection] Maximum/Minimum Graph Difference. Compares one past
+    day's price with today's:
+      max_rise  how far BELOW today a past day can be (price went up since)
+      max_drop  how far ABOVE today a past day can be, as a negative number
+    Between -1 and 1 = a share of today's price (0.4 = 40%); otherwise Robux.
+    None skips that direction. Defaults 0.4 / -0.4.
+    """
+
+    def change(limit):
+        return (current - past) / current if abs(limit) < 1 else current - past
+
+    if max_rise is not None and change(max_rise) > max_rise:
+        return True
+    return max_drop is not None and change(max_drop) < max_drop
+
+
 class RobloxAPI:
     """
     Pass in Cookie if you want it to be an account
@@ -76,21 +95,20 @@ class RobloxAPI:
         # on every Rolimons update without calling Roblox again
         self.outbound_cache = {}
         self.outbound_lock = threading.Lock()
+        # (sent at, our instance ids) for trades sent since the last outbound
+        # check; they aren't in outbound_cache yet (see offered_item_counts)
+        self.sent_since_check = []
         # When this account's trading config last changed (see _config_changed_at)
         self.config_changed_at = None
         self.auth_secret = auth_secret
+        # Rolimons verification cookie for [Trade Ads], set from cookies.json
+        self.rolimons_cookie = None
         # 0 = check inbounds as soon as the bot starts
         self.counter_timer = 0
 
         self.account_configs = HandleConfigs()
 
         self.json = JsonHandler("cookies.json")
-        # For rolimon Trade Ads
-        self.last_outbound = None
-        # TODO:
-        # put this in cookies.json
-        self.tradead_timestamp = None
-
         # TODO: USE PROXIES
         self.parse_handler = RequestsHandler(
             Session=requests.Session(), use_proxies=False
@@ -390,9 +408,6 @@ class RobloxAPI:
 
         return self.rolimon.add_data_to_inventory(inventory, is_self=is_self)
 
-    # NOTE: Payload:
-    # {"offers":[{"userId":4486142832,"userAssetIds":[672469540],"robux":null},{"userId":1283171278,"userAssetIds":[1310053014],"robux":null}]}
-
     def validate_2fa(self, response):
         """
         Takes a response that has a 2FA challenge and solves it.
@@ -685,6 +700,7 @@ class RobloxAPI:
             their_rap_algo=trade["their_rap_algo"],
             their_value=trade["their_value"],
             their_overall_value=trade["their_overall_value"],
+            their_robux=trade.get("their_robux"),
         )
         return None if valid else reason
 
@@ -734,7 +750,10 @@ class RobloxAPI:
             return False
 
         generated_trade = self.trade_maker.generate_trade(
-            self.account_inventory, trader_inventory, counter_trade=True
+            self.account_inventory,
+            trader_inventory,
+            counter_trade=True,
+            offered=self.offered_item_counts(),
         )
         if not generated_trade:
             log(f"[INBOUND] Couldn't generate a counter for {trade_id}")
@@ -831,6 +850,7 @@ class RobloxAPI:
                     f"Trade sent but no tradeId: {e}", trade_api
                 ) from e
             log("Trade sent!")
+            self.note_sent_trade(trade_send)
             return trade_id
 
         raise last_error or TradeRejected(message=f"Couldn't send trade to {trader_id}")
@@ -875,8 +895,8 @@ class RobloxAPI:
 
     def get_recent_traders(self, max_days_since=5):
         """
-        Sends a list of your last inbounds and outbounds
-        TODO: make it have dates too so we can have cooldowns on users
+        Remembers everyone you traded with (inbound, outbound or finished) in
+        the last max_days_since days, so the bot doesn't send them another trade.
         """
 
         check_urls = [
@@ -922,8 +942,6 @@ class RobloxAPI:
         Raises InvalidResponse if the trade JSON is malformed, UnknownItem if an item
         isn't on Rolimons yet.
         """
-        # TODO: If this function is only used for webhook reasons, scrap it and remake it,
-        # Because grouping up RAP as a total value then VALUE has a total value to get webhook totals don't work because  they shouldnt be added together to get a value of an item
 
         def asset_ids(offer):
             return [
@@ -980,7 +998,6 @@ class RobloxAPI:
         Posts newly completed trades to the Completed webhook.
         Raises if the completed list can't be loaded; a single bad trade is skipped.
         """
-        # TODO: DO SOMETHING WITH UNLOGGED TRADES, AKA SEND THROUGH WEBHOOK ALSO MAYBE MAKE IT RUN WITH THE UPDATE DATA THREAD
         trades = self.get_trades(
             "https://trades.roblox.com/v1/trades/completed?limit=100&sortOrder=Desc",
             limit_pages=1,
@@ -1051,14 +1068,14 @@ class RobloxAPI:
         )
 
     def calculate_gains(self, item_ids):
-        """Returns (rap, value, algorithm value, overall value). Raises UnknownItem."""
-        # TODO: COMPLETELY REMAKE THIS AND IMMITATE THE TRADE ALGORITHM
-        # OR DRAW THIS MATH OUT, THE MAIN ISSUE IM HAVING IS TELL IF I SHOULD
-        # SEPERATE VALUE AND RAP OR KEEP THEM ADDED TOGETHER?
-        # I DONT THINK TRADE ALGORITHM GROUPS THEM TOGETHER BECAUSE VALUE WOULD BE 0 FOR AN RAP ITEM  BUT VALUE SILL HAS RAP I THINK HOW DO  I SEPERATE THEM
-        # after thinking I should cant just add value and rap together, make another function for this for webhooks for combining them.
-
-        # I THINK THE MAIN PROBLEM IM HAVING IS IM COMBINING VALUE AND RAP IN THE WEBHOOKS WHEN ITS NOT THAT SIMPLE
+        """
+        Returns (rap, value, algorithm value, overall value), worked out the same
+        way the trade generator does: RAP items have 0 value, and valued items'
+        algorithm value follows "RAP Algorithm for Valued Items". Raises UnknownItem.
+        """
+        valued_mode = (
+            self.config.trading.get("Rap_Algo_For_Valued") or "rap_algo"
+        ).lower()
 
         account_rap = 0
         account_value = 0
@@ -1076,7 +1093,11 @@ class RobloxAPI:
             overall_value = item_data["total_value"] or 0
 
             projected = projected_data.get(str(item))
-            if projected and projected.get("value") is not None:
+            if value and valued_mode == "rolimon_value":
+                account_algorithm_value += value
+            elif value and valued_mode == "zero_value":
+                pass
+            elif projected and projected.get("value") is not None:
                 account_algorithm_value += projected["value"]
             else:
                 account_algorithm_value += rap
@@ -1092,6 +1113,38 @@ class RobloxAPI:
             account_overall_value,
         )
 
+    def note_sent_trade(self, instance_ids):
+        sent = getattr(self, "sent_since_check", None)
+        if sent is None:
+            sent = self.sent_since_check = []
+        sent.append((time.time(), list(instance_ids)))
+
+    def offered_item_counts(self) -> dict:
+        """
+        How many open outbounds each of our items (by instance id) is in: the
+        trades from the last outbound check plus the ones sent since. Trades
+        sent over a day ago that were never seen by a check are forgotten.
+        """
+        counts = {}
+        account_id = str(getattr(self, "account_id", None))
+        for cached in list(getattr(self, "outbound_cache", {}).values()):
+            trade_json = cached.get("json") or {}
+            for key in ("participantAOffer", "participantBOffer"):
+                offer = trade_json.get(key) or {}
+                if str((offer.get("user") or {}).get("id")) != account_id:
+                    continue
+                for item in offer.get("items") or []:
+                    uaid = item.get("collectibleItemInstanceId")
+                    if uaid:
+                        counts[uaid] = counts.get(uaid, 0) + 1
+        cutoff = time.time() - SECONDS_PER_DAY
+        sent = getattr(self, "sent_since_check", [])
+        sent[:] = [entry for entry in sent if entry[0] >= cutoff]
+        for _, instance_ids in sent:
+            for uaid in instance_ids:
+                counts[uaid] = counts.get(uaid, 0) + 1
+        return counts
+
     def outbound_api_checker(self):
         """
         Scans the outbound API for bad trades then cancels them.
@@ -1099,6 +1152,7 @@ class RobloxAPI:
         """
 
         log("in outbound checker", dontPrint=True)
+        check_started = time.time()
         trades = self.get_trades(
             "https://trades.roblox.com/v1/trades/outbound?limit=100&sortOrder=Asc"
         )
@@ -1124,6 +1178,13 @@ class RobloxAPI:
                 except TradebotError as e:
                     log(f"Skipping outbound {trade_id}: {e}", severityNum=2)
                     time.sleep(2)
+
+            # Trades sent before this check are in outbound_cache now
+            self.sent_since_check = [
+                entry
+                for entry in getattr(self, "sent_since_check", [])
+                if entry[0] >= check_started
+            ]
 
     def recheck_cached_outbounds(self) -> int:
         """
@@ -1311,6 +1372,7 @@ class RobloxAPI:
             their_value=formatted_trade["their_value"],
             their_overall_value=formatted_trade["their_overall_value"],
             robux=formatted_trade["self_robux"],
+            their_robux=formatted_trade.get("their_robux"),
         )
 
         if not valid_trade:
@@ -1410,10 +1472,6 @@ class RobloxAPI:
         Check rolimons projected API, scan the price chart and determine the value of an item and if its projected
         then update all the data to the projected_checker.json
         """
-        # TODO: GET the dates and see how much the item sells so we dont trade dead items or we can
-        # see how active an item is
-        # TODO: Delete all the value: "1" from data points
-
         config_projected = self.config.projected_detection
         use_rolimons_projected = config_projected["Detect_Rolimons_Projecteds"]
 
@@ -1440,11 +1498,14 @@ class RobloxAPI:
             )
             return
 
-        def parse_api_data(data_points):
+        def parse_api_data(data_points, is_price=False):
             parsed = []
             for point in data_points or []:
                 date = self.parse_date(point.get("date", ""))
                 if date is None or point.get("value") is None:
+                    continue
+                # Days with no sales come back as price 0; they aren't a price
+                if is_price and point["value"] <= 1:
                     continue
                 parsed.append(
                     {
@@ -1455,7 +1516,7 @@ class RobloxAPI:
                 )
             return sorted(parsed, key=lambda x: x["date"], reverse=True)
 
-        sales_data = parse_api_data(resale_json.get("priceDataPoints"))
+        sales_data = parse_api_data(resale_json.get("priceDataPoints"), is_price=True)
         volume_data = parse_api_data(resale_json.get("volumeDataPoints"))
         if not sales_data:
             log(
@@ -1490,12 +1551,14 @@ class RobloxAPI:
         ]
 
         if current_price > 0:
+            max_rise = config_projected.get("MaximumGraphDifference")
+            max_drop = config_projected.get("MinimumGraphDifference")
             for data in recent_data_points:
-                loop_price = int(data["value"])
-                percentage_change = (current_price - loop_price) / current_price
-
-                if percentage_change < -0.4 or percentage_change > 0.4:
+                if price_swing_is_projected(
+                    current_price, int(data["value"]), max_rise, max_drop
+                ):
                     is_projected = True
+                    break
 
         data = self.rolimon.projected_json.read_data()
         data.update(

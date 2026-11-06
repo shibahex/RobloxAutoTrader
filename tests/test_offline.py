@@ -479,7 +479,7 @@ THEIR_INV = {"t1": {"item_id": "1:2"}}
 
 def trade_account(account, send_effect):
     account.trade_maker = types.SimpleNamespace(
-        generate_trade=lambda a, b: {
+        generate_trade=lambda a, b, **_k: {
             "self_side": ["u1"],
             "their_side": ["t1"],
             "self_robux": 0,
@@ -1509,3 +1509,788 @@ def test_invalid_settings_stop_startup_with_their_real_name(tmp_path, line, expe
     with pytest.raises(ConfigError) as info:
         ConfigHandler(str(cfg))
     assert expected in str(info.value)
+
+
+# --- projected detection: Graph Difference settings --------------------------------
+
+
+def test_default_graph_difference_matches_the_old_fixed_40_percent_rule():
+    import random
+
+    from roblox_api import price_swing_is_projected
+
+    rng = random.Random(7)
+    for _ in range(5000):
+        current, past = rng.randint(1, 50_000), rng.randint(1, 50_000)
+        old_rule = not -0.4 <= (current - past) / current <= 0.4
+        assert price_swing_is_projected(current, past, 0.4, -0.4) == old_rule
+
+
+@pytest.mark.parametrize(
+    "past, max_rise, max_drop, projected",
+    [
+        (5_999, 0.4, -0.4, True),  # price shot up since (more than 40% below today)
+        (6_001, 0.4, -0.4, False),
+        (14_001, 0.4, -0.4, True),  # price crashed since
+        (14_001, 0.4, None, False),  # crash check off
+        (5_999, None, -0.4, False),  # spike check off
+        (8_999, 1000, -1000, True),  # Robux: more than 1,000 below today
+        (9_001, 1000, -1000, False),
+        (11_001, 1000, -1000, True),  # Robux: more than 1,000 above today
+    ],
+)
+def test_graph_difference_settings(past, max_rise, max_drop, projected):
+    from roblox_api import price_swing_is_projected
+
+    assert price_swing_is_projected(10_000, past, max_rise, max_drop) is projected
+
+
+@pytest.mark.parametrize(
+    "lines, expected",
+    [
+        ("", (0.4, -0.4)),  # missing -> today's default
+        (
+            "Maximum Graph Difference = 0.25\nMinimum Graph Difference = None\n",
+            (0.25, None),
+        ),
+        (
+            "Maximum Graph Difference = 1000\nMinimum Graph Difference = -1000\n",
+            (1000, -1000),
+        ),
+    ],
+)
+def test_graph_difference_config(tmp_path, lines, expected):
+    from handler.handle_config import ConfigHandler
+
+    cfg = tmp_path / "c.cfg"
+    cfg.write_text("[Projected Detection]\n" + lines)
+    p = ConfigHandler(str(cfg)).projected_detection
+    assert (p["MaximumGraphDifference"], p["MinimumGraphDifference"]) == expected
+
+
+# --- Outbound Variety -------------------------------------------------------------
+
+
+def variety_maker(variety):
+    from trade_algorithm import TradeMaker
+
+    maker = object.__new__(TradeMaker)
+    maker.outbound_variety = variety
+    return maker
+
+
+VARIETY_TRADES = [
+    {"self_side": ("a", "b")},  # offered 3 + 2 = 5
+    {"self_side": ("a",)},  # 3
+    {"self_side": ("c",)},  # 0
+    {"self_side": ("b", "d")},  # 2
+]
+OFFERED = {"a": 3, "b": 2}
+
+
+@pytest.mark.parametrize(
+    "variety, kept",
+    [
+        (0, [0, 1, 2, 3]),
+        (None, [0, 1, 2, 3]),
+        (0.5, [2, 3]),  # counts run 0..5, keep 2.5 or less
+        (0.4, [1, 2, 3]),  # keep 3 or less
+        (1, [2]),
+    ],
+)
+def test_outbound_variety_drops_the_most_offered_trades(variety, kept):
+    result = variety_maker(variety).prefer_unoffered(VARIETY_TRADES, OFFERED)
+    assert result == [VARIETY_TRADES[i] for i in kept]
+
+
+def test_outbound_variety_with_nothing_offered_keeps_everything():
+    maker = variety_maker(1)
+    assert maker.prefer_unoffered(VARIETY_TRADES, {}) == VARIETY_TRADES
+    assert maker.prefer_unoffered(VARIETY_TRADES, None) == VARIETY_TRADES
+
+
+def test_generate_trade_avoids_items_already_in_outbounds():
+    from handler.handle_config import ConfigHandler
+    from trade_algorithm import TradeMaker
+
+    maker = TradeMaker(ConfigHandler("configs/small_value.cfg"))
+    for name in (
+        "min_rap_gain max_rap_gain min_overall_gain max_overall_gain min_algo_gain "
+        "max_algo_gain min_value_gain max_value_gain min_rap_score_percentage "
+        "max_rap_score_percentage min_overall_score_percentage "
+        "max_overall_score_percentage max_valid_trades"
+    ).split():
+        setattr(maker, name, None)
+    maker.min_value_of_trade = maker.min_rap_of_trade = 0
+    maker.min_items_self = maker.min_items_their = 1
+    maker.max_items_self = 1
+    maker.max_items_their = 2
+    maker.trade_robux = False
+    maker.trade_timeout = 10
+    maker.select_by = "highest_overall_gain"
+
+    def item(item_id, value):
+        return {
+            "item_id": item_id,
+            "value": value,
+            "rap": value,
+            "demand": 2,
+            "rap_algorithm": value,
+            "total_value": value,
+            "item_volume": 5,
+        }
+
+    mine = {"uaid-big": item("10", 1000), "uaid-small": item("11", 900)}
+    theirs = {"x": item("20", 1500), "y": item("21", 100)}
+
+    maker.outbound_variety = 0
+    best = maker.generate_trade(mine, theirs, offered={"uaid-big": 4})
+    assert best["self_side"] == ("uaid-small",)  # 900 for 1600 is the biggest gain
+
+    maker.outbound_variety = 1
+    spread = maker.generate_trade(mine, theirs, offered={"uaid-small": 4})
+    assert spread["self_side"] == ("uaid-big",)
+
+
+def outbound_json(trade_id, mine, theirs, my_id=1):
+    def offer(user, uaids):
+        return {
+            "user": {"id": user},
+            "items": [{"collectibleItemInstanceId": u} for u in uaids],
+        }
+
+    # Roblox doesn't promise which side is ours
+    return {
+        "id": trade_id,
+        "participantAOffer": offer(2, theirs),
+        "participantBOffer": offer(my_id, mine),
+    }
+
+
+def test_offered_item_counts_uses_cached_outbounds_and_new_sends(account):
+    account.outbound_cache = {
+        1: cached(outbound_json(1, ["u1", "u2"], ["t1"])),
+        2: cached(outbound_json(2, ["u1"], ["u2"])),  # their u2 isn't ours
+    }
+    account.note_sent_trade(["u1", "u3"])
+    assert account.offered_item_counts() == {"u1": 3, "u2": 1, "u3": 1}
+
+
+def test_offered_item_counts_forgets_sends_older_than_a_day(account):
+    import time as _time
+
+    account.sent_since_check = [(_time.time() - 2 * 86400, ["old"])]
+    account.note_sent_trade(["new"])
+    assert account.offered_item_counts() == {"new": 1}
+
+
+def test_send_trade_counts_the_items_it_sent(router, account):
+    router.set(SEND, resp(200, {"tradeId": 77}))
+    account.send_trade(2, ["a", "b"], ["c"])
+    assert account.offered_item_counts() == {"a": 1, "b": 1}
+
+
+def test_outbound_check_drops_sends_it_now_has_cached(router, outbound):
+    import time as _time
+
+    outbound.sent_since_check = [(_time.time() - 60, ["seen"])]
+    router.set("https://trades.roblox.com/v1/trades/outbound", outbound_list())
+    outbound.outbound_api_checker()
+    assert outbound.sent_since_check == []
+
+
+@pytest.mark.parametrize(
+    "line, expected",
+    [("", 0.0), ("Outbound Variety = None", 0.0), ("Outbound Variety = 0.7", 0.7)],
+)
+def test_outbound_variety_config(tmp_path, line, expected):
+    from handler.handle_config import ConfigHandler
+
+    cfg = tmp_path / "c.cfg"
+    cfg.write_text(f"[Filtering Generated Trades]\n{line}\n")
+    assert ConfigHandler(str(cfg)).filter_generated["Outbound_Variety"] == expected
+
+
+@pytest.mark.parametrize("typed", ["2", "-0.1", "lots"])
+def test_bad_outbound_variety_stops_startup(tmp_path, typed):
+    from handler.exceptions_types import ConfigError
+    from handler.handle_config import ConfigHandler
+
+    cfg = tmp_path / "c.cfg"
+    cfg.write_text(f"[Filtering Generated Trades]\nOutbound Variety = {typed}\n")
+    with pytest.raises(ConfigError, match="Outbound Variety"):
+        ConfigHandler(str(cfg))
+
+
+# --- notes/TODO cleanup fixes ------------------------------------------------------
+
+
+def test_outbound_algo_gain_follows_valued_item_setting(router, account):
+    # Outbound checks must work out RAP Algorithm the same way trades are made
+    account.rolimon.projected_json.write_data({"1:2": {"value": 999}})
+    for mode, expected in [
+        ("rolimon_value", 600),
+        ("zero_value", 0),
+        ("rap_algo", 999),
+    ]:
+        account.config.trading["Rap_Algo_For_Valued"] = mode
+        _rap, _value, algo, _overall = account.calculate_gains(["1:2"])
+        assert algo == expected, mode
+
+
+def test_webhook_lists_duplicate_items_twice(router):
+    from handler.handle_discord import DiscordHandler
+    from rolimons_api import RolimonAPI
+
+    trade = {
+        "self_side_item_ids": ["1:1", "1:1"],
+        "their_side_item_ids": ["1:2"],
+        "self_robux": 0,
+        "their_rap": 500,
+        "their_value": 600,
+        "their_rap_algo": 500,
+        "their_overall_value": 600,
+        "self_rap": 2000,
+        "self_value": 0,
+        "self_rap_algo": 2000,
+        "self_overall_value": 2000,
+    }
+    fields, _profit = DiscordHandler().embed_fields_from_trade(
+        trade, RolimonAPI().item_data, {}
+    )
+    assert str(fields["Send"]).count("Hat") == 2
+
+
+def resale_points(prices, start=None):
+    import datetime as dt
+
+    start = start or dt.datetime.now(dt.timezone.utc).replace(hour=0, minute=0)
+    return [
+        {
+            "value": p,
+            "date": (start - dt.timedelta(days=i)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        for i, p in enumerate(prices)
+    ]
+
+
+def test_no_sale_days_dont_make_an_item_projected(router, account):
+    # A day with no sales comes back as price 0; it isn't a 100% price swing
+    prices = [1000, 1010, 0, 990, 1005, 0, 1000, 995, 1008, 1000]
+    router.set(
+        "https://apis.roblox.com/marketplace-sales",
+        resp(
+            200,
+            {
+                "priceDataPoints": resale_points(prices),
+                "volumeDataPoints": resale_points([3] * len(prices)),
+            },
+        ),
+    )
+    account.parse_handler = account.request_handler
+    account.config.projected_detection["Detect_Rolimons_Projecteds"] = False
+    account.is_projected_api(collectibleId="c", item_id="1:1")
+    saved = account.rolimon.projected_json.read_data()["1:1"]
+    assert saved["is_projected"] is False
+    assert saved["value"] > 900  # the 0 days aren't counted as price dips
+
+
+def test_items_are_rescanned_after_2_days(router, monkeypatch):
+    import time as _time
+
+    import roblox_api
+    from rolimons_api import RolimonAPI
+
+    scans = []
+
+    class FakeRoblox:
+        def is_projected_api(self, item_id, collectibleId):
+            scans.append(item_id)
+
+    monkeypatch.setattr(roblox_api, "RobloxAPI", FakeRoblox)
+    rol = RolimonAPI()
+    for days_old, rescanned in [(1.5, False), (2.5, True)]:
+        scans.clear()
+        rol.projected_json.write_data(
+            {
+                "1:1": {
+                    "is_projected": False,
+                    "value": 900,
+                    "volume": 5,
+                    "average_gap": 1,
+                    "timestamp": _time.time() - days_old * 86400,
+                    "last_price": rol.item_data["1:1"]["best_price"],
+                }
+            }
+        )
+        rol.add_data_to_inventory(
+            {"u": {"item_id": "1:1", "collectibleItemId": "c"}}, is_self=True
+        )
+        assert bool(scans) is rescanned, days_old
+
+
+# --- RAP Algorithm split + Robux in gains --------------------------------------------
+
+
+def test_rap_algorithm_is_the_same_whichever_order_the_data_comes_in():
+    from handler.price_algorithm import SalesVolumeAnalyzer
+
+    day = 86400
+    # Price rises over time, with a dip every other day
+    sales = [{"value": 100 + i + (i % 2) * 20, "date": i * day} for i in range(90)]
+    volume = [{"value": 3 + (i % 2) * 4, "date": i * day} for i in range(90)]
+    newest_first = SalesVolumeAnalyzer(sales[::-1], volume[::-1], "x").process()
+    oldest_first = SalesVolumeAnalyzer(sales, volume, "x").process()
+    assert newest_first["value"] == oldest_first["value"]
+    assert newest_first["volume"] == oldest_first["volume"]
+
+
+def test_rap_algorithm_splits_history_into_even_thirds():
+    from handler.price_algorithm import SalesVolumeAnalyzer
+
+    day = 86400
+    points = [{"value": 100 + (i % 2) * 10, "date": i * day} for i in range(90)]
+    analyzer = SalesVolumeAnalyzer(points[::-1], [], "x")
+    lows, _ = analyzer.find_extrema(analyzer.sales_data)
+    assert [len(s) for s in analyzer.segment_data(lows)] == [15, 14, 15]
+
+
+def loose_maker(**settings):
+    from handler.handle_config import ConfigHandler
+    from trade_algorithm import TradeMaker
+
+    maker = TradeMaker(ConfigHandler("configs/small_value.cfg"))
+    for name in (
+        "min_rap_gain max_rap_gain min_overall_gain max_overall_gain min_algo_gain "
+        "max_algo_gain min_value_gain max_value_gain min_rap_score_percentage "
+        "max_rap_score_percentage min_overall_score_percentage "
+        "max_overall_score_percentage"
+    ).split():
+        setattr(maker, name, None)
+    maker.min_value_of_trade = maker.min_rap_of_trade = 0
+    for name, value in settings.items():
+        setattr(maker, name, value)
+    return maker
+
+
+def rap_trade(maker, robux=None, their_robux=None):
+    return maker.validate_trade(
+        self_rap=1000,
+        self_rap_algo=1000,
+        self_value=0,
+        self_overall_value=1000,
+        their_rap=1700,
+        their_rap_algo=1700,
+        their_value=0,
+        their_overall_value=1700,
+        robux=robux,
+        their_robux=their_robux,
+    )
+
+
+@pytest.mark.parametrize(
+    "setting", ["min_rap_gain", "min_overall_gain", "min_algo_gain"]
+)
+def test_robux_you_add_counts_against_your_gains(setting):
+    maker = loose_maker(**{setting: 600})
+    assert rap_trade(maker)[0]  # +700
+    assert rap_trade(maker, robux=50)[0]  # +650
+    assert not rap_trade(maker, robux=200)[0]  # +500
+
+
+def test_robux_they_add_counts_for_you():
+    maker = loose_maker(min_rap_gain=800)
+    assert not rap_trade(maker)[0]
+    assert rap_trade(maker, their_robux=150)[0]
+
+
+def test_robux_doesnt_count_toward_value_gain():
+    maker = loose_maker(min_value_gain=1)
+    assert not rap_trade(maker, their_robux=5000)[0]
+
+
+def test_webhook_profit_includes_robux():
+    from handler.handle_discord import DiscordHandler
+
+    trade = {
+        "their_rap": 1700,
+        "their_value": 0,
+        "their_rap_algo": 1700,
+        "their_overall_value": 1700,
+        "self_rap": 1000,
+        "self_value": 0,
+        "self_rap_algo": 1000,
+        "self_overall_value": 1000,
+        "self_robux": 200,
+    }
+    total, algo, rap, value = DiscordHandler().trade_profit(trade)
+    assert (total, algo, rap, value) == (500, 500, 500, 0)
+
+
+# --- Rolimons trade ads ----------------------------------------------------------------
+
+
+class FakeAdSession:
+    def __init__(self, *responses):
+        self.responses = list(responses)
+        self.sent = []
+
+    def post(self, url, json=None, cookies=None, timeout=None):
+        self.sent.append({"url": url, "json": json, "cookies": cookies})
+        answer = self.responses.pop(0) if len(self.responses) > 1 else self.responses[0]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+
+def ad_response(body, status=200):
+    if isinstance(body, str):
+        return resp(status, text=body)
+    return resp(status, body)
+
+
+AD_INVENTORY = {
+    "u1": {"item_id": "1:10", "total_value": 500},
+    "u2": {"item_id": "1:11", "total_value": 9000},
+    "u3": {"item_id": "1:11", "total_value": 9000},  # a second copy
+    "u4": {"item_id": "2:12", "total_value": 99999},  # bundle, can't be listed
+    "u5": {"item_id": "1:13", "total_value": 3000},
+}
+
+
+@pytest.mark.parametrize(
+    "pick, count, expected",
+    [
+        ("highest_value", 2, [11, 13]),
+        ("lowest_value", 2, [10, 13]),
+        ("highest_value", 4, [11, 13, 10]),
+    ],
+)
+def test_pick_offer_items(pick, count, expected):
+    from handler.handle_trade_ads import pick_offer_items
+
+    assert pick_offer_items(AD_INVENTORY, count, pick) == expected
+
+
+def test_pick_offer_items_random_lists_each_item_once():
+    from handler.handle_trade_ads import pick_offer_items
+
+    picked = pick_offer_items(AD_INVENTORY, 4, "random")
+    assert sorted(picked) == [10, 11, 13]
+
+
+def test_post_trade_ad_sends_the_cookie_and_ad():
+    from handler.handle_trade_ads import build_ad, post_trade_ad
+
+    session = FakeAdSession(ad_response({"success": True}))
+    ad = build_ad("55", [11, 13], [], ["any", "upgrade"])
+    post_trade_ad("roli-cookie", ad, session)
+    sent = session.sent[0]
+    assert sent["url"] == "https://api.rolimons.com/tradeads/v1/createad"
+    assert sent["cookies"] == {"_RoliVerification": "roli-cookie"}
+    assert sent["json"] == {
+        "player_id": 55,
+        "offer_item_ids": [11, 13],
+        "request_item_ids": [],
+        "request_tags": ["any", "upgrade"],
+    }
+
+
+@pytest.mark.parametrize(
+    "answer, error",
+    [
+        (
+            ad_response(
+                {"success": False, "code": 5, "message": "Invalid verification data"},
+                401,
+            ),
+            "RolimonsCookieInvalid",
+        ),
+        (
+            ad_response(
+                {"success": False, "code": 4, "message": "Missing verification cookie"},
+                401,
+            ),
+            "RolimonsCookieInvalid",
+        ),
+        (
+            ad_response({"success": False, "code": 7, "message": "Too soon"}, 429),
+            "TradeAdRejected",
+        ),
+        (ad_response("<html>down</html>", 502), "RolimonsError"),
+        (requests.ConnectionError("no route"), "NetworkError"),
+    ],
+)
+def test_post_trade_ad_errors(answer, error):
+    from handler.handle_trade_ads import build_ad, post_trade_ad
+
+    with pytest.raises(getattr(E, error)):
+        post_trade_ad("c", build_ad(1, [10], [], ["any"]), FakeAdSession(answer))
+
+
+def test_check_rolimons_cookie():
+    from handler.handle_trade_ads import check_rolimons_cookie
+
+    # Rolimons accepted the cookie but not the empty ad: the cookie is fine
+    check_rolimons_cookie(
+        "c",
+        FakeAdSession(
+            ad_response(
+                {"success": False, "code": 1, "message": "Missing player_id"}, 400
+            )
+        ),
+    )
+    with pytest.raises(E.RolimonsCookieInvalid):
+        check_rolimons_cookie(
+            "c",
+            FakeAdSession(
+                ad_response(
+                    {
+                        "success": False,
+                        "code": 5,
+                        "message": "Invalid verification data",
+                    },
+                    401,
+                )
+            ),
+        )
+
+
+AD_SETTINGS = {
+    "Enabled": True,
+    "Post_Every_Minutes": 20,
+    "Offer_Items": 2,
+    "Offer_Items_Using": "highest_value",
+    "Request_Items": [],
+    "Request_Tags": ["any"],
+}
+
+
+def ad_account(account_id, cookie, inventory=AD_INVENTORY):
+    return types.SimpleNamespace(
+        account_id=account_id,
+        username=f"acc{account_id}",
+        rolimons_cookie=cookie,
+        account_inventory=inventory,
+    )
+
+
+def test_trade_ad_poster_posts_on_schedule():
+    from handler.handle_trade_ads import TradeAdPoster
+
+    session = FakeAdSession(ad_response({"success": True}))
+    poster = TradeAdPoster(AD_SETTINGS, session)
+    accounts = [
+        ad_account(1, "c1"),
+        ad_account(2, None),  # no cookie: skipped
+        ad_account(3, "c3", inventory=None),  # inventory not loaded yet
+    ]
+    assert poster.run_once(accounts, now=0) == 1
+    assert poster.run_once(accounts, now=19 * 60) == 0  # not due yet
+    assert poster.run_once(accounts, now=20 * 60) == 1
+    assert [s["cookies"]["_RoliVerification"] for s in session.sent] == ["c1", "c1"]
+
+
+def test_trade_ad_poster_stops_on_a_refused_cookie():
+    from handler.handle_trade_ads import TradeAdPoster
+
+    session = FakeAdSession(
+        ad_response(
+            {"success": False, "code": 5, "message": "Invalid verification data"}, 401
+        )
+    )
+    poster = TradeAdPoster(AD_SETTINGS, session)
+    accounts = [ad_account(1, "bad")]
+    assert poster.run_once(accounts, now=0) == 0
+    assert poster.run_once(accounts, now=10_000) == 0
+    assert len(session.sent) == 1
+
+
+def test_trade_ad_poster_retries_after_other_errors():
+    from handler.handle_trade_ads import TradeAdPoster
+
+    session = FakeAdSession(
+        ad_response({"success": False, "code": 7, "message": "Too soon"}, 429),
+        ad_response({"success": True}),
+    )
+    poster = TradeAdPoster(AD_SETTINGS, session)
+    accounts = [ad_account(1, "c1")]
+    assert poster.run_once(accounts, now=0) == 0
+    assert poster.run_once(accounts, now=20 * 60) == 1
+
+
+def test_trade_ads_config_defaults(tmp_path):
+    from handler.handle_config import ConfigHandler
+
+    cfg = tmp_path / "c.cfg"
+    cfg.write_text("[Trade Ads]\n")
+    assert ConfigHandler(str(cfg)).trade_ads == {
+        "Enabled": False,
+        "Post_Every_Minutes": 20,
+        "Offer_Items": 4,
+        "Offer_Items_Using": "highest_value",
+        "Offer_Item_IDs": [],
+        "Request_Items": [],
+        "Request_Tags": ["any"],
+    }
+
+
+def test_trade_ads_config_reads_items_and_tags(tmp_path):
+    from handler.handle_config import ConfigHandler
+
+    cfg = tmp_path / "c.cfg"
+    cfg.write_text(
+        "[Trade Ads]\nEnabled = True\nOffer Items Using = Random\n"
+        "Request Item IDs = 1:1029025, 1191135761\nRequest Tags = Upgrade, adds\n"
+    )
+    ads = ConfigHandler(str(cfg)).trade_ads
+    assert ads["Enabled"] is True
+    assert ads["Offer_Items_Using"] == "random"
+    assert ads["Request_Items"] == [1029025, 1191135761]
+    assert ads["Request_Tags"] == ["upgrade", "adds"]
+
+
+@pytest.mark.parametrize(
+    "lines, named",
+    [
+        ("Post Every Minutes = 5", "Post Every Minutes"),
+        ("Offer Items = 5", "Offer Items"),
+        ("Offer Items Using = best", "Offer Items Using"),
+        ("Request Tags = any, cheap", "Request Tags"),
+        ("Request Item IDs = hat", "Request Item IDs"),
+        ("Request Item IDs = 1, 2, 3\nRequest Tags = any, adds", "Request Item IDs"),
+        ("Offer Item IDs = 1, 2, 3, 4, 5", "Offer Item IDs"),
+        ("Enabled = True\nOffer Items Using = manual", "Offer Item IDs"),
+        ("Enabled = True\nRequest Tags = None", "Request Tags"),
+    ],
+)
+def test_bad_trade_ads_settings_stop_startup(tmp_path, lines, named):
+    from handler.exceptions_types import ConfigError
+    from handler.handle_config import ConfigHandler
+
+    cfg = tmp_path / "c.cfg"
+    cfg.write_text(f"[Trade Ads]\n{lines}\n")
+    with pytest.raises(ConfigError, match=named):
+        ConfigHandler(str(cfg))
+
+
+def test_rolimons_cookie_is_saved_and_removed(tmp_path, monkeypatch):
+    from handler.handle_json import JsonHandler
+
+    monkeypatch.chdir(tmp_path)
+    store = JsonHandler("cookies.json")
+    store.write_data({"roblox_accounts": [{"username": "a", "cookie": "x"}]})
+    assert store.set_rolimons_cookie(0, "roli")
+    assert store.read_data()["roblox_accounts"][0]["rolimons_cookie"] == "roli"
+    assert store.set_rolimons_cookie(0, None)
+    assert "rolimons_cookie" not in store.read_data()["roblox_accounts"][0]
+    assert not store.set_rolimons_cookie(5, "roli")
+
+
+def ad_outbound(trade_id, mine, theirs, my_id=1):
+    def offer(user, ids):
+        return {
+            "user": {"id": user},
+            "items": [
+                {"itemTarget": {"itemType": t, "targetId": str(i)}} for t, i in ids
+            ],
+        }
+
+    return {
+        "json": {
+            "participantAOffer": offer(2, theirs),
+            "participantBOffer": offer(my_id, mine),
+        }
+    }
+
+
+def outbound_ad_account(cache, inventory=AD_INVENTORY):
+    account = ad_account(1, "c1", inventory)
+    account.outbound_cache = cache
+    return account
+
+
+def posted(session):
+    return [
+        (
+            s["json"]["offer_item_ids"],
+            s["json"]["request_item_ids"],
+            s["json"]["request_tags"],
+        )
+        for s in session.sent
+    ]
+
+
+def test_outbound_ads_take_turns_through_open_outbounds():
+    from handler.handle_trade_ads import TradeAdPoster
+
+    session = FakeAdSession(ad_response({"success": True}))
+    settings = dict(
+        AD_SETTINGS,
+        Offer_Items_Using="outbound",
+        Request_Items=[999],  # ignored: outbound asks for their items
+        Request_Tags=["any", "upgrade", "adds"],
+    )
+    poster = TradeAdPoster(settings, session)
+    account = outbound_ad_account(
+        {
+            101: ad_outbound(101, [("Asset", 10)], [("Asset", 20), ("Asset", 21)]),
+            # bundles can't be listed, and their side has nothing else: skipped
+            102: ad_outbound(102, [("Asset", 11)], [("Bundle", 30)]),
+            103: ad_outbound(103, [("Asset", 13), ("Asset", 13)], [("Asset", 22)]),
+        }
+    )
+    for minute in (0, 20, 40):
+        poster.run_once([account], now=minute * 60)
+    assert posted(session) == [
+        ([10], [20, 21], ["any", "upgrade"]),  # tags fill the 2 slots left
+        ([13], [22], ["any", "upgrade", "adds"]),
+        ([10], [20, 21], ["any", "upgrade"]),  # every outbound had a turn
+    ]
+
+
+def test_outbound_ads_fall_back_to_highest_value_without_outbounds():
+    from handler.handle_trade_ads import TradeAdPoster
+
+    session = FakeAdSession(ad_response({"success": True}))
+    poster = TradeAdPoster(dict(AD_SETTINGS, Offer_Items_Using="outbound"), session)
+    poster.run_once([outbound_ad_account({})], now=0)
+    assert posted(session) == [([11, 13], [], ["any"])]
+
+
+def test_manual_ads_list_only_items_you_own():
+    from handler.handle_trade_ads import TradeAdPoster
+
+    session = FakeAdSession(ad_response({"success": True}))
+    settings = dict(
+        AD_SETTINGS,
+        Offer_Items_Using="manual",
+        Offer_Item_IDs=[13, 777, 10],  # 777 isn't owned
+        Request_Items=[555],
+        Request_Tags=["any"],
+    )
+    TradeAdPoster(settings, session).run_once([ad_account(1, "c1")], now=0)
+    assert posted(session) == [([13, 10], [555], ["any"])]
+
+
+def test_trade_ads_config_reads_manual_offer_ids(tmp_path):
+    from handler.handle_config import ConfigHandler
+
+    cfg = tmp_path / "c.cfg"
+    cfg.write_text(
+        "[Trade Ads]\nEnabled = True\nOffer Items Using = manual\n"
+        "Offer Item IDs = 1:10, 13\n"
+    )
+    ads = ConfigHandler(str(cfg)).trade_ads
+    assert ads["Offer_Items_Using"] == "manual"
+    assert ads["Offer_Item_IDs"] == [10, 13]
+
+
+def test_outbound_ads_need_no_request_settings(tmp_path):
+    from handler.handle_config import ConfigHandler
+
+    cfg = tmp_path / "c.cfg"
+    cfg.write_text(
+        "[Trade Ads]\nEnabled = True\nOffer Items Using = outbound\nRequest Tags = None\n"
+    )
+    assert ConfigHandler(str(cfg)).trade_ads["Request_Tags"] == []

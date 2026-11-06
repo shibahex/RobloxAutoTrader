@@ -11,7 +11,10 @@ from handler.exceptions_types import (
 )
 
 import roblox_api
-from datetime import datetime
+import time
+
+# Items are re-scanned when their saved sales data is older than this
+RESCAN_AFTER_SECONDS = 2 * 86400
 
 
 class Item:
@@ -206,25 +209,12 @@ class RolimonAPI:
 
             """
 
-            # TODO: this doesnt get followed properly
             def is_recently_scanned(projected_data, asset_id):
+                """Scanned in the last 2 days."""
                 timestamp = projected_data[str(asset_id)].get("timestamp")
                 if timestamp is None:
                     return False
-                timestamp_datetime = datetime.utcfromtimestamp(timestamp)
-                current_datetime = datetime.utcnow()
-
-                # Calculate the difference between the current time and the timestamp
-                time_difference = current_datetime - timestamp_datetime
-
-                # Get the number of days in the time difference
-                days_ago = time_difference.days
-
-                # Check if it's been more than 2 day
-                # print(days_ago, "days ago")
-                if days_ago > 2:
-                    return False
-                return True
+                return time.time() - timestamp <= RESCAN_AFTER_SECONDS
 
             def big_price_change(assetid, project_data, threshold=0.5):
                 """

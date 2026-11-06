@@ -80,6 +80,7 @@ class TradeMaker:
         self.min_items_their = self.config.trading["MinimumItemsTheirSide"]
         self.max_items_their = self.config.trading["MaximumItemsTheirSide"]
         self.select_by = self.config.filter_generated["Select_Trade_Using"]
+        self.outbound_variety = self.config.filter_generated.get("Outbound_Variety")
 
         self.max_robux = self.config.trading["MaxRobux"]
         self.robux_divide = self.config.trading["RobuxDividePercentage"]
@@ -289,17 +290,40 @@ class TradeMaker:
         else:
             raise ValueError(f"Unknown selection type: {select_by}")
 
-    def generate_trade(self, self_inventory, their_inventory, counter_trade=False):
+    def prefer_unoffered(self, valid_trades, offered):
+        """
+        [Filtering Generated Trades] Outbound Variety. offered = how many open
+        outbounds each of our items (by instance id) is already in. Drops the
+        trades whose items are offered the most, so outbounds don't all use the
+        same items (once one is accepted, the rest become invalid).
+        0 keeps every trade, 1 keeps only the trades using the least-offered items.
+        """
+        variety = getattr(self, "outbound_variety", None)
+        if not variety or not offered or not valid_trades:
+            return valid_trades
+        reuse = [
+            sum(offered.get(uaid, 0) for uaid in trade["self_side"])
+            for trade in valid_trades
+        ]
+        low, high = min(reuse), max(reuse)
+        limit = high - variety * (high - low) + 1e-9
+        return [trade for trade, r in zip(valid_trades, reuse) if r <= limit]
+
+    def generate_trade(
+        self, self_inventory, their_inventory, counter_trade=False, offered=None
+    ):
         """
         Algorithm responsible for generating combinations and validating them..
-        if its a counter trade it will select random trade to send back
+        if its a counter trade it will select random trade to send back.
+        offered: our items' open-outbound counts, for Outbound Variety.
         """
         valid_trades = []
 
         def pick_trade():
+            candidates = self.prefer_unoffered(valid_trades, offered)
             # pick random trade to avoid sending the same counter trade
             if counter_trade:
-                trade = self.select_trade(valid_trades, select_by="random")
+                trade = self.select_trade(candidates, select_by="random")
                 return trade
 
             select_by = (self.select_by or DEFAULT_SELECT_TRADE).lower()
@@ -310,7 +334,7 @@ class TradeMaker:
                     severityNum=2,
                 )
                 select_by = DEFAULT_SELECT_TRADE
-            return self.select_trade(valid_trades, select_by=select_by)
+            return self.select_trade(candidates, select_by=select_by)
 
         start_time = time.perf_counter()  # Use perf_counter for better precision
 
@@ -508,8 +532,6 @@ class TradeMaker:
                         total_volume = self_volume + their_volume
 
                         # Calculate close score (percentage)
-                        # TODO: maybe we could optimize this by having ONE function do it then return it.
-                        # Because Right now we are doing this while generating the trade and here
                         rap_close_percentage = self.close_percentage(
                             self_value=self_rap, their_value=their_rap
                         )
@@ -564,8 +586,6 @@ class TradeMaker:
                             }
                         )
 
-                        # idk the number lol
-                        # TODO: MAKE THIS IN CONFIG
                         if (
                             self.max_valid_trades
                             and len(valid_trades) > self.max_valid_trades
@@ -628,17 +648,21 @@ class TradeMaker:
         self_overall_value,
         their_overall_value,
         robux=None,
+        their_robux=None,
     ):
-        value_gain = their_value - self_value
-        if robux is not None and robux != 0:
-            # see if value is losing because of robux
-            # TODO: test to make sure this is a valid method of doing this
-            if self.min_value_gain and (value_gain + robux) < self.min_value_gain:
-                return False, "value_gain"
-
-            # if robux > calc_robux:
-            #    return False
-
+        """
+        robux / their_robux: Robux each side adds. They count at face value
+        toward RAP, Overall Value and RAP Algorithm (not Value, which is
+        Rolimons values only), and toward the score percentages.
+        """
+        if robux:
+            self_rap += robux
+            self_overall_value += robux
+            self_rap_algo += robux
+        if their_robux:
+            their_rap += their_robux
+            their_overall_value += their_robux
+            their_rap_algo += their_robux
         if (
             self.min_value_of_trade
             and self.min_value_of_trade > self_value + their_value

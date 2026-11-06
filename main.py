@@ -12,27 +12,15 @@ from handler.handle_logs import log
 from handler.handle_cli import Terminal
 from handler.handle_discord import DiscordHandler
 from handler import exceptions_types
+from handler.handle_trade_ads import TradeAdPoster
 
 
 """
-    have total value gain (total value of items traded)
-
-    if account has no value items, maybe swatch to rap_config.cfg?
-    have value_config.cfg
-
-    fix outbound checking cancel outbounds thats above the max
-    Fix bad imports and messy imports..
-
-
-    1. multithread appending owners (bake in get inventory so multiple threads work on inventories)
-    maybe have projected scanning in another thread somehow? dont let the whole program wait on 1 thread for projected scanning
-
-    Rolimon ads and discord ads for more counters!
-
-    Trade send thread should be seprate from scanning inventories threads bc ratelimit on resale-data
-
-    dont keep countering trades from same person
-    also switch users if coulndt find trade in like 30 minutes
+    Ideas not done yet:
+    - if an account has no valued items, switch it to rap_config.cfg
+    - scan owners' inventories on more than one thread
+    - post Rolimons / Discord trade ads to get more inbounds to counter
+    - don't keep countering trades from the same person
 """
 
 
@@ -46,8 +34,6 @@ class Doggo:
         self.json = JsonHandler(filename="cookies.json")
         self.rolimons = RolimonAPI()
 
-        # NOTE: use roblo accounts trademaker
-        # self.trader = TradeMaker()
         self.account_configs = HandleConfigs()
         self.discord_webhook = DiscordHandler()
 
@@ -353,6 +339,30 @@ class Doggo:
     # Main trading loop
     # ------------------------------------------------------------------
 
+    def start_trade_ads(self, roblox_accounts):
+        """Starts posting Rolimons trade ads if [Trade Ads] Enabled = True."""
+        config = self.rolimons.config
+        if not config.trade_ads["Enabled"]:
+            return
+        if config.debug["dont_send_trade"]:
+            log("[TRADE ADS] Not posting ads: Dont Send Trades is on (test mode)")
+            return
+        with_cookie = [a for a in roblox_accounts if a.rolimons_cookie]
+        if not with_cookie:
+            log(
+                "[TRADE ADS] No account has a Rolimons cookie. "
+                "Add one in Account Manager > Rolimons Cookies.",
+                severityNum=2,
+            )
+            return
+        poster = TradeAdPoster(config.trade_ads)
+        self.start_thread("Trade ads", self.trade_ad_thread, poster, with_cookie)
+
+    def trade_ad_thread(self, poster, accounts):
+        while True:
+            poster.run_once([a for a in accounts if not self.is_disabled(a)])
+            time.sleep(60)
+
     def open_account_manager_for_setup(self):
         """No usable accounts: explain why and open the Account Manager."""
         saved = self.json.read_data().get("roblox_accounts", [])
@@ -384,6 +394,7 @@ class Doggo:
         )
         self.start_thread("Inbound trades", self.counter_trade_thread, roblox_accounts)
         self.start_thread("Rolimons updater", self.update_data_thread, roblox_accounts)
+        self.start_trade_ads(roblox_accounts)
 
         time.sleep(1)
         while True:
@@ -582,7 +593,7 @@ class Doggo:
         """
         log(f"generating trade for {account.username}")
         generated_trade = account.trade_maker.generate_trade(
-            account_inventory, trader_inventory
+            account_inventory, trader_inventory, offered=account.offered_item_counts()
         )
 
         if not generated_trade:
@@ -738,6 +749,9 @@ class Doggo:
             except exceptions_types.TradebotError as e:
                 self.report_error(f"Couldn't load {name}, skipping it", e)
                 continue
+
+            # Optional, for [Trade Ads]
+            roblox_account.rolimons_cookie = account.get("rolimons_cookie")
 
             user_config = self.account_configs.get_config(user_id)
             if user_config:

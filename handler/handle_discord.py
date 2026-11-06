@@ -19,50 +19,26 @@ class DiscordHandler:
     def __init__(self):
         pass
 
-    # NOTE: trade advertisement channel in rolimons is slowmode of 10 mins use a link like https://www.roblox.com/users/97483119/trade and say how much robux u have
-
-    def post_message(self):
-
-        pass
-
-    def scan_channel(self):
-        pass
-
-    def scan_value_requests(self):
-        pass
-
-    def scan_value_albums(self):
-        pass
-
-    def post_webhook(self):
-        pass
-
-    def format_trades_api(self, response):
-        """
-        Makes webhooks for trades.roblox.com/v1/trades
-        """
-
     def trade_profit(self, trade) -> int:
         """
         Calculates the profits for a trade for the webhook info
         """
-        # NOTE: the problem is that the bot adds rap + value
         their_rap = trade["their_rap"]
         their_value = trade["their_value"]
         their_algo = trade["their_rap_algo"]
         their_overall = trade["their_overall_value"]
 
-        # self_robux = trade["self_robux"]
         self_rap = trade["self_rap"]
         self_value = trade["self_value"]
         self_algo = trade["self_rap_algo"]
         self_overall = trade["self_overall_value"]
 
-        # use to add algo to this but doesnt make sense because its like the RAP
-        total_profit = their_overall - self_overall
+        # Robux counts toward everything but Value, like when the trade was checked
+        robux = (trade.get("their_robux") or 0) - (trade.get("self_robux") or 0)
+        total_profit = their_overall - self_overall + robux
 
-        algo_profit = round(their_algo - self_algo)
-        rap_profit = their_rap - self_rap
+        algo_profit = round(their_algo - self_algo + robux)
+        rap_profit = their_rap - self_rap + robux
         value_profit = their_value - self_value
 
         return total_profit, algo_profit, rap_profit, value_profit
@@ -70,9 +46,9 @@ class DiscordHandler:
     def embed_fields_from_trade(
         self, generated_trade: dict, rolimon_data: dict, projected_data
     ) -> dict:
-        # TODO: fix the bug where if theres multiple of the same item it only puts one of them in the webhook
         """
-        Takes all the item ids from generated trade and formats their names in a string that have linebreaks
+        Takes all the item ids from generated trade and formats their names in a string that have linebreaks.
+        Item id lists keep duplicates, so two of the same item are listed twice.
         """
 
         def str_from_item_ids(item_ids, is_self=False):

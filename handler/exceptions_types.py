@@ -158,6 +158,14 @@ class RolimonsError(TradebotError):
     """Rolimons couldn't be reached or its page/API format changed."""
 
 
+class RolimonsCookieInvalid(RolimonsError):
+    """The account's Rolimons verification cookie is missing, wrong or expired."""
+
+
+class TradeAdRejected(RolimonsError):
+    """Rolimons refused a trade ad (too soon since the last one, bad items...)."""
+
+
 class DataFileError(TradebotError):
     """A local JSON data file couldn't be read or written."""
 

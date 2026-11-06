@@ -9,9 +9,6 @@ from datetime import datetime, timedelta
 from handler.handle_logs import log
 from handler.exceptions_types import DataFileError
 
-# NOTE: I can optimize json reading and stuff by not having cookies.json a list of dicts
-# rather it could be dicts with the keys as the userids
-
 
 class JsonHandler:
     # filename -> ((mtime_ns, size), data): shared read-only snapshots
@@ -287,6 +284,20 @@ class JsonHandler:
             print("Cookie already exists.")
             time.sleep(1)
 
+    def set_rolimons_cookie(self, index: int, rolimons_cookie) -> bool:
+        """Saves (or with None, removes) an account's Rolimons cookie."""
+        data = self.read_data()
+        accounts = data["roblox_accounts"]
+        if not 0 <= index < len(accounts):
+            self.cli.print_error("Invalid number.")
+            return False
+        if rolimons_cookie:
+            accounts[index]["rolimons_cookie"] = rolimons_cookie
+        else:
+            accounts[index].pop("rolimons_cookie", None)
+        self.write_data(data)
+        return True
+
     def delete_cookie(self, index: int) -> None:
         data = self.read_data()
         if 0 <= index < len(data["roblox_accounts"]):
@@ -328,11 +339,11 @@ class JsonHandler:
                 shorten_cookie = account["cookie"][: len(account["cookie"]) // 6]
                 cookie_info = f"\nusername: {account['username']},\n user id: {
                     account['user_id']
-                }\nratelimited: {account['ratelimit_timestamp']}\nenabled: {
-                    account['use_account']
-                }\n\nshortened cookie: {shorten_cookie}\nauth secret: {
-                    account['auth_secret']
-                }\n"
+                }\nratelimited: {account['ratelimit_timestamp']}\nrolimons cookie: {
+                    'set' if account.get('rolimons_cookie') else 'not set'
+                }\nenabled: {account['use_account']}\n\nshortened cookie: {
+                    shorten_cookie
+                }\nauth secret: {account['auth_secret']}\n"
 
                 print("---" + title + "---" + cookie_info)
 

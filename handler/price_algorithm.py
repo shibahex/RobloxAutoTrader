@@ -18,8 +18,10 @@ class SalesVolumeAnalyzer:
             volume_data: A list of dictionaries with keys "value" and "date".
             item_id: The identifier for the item being analyzed.
         """
-        self.sales_data = sales_data
-        self.volume_data = volume_data
+        # The splitting into thirds below needs oldest-first data (callers
+        # usually pass newest-first)
+        self.sales_data = sorted(sales_data, key=lambda point: point["date"])
+        self.volume_data = sorted(volume_data, key=lambda point: point["date"])
         self.item_id = item_id
         self.values = {}
         self.now = time.time()

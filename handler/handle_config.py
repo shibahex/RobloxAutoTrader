@@ -62,6 +62,7 @@ class ConfigHandler:
         self.debug = self.load_debug()
         self.discord_settings = self.load_discord()
         self.outbound = self.load_outbound()
+        self.trade_ads = self.load_trade_ads()
         # self.mass_sender = self.load_mass_sender()
         # Check if config is filled out
         self.validate_config()
@@ -121,6 +122,106 @@ class ConfigHandler:
         elif max_gain is not None:
             return max_profit <= max_gain
         return True
+
+    def load_trade_ads(self):
+        """[Trade Ads]: Rolimons trade ads. Missing settings use the defaults."""
+        from handler.handle_trade_ads import (
+            MAX_ITEMS_PER_SIDE,
+            MIN_MINUTES_BETWEEN_ADS,
+            OFFER_PICKS,
+            REQUEST_TAGS,
+        )
+
+        section = "Trade Ads"
+
+        def invalid(option, why):
+            self.invalid_settings.append(f"[{section}] {option} ({why})")
+
+        enabled = self.get_boolean("Trade Ads", "Enabled")
+
+        minutes = self.get_float_default("Trade Ads", "Post Every Minutes", 20)
+        if minutes == "Not Set":
+            minutes = 20
+        elif minutes is None or minutes < MIN_MINUTES_BETWEEN_ADS:
+            invalid(
+                "Post Every Minutes",
+                f"must be {MIN_MINUTES_BETWEEN_ADS} or more, Rolimons allows one "
+                f"ad every {MIN_MINUTES_BETWEEN_ADS} minutes",
+            )
+            minutes = 20
+
+        offer_count = self.get_int("Trade Ads", "Offer Items")
+        if offer_count is None or offer_count == "Not Set":
+            offer_count = MAX_ITEMS_PER_SIDE
+        elif not 1 <= offer_count <= MAX_ITEMS_PER_SIDE:
+            invalid("Offer Items", f"must be 1 to {MAX_ITEMS_PER_SIDE}")
+            offer_count = MAX_ITEMS_PER_SIDE
+
+        pick = self.get_string("Trade Ads", "Offer Items Using") or "highest_value"
+        pick = pick.strip().lower()
+        if pick not in OFFER_PICKS:
+            invalid("Offer Items Using", "must be " + ", ".join(OFFER_PICKS))
+            pick = "highest_value"
+
+        def item_ids(values, option):
+            ids = []
+            for raw in values:
+                raw = raw.strip().removeprefix("1:")
+                if not raw or raw.lower() == "none":
+                    continue
+                if not raw.isdigit():
+                    invalid(option, "must be item IDs separated by commas")
+                    return []
+                ids.append(int(raw))
+            if len(ids) > MAX_ITEMS_PER_SIDE:
+                invalid(option, f"at most {MAX_ITEMS_PER_SIDE} items")
+                return ids[:MAX_ITEMS_PER_SIDE]
+            return ids
+
+        offer_items = item_ids(
+            self.get_list("Trade Ads", "Offer Item IDs"), "Offer Item IDs"
+        )
+        if enabled is True and pick == "manual" and not offer_items:
+            invalid(
+                "Offer Item IDs",
+                "Offer Items Using = manual needs at least one item ID here",
+            )
+        request_items = item_ids(
+            self.get_list("Trade Ads", "Request Item IDs"), "Request Item IDs"
+        )
+
+        if self.config.has_option("Trade Ads", "Request Tags"):
+            tags = [
+                t.strip().lower()
+                for t in self.get_list("Trade Ads", "Request Tags")
+                if t.strip() and t.strip().lower() != "none"
+            ]
+        else:
+            tags = ["any"]
+        unknown = [t for t in tags if t not in REQUEST_TAGS]
+        if unknown:
+            invalid("Request Tags", "can only be " + ", ".join(REQUEST_TAGS))
+            tags = [t for t in tags if t in REQUEST_TAGS]
+
+        if len(request_items) + len(tags) > MAX_ITEMS_PER_SIDE:
+            invalid(
+                "Request Item IDs",
+                f"Request Item IDs and Request Tags together can be at most "
+                f"{MAX_ITEMS_PER_SIDE}",
+            )
+        # outbound ads always request the other person's items
+        if enabled is True and pick != "outbound" and not request_items and not tags:
+            invalid("Request Tags", "an ad needs at least one request item or tag")
+
+        return {
+            "Enabled": bool(enabled) and enabled != "Not Set",
+            "Post_Every_Minutes": minutes,
+            "Offer_Items": offer_count,
+            "Offer_Items_Using": pick,
+            "Offer_Item_IDs": offer_items,
+            "Request_Items": request_items,
+            "Request_Tags": tags,
+        }
 
     def load_outbound(self):
         return {
@@ -229,7 +330,21 @@ class ConfigHandler:
             "Select_Trade_Using": self.get_string(
                 "Filtering Generated Trades", "Select Trade Using"
             ),
+            "Outbound_Variety": self._outbound_variety(),
         }
+
+    def _outbound_variety(self):
+        """0 (off) to 1. Missing or None = 0."""
+        section, option = "Filtering Generated Trades", "Outbound Variety"
+        value = self.get_float_default(section, option, 0.0)
+        if value is None or value == "Not Set":  # "Not Set" is already reported
+            return 0.0
+        if not 0 <= value <= 1:
+            self.invalid_settings.append(
+                f"[{section}] {option} (must be between 0 and 1)"
+            )
+            return 0.0
+        return value
 
     def load_trading(self):
         return {
@@ -321,11 +436,12 @@ class ConfigHandler:
             "Detect_Rolimons_Projecteds": self.get_boolean(
                 "Projected Detection", "Detect Rolimons Projecteds"
             ),
-            "MaximumGraphDifference": self.get_float(
-                "Projected Detection", "Maximum Graph Difference"
+            # Missing = today's default (40% each way); None = don't check that way
+            "MaximumGraphDifference": self.get_float_default(
+                "Projected Detection", "Maximum Graph Difference", 0.4
             ),
-            "MinimumGraphDifference": self.get_float(
-                "Projected Detection", "Minimum Graph Difference"
+            "MinimumGraphDifference": self.get_float_default(
+                "Projected Detection", "Minimum Graph Difference", -0.4
             ),
             "MinPriceDifference": self.get_float(
                 "Projected Detection", "MinPriceDifference"
@@ -374,6 +490,12 @@ class ConfigHandler:
                 f"[{section}] {option} (must be a number or None)"
             )
             return "Not Set"
+
+    def get_float_default(self, section, option, default):
+        """Like get_float, but a missing setting gets `default` (None still means off)."""
+        if not self.config.has_option(section, option):
+            return default
+        return self.get_float(section, option)
 
     def get_string(self, section, option):
         try:
