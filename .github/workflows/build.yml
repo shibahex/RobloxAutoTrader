@@ -1,11 +1,11 @@
 # Builds the Windows .exe and the Linux binary, and publishes them as a GitHub
-# release. Runs when version.py changes on main or refactor-branch, or when you
-# press "Run workflow" on the Actions tab.
+# release. Runs when version.py changes on main (e.g. merging a pull request that
+# changes it), or when you press "Run workflow" on the Actions tab.
 name: Build
 
 on:
   push:
-    branches: [main, refactor-branch, community]
+    branches: [main, community]
     paths: [version.py, .github/workflows/build.yml]
   workflow_dispatch:
     inputs:
@@ -93,8 +93,9 @@ jobs:
           mkdir -p "$name/configs" "$name/docs"
           cp dist/TradebotRBX* "$name/"
           cp configs/*.cfg "$name/configs/"
-          # Starting config; switch it with Config Manager > Change Config
-          cp configs/small_value.cfg "$name/config.cfg"
+          # Starting config (the repo's default); switch it with
+          # Config Manager > Change Config
+          cp config.cfg "$name/config.cfg"
           cp -r docs/config "$name/docs/"
           cp README.md LICENSE "$name/"
           # Linux setup scripts (e.g. scripts/waydroid/setup.sh), if the repo has any

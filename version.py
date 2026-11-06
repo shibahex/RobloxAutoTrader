@@ -1,7 +1,7 @@
 """
-The bot's version. Changing VERSION or STAGE here (and pushing to main or
-refactor-branch) makes GitHub Actions build the Windows .exe and Linux
-binary and publish them as a release.
+The bot's version. Changing VERSION or STAGE here and pushing (or merging)
+to main makes GitHub Actions build the Windows .exe and Linux binary and
+publish them as a release.
 """
 
 import importlib.util
@@ -9,7 +9,7 @@ import sys
 
 VERSION = "2.0"
 # "BETA", or "" for a stable release
-STAGE = "BETA"
+STAGE = ""
 
 
 def edition() -> str:
