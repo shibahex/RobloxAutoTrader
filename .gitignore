@@ -6,6 +6,8 @@ venv/
 proxies.txt
 cookies*
 .*
+!.github/
+!.gitignore
 *.crt
 logs/
 build/

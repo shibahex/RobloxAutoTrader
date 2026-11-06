@@ -2294,3 +2294,21 @@ def test_outbound_ads_need_no_request_settings(tmp_path):
         "[Trade Ads]\nEnabled = True\nOffer Items Using = outbound\nRequest Tags = None\n"
     )
     assert ConfigHandler(str(cfg)).trade_ads["Request_Tags"] == []
+
+
+# --- version ---------------------------------------------------------------------------
+
+
+def test_version_strings(monkeypatch):
+    import version
+
+    monkeypatch.setattr(version, "VERSION", "2.0")
+    monkeypatch.setattr(version, "edition", lambda: "")
+    monkeypatch.setattr(version, "STAGE", "BETA")
+    assert version.full_version() == "2.0 (BETA)"
+    assert version.release_tag() == "v2.0-beta"
+    monkeypatch.setattr(version, "STAGE", "")
+    assert version.full_version() == "2.0"
+    assert version.release_tag() == "v2.0"
+    monkeypatch.setattr(version, "edition", lambda: "-community")
+    assert version.release_tag() == "v2.0-community"

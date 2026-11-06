@@ -13,6 +13,7 @@ from handler.handle_cli import Terminal
 from handler.handle_discord import DiscordHandler
 from handler import exceptions_types
 from handler.handle_trade_ads import TradeAdPoster
+from version import full_version
 
 
 """
@@ -64,7 +65,7 @@ class Doggo:
             (2, "Config Manager"),
             (3, "Execute Trader"),
         )
-        log("Version: 2.0 (BETA)")
+        log(f"Version: {full_version()}")
         self.cli.print_menu("Main Menu", options)
         try:
             answer = int(self.cli.input_prompt("Enter Option"))
@@ -761,6 +762,10 @@ class Doggo:
 
 
 if __name__ == "__main__":
+    # Used by the release build to check the program starts
+    if "--version" in sys.argv:
+        print(full_version())
+        sys.exit(0)
     try:
         doggo = Doggo()
         doggo.main()
