@@ -1,0 +1,149 @@
+# Builds the Windows .exe and the Linux binary, and publishes them as a GitHub
+# release. Runs when version.py changes on main (e.g. merging a pull request that
+# changes it), or when you press "Run workflow" on the Actions tab.
+name: Build
+
+on:
+  push:
+    branches: [main, community]
+    paths: [version.py, .github/workflows/build.yml]
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish as a GitHub release (off = only downloadable from this run)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+# One build per branch at a time; a newer push waits instead of racing
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.12"
+  PYINSTALLER_VERSION: "6.11.1"
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      # Offline tests only: the live ones talk to Roblox and Rolimons
+      - run: python -m pytest tests -q -p no:cacheprovider --ignore=tests/test_live.py
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+          # Built on an older Ubuntu so the binary also runs on older distros
+          - os: ubuntu-22.04
+            platform: linux
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      # jaraco.*: pkg_resources (used by selenium-wire) needs them at runtime,
+      # and PyInstaller doesn't pick them up on its own on Windows
+      - run: pip install -r requirements.txt "pyinstaller==${PYINSTALLER_VERSION}" jaraco.text jaraco.functools jaraco.context
+
+      - name: Read version
+        id: version
+        run: echo "tag=$(python -c 'import version; print(version.release_tag())')" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: >-
+          pyinstaller --onefile --console --name TradebotRBX
+          --collect-data seleniumwire
+          --hidden-import jaraco.text --hidden-import jaraco.functools --hidden-import jaraco.context
+          --python-option "W ignore:pkg_resources is deprecated:UserWarning"
+          main.py
+
+      - name: Check it starts
+        run: |
+          if ! out=$(./dist/TradebotRBX --version 2>&1); then
+            echo "$out"
+            # Last lines of the error as an annotation, so it shows on the run page
+            echo "::error title=TradebotRBX didn't start::$(echo "$out" | tr -d '\r' | tail -n 12 | tr '\n' '|')"
+            exit 1
+          fi
+          echo "$out"
+
+      - name: Package
+        id: package
+        run: |
+          name="TradebotRBX-${{ steps.version.outputs.tag }}-${{ matrix.platform }}"
+          mkdir -p "$name/configs" "$name/docs"
+          cp dist/TradebotRBX* "$name/"
+          cp configs/*.cfg "$name/configs/"
+          # Starting config (the repo's default); switch it with
+          # Config Manager > Change Config
+          cp config.cfg "$name/config.cfg"
+          cp -r docs/config "$name/docs/"
+          cp README.md LICENSE "$name/"
+          # Linux setup scripts (e.g. scripts/waydroid/setup.sh), if the repo has any
+          if [ "${{ matrix.platform }}" = linux ] && [ -d scripts ]; then
+            cp -r scripts "$name/"
+            find "$name/scripts" -name '*.sh' -exec chmod +x {} +
+          fi
+          if [ "${{ matrix.platform }}" = windows ]; then
+            7z a -tzip "$name.zip" "$name" > /dev/null
+            echo "file=$name.zip" >> "$GITHUB_OUTPUT"
+          else
+            tar -czf "$name.tar.gz" "$name"   # tar keeps the binary executable
+            echo "file=$name.tar.gz" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}
+          path: ${{ steps.package.outputs.file }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: github.event_name == 'push' || inputs.release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(python -c 'import version; print(version.release_tag())')
+          title="TradebotRBX $(python -c 'import version; print(version.full_version())')"
+          flags=(--target "$GITHUB_SHA" --title "$title" --generate-notes)
+          # A BETA (or any STAGE) version is marked as a pre-release
+          if [ -n "$(python -c 'import version; print(version.STAGE)')" ]; then
+            flags+=(--prerelease)
+          fi
+          # First build of this version creates the release; later ones
+          # (e.g. pressing Run workflow again) replace its files
+          if ! gh release view "$tag" > /dev/null 2>&1; then
+            gh release create "$tag" "${flags[@]}"
+          fi
+          gh release upload "$tag" release/* --clobber

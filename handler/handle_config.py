@@ -1,12 +1,67 @@
+import functools
 from handler.handle_logs import log
+from handler.exceptions_types import ConfigError
 
 import configparser
+
+
+@functools.lru_cache(maxsize=256)
+def _convert_gain(gain):
+    """
+    Convert gain to a float or int; gains between -1 and 1 are percentages.
+    Cached: trade generation checks the same few settings millions of times.
+    """
+    try:
+        gain = float(gain) if "." in str(gain) else int(gain)
+
+        if gain == 0.0:
+            return gain, False
+
+        return gain, abs(gain) < 1  # True if between -1 and 1 (percentage)
+    except ValueError:
+        raise ValueError(f"Invalid gain value: {gain}")
+
+
+def _positive_number(value, default):
+    """A setting that must be a number above 0; anything else (missing, "Not Set",
+    a typo like "10m", 0 or negative) falls back to the default."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+        return value
+    return default
+
+
+def _item_ids(values):
+    """NFT/NFR entries as Rolimons IDs: "1029025" becomes "1:1029025" (bundles
+    need the "2:" prefix written out)."""
+    ids = []
+    for value in values or []:
+        value = str(value).strip()
+        if value.isdigit():
+            value = f"1:{value}"
+        if value:
+            ids.append(value)
+    return ids
+
+
+# [Inbound Settings] gain -> the [Trading Settings] key it replaces for inbounds
+INBOUND_GAINS = {
+    ("Inbound Settings", "Minimum RAP Gain"): "Minimum_RAP_Gain",
+    ("Inbound Settings", "Maximum RAP Gain"): "Maximum_RAP_Gain",
+    ("Inbound Settings", "Minimum Value Gain"): "Minimum_Value_Gain",
+    ("Inbound Settings", "Maximum Value Gain"): "Maximum_Value_Gain",
+    ("Inbound Settings", "Minimum Overall Value Gain"): "Minimum_Overall_Gain",
+    ("Inbound Settings", "Maximum Overall Value Gain"): "Maximum_Overall_Gain",
+    ("Inbound Settings", "Minimum Rap Algorithm Gain"): "Minimum_Algo_Gain",
+    ("Inbound Settings", "Maximum Rap Algorithm Gain"): "Maximum_Algo_Gain",
+}
 
 
 class ConfigHandler:
     def __init__(self, filename="config.cfg"):
         self.config = configparser.ConfigParser()
         self.config.read(filename)
+        # "[Section] Option" of every setting that couldn't be read
+        self.invalid_settings = []
 
         # Load configuration values into attributes
         self.scan_items = self.load_scan_items()
@@ -19,6 +74,8 @@ class ConfigHandler:
         self.inbounds = self.load_inbounds()
         self.debug = self.load_debug()
         self.discord_settings = self.load_discord()
+        self.outbound = self.load_outbound()
+        self.trade_ads = self.load_trade_ads()
         # self.mass_sender = self.load_mass_sender()
         # Check if config is filled out
         self.validate_config()
@@ -28,15 +85,7 @@ class ConfigHandler:
         Convert gain to a float or int
         Treat gains < 1 and > -1 as percentages.
         """
-        try:
-            gain = float(gain) if "." in str(gain) else int(gain)
-
-            if gain == 0.0:
-                return gain, False
-
-            return gain, abs(gain) < 1  # True if between -1 and 1 (percentage)
-        except ValueError:
-            raise ValueError(f"Invalid gain value: {gain}")
+        return _convert_gain(gain)
 
     def calculate_gain(self, gain, base_value, is_percentage):
         """
@@ -87,10 +136,130 @@ class ConfigHandler:
             return max_profit <= max_gain
         return True
 
+    def load_trade_ads(self):
+        """[Trade Ads]: Rolimons trade ads. Missing settings use the defaults."""
+        from handler.handle_trade_ads import (
+            MAX_ITEMS_PER_SIDE,
+            MIN_MINUTES_BETWEEN_ADS,
+            OFFER_PICKS,
+            REQUEST_TAGS,
+        )
+
+        section = "Trade Ads"
+
+        def invalid(option, why):
+            self.invalid_settings.append(f"[{section}] {option} ({why})")
+
+        enabled = self.get_boolean("Trade Ads", "Enabled")
+
+        minutes = self.get_float_default("Trade Ads", "Post Every Minutes", 20)
+        if minutes == "Not Set":
+            minutes = 20
+        elif minutes is None or minutes < MIN_MINUTES_BETWEEN_ADS:
+            invalid(
+                "Post Every Minutes",
+                f"must be {MIN_MINUTES_BETWEEN_ADS} or more, Rolimons allows one "
+                f"ad every {MIN_MINUTES_BETWEEN_ADS} minutes",
+            )
+            minutes = 20
+
+        offer_count = self.get_int("Trade Ads", "Offer Items")
+        if offer_count is None or offer_count == "Not Set":
+            offer_count = MAX_ITEMS_PER_SIDE
+        elif not 1 <= offer_count <= MAX_ITEMS_PER_SIDE:
+            invalid("Offer Items", f"must be 1 to {MAX_ITEMS_PER_SIDE}")
+            offer_count = MAX_ITEMS_PER_SIDE
+
+        pick = self.get_string("Trade Ads", "Offer Items Using") or "highest_value"
+        pick = pick.strip().lower()
+        if pick not in OFFER_PICKS:
+            invalid("Offer Items Using", "must be " + ", ".join(OFFER_PICKS))
+            pick = "highest_value"
+
+        def item_ids(values, option):
+            ids = []
+            for raw in values:
+                raw = raw.strip().removeprefix("1:")
+                if not raw or raw.lower() == "none":
+                    continue
+                if not raw.isdigit():
+                    invalid(option, "must be item IDs separated by commas")
+                    return []
+                ids.append(int(raw))
+            if len(ids) > MAX_ITEMS_PER_SIDE:
+                invalid(option, f"at most {MAX_ITEMS_PER_SIDE} items")
+                return ids[:MAX_ITEMS_PER_SIDE]
+            return ids
+
+        offer_items = item_ids(
+            self.get_list("Trade Ads", "Offer Item IDs"), "Offer Item IDs"
+        )
+        if enabled is True and pick == "manual" and not offer_items:
+            invalid(
+                "Offer Item IDs",
+                "Offer Items Using = manual needs at least one item ID here",
+            )
+        request_items = item_ids(
+            self.get_list("Trade Ads", "Request Item IDs"), "Request Item IDs"
+        )
+
+        if self.config.has_option("Trade Ads", "Request Tags"):
+            tags = [
+                t.strip().lower()
+                for t in self.get_list("Trade Ads", "Request Tags")
+                if t.strip() and t.strip().lower() != "none"
+            ]
+        else:
+            tags = ["any"]
+        unknown = [t for t in tags if t not in REQUEST_TAGS]
+        if unknown:
+            invalid("Request Tags", "can only be " + ", ".join(REQUEST_TAGS))
+            tags = [t for t in tags if t in REQUEST_TAGS]
+
+        if len(request_items) + len(tags) > MAX_ITEMS_PER_SIDE:
+            invalid(
+                "Request Item IDs",
+                f"Request Item IDs and Request Tags together can be at most "
+                f"{MAX_ITEMS_PER_SIDE}",
+            )
+        # outbound ads always request the other person's items
+        if enabled is True and pick != "outbound" and not request_items and not tags:
+            invalid("Request Tags", "an ad needs at least one request item or tag")
+
+        return {
+            "Enabled": bool(enabled) and enabled != "Not Set",
+            "Post_Every_Minutes": minutes,
+            "Offer_Items": offer_count,
+            "Offer_Items_Using": pick,
+            "Offer_Item_IDs": offer_items,
+            "Request_Items": request_items,
+            "Request_Tags": tags,
+        }
+
+    def load_outbound(self):
+        return {
+            # Trades sent before the config last changed are only cancelled if
+            # they're losing overall (or receive a projected item), not for
+            # failing the new config's rules. Older configs use the old name.
+            "Only_Cancel_Losing_After_Config_Change": bool(
+                self.get_boolean(
+                    "Outbound Settings", "Keep Trades Sent Before Config Change"
+                )
+                if self.config.has_option(
+                    "Outbound Settings", "Keep Trades Sent Before Config Change"
+                )
+                else self.get_boolean(
+                    "Outbound Settings", "Only Cancel Losing Trades After Config Change"
+                )
+            ),
+        }
+
     def load_discord(self):
         return {
             "Send_Webhook": self.get_string("Discord", "Send Webhook"),
             "Completed_Webhook": self.get_string("Discord", "Completed Webhook"),
+            # Optional: where crashes and account problems get posted
+            "Error_Webhook": self.get_string("Discord", "Error Webhook"),
         }
 
     def load_scan_items(self):
@@ -149,8 +318,8 @@ class ConfigHandler:
 
     def load_filter_items(self):
         return {
-            "NFT": self.get_list("Filtering Items", "NFT"),
-            "NFR": self.get_list("Filtering Items", "NFR"),
+            "NFT": _item_ids(self.get_list("Filtering Items", "NFT")),
+            "NFR": _item_ids(self.get_list("Filtering Items", "NFR")),
             "Maximum_Amount_of_Duplicate_Items": self.get_int(
                 "Filtering Items", "Maximum Amount of Duplicate Items"
             ),
@@ -180,7 +349,21 @@ class ConfigHandler:
             "Select_Trade_Using": self.get_string(
                 "Filtering Generated Trades", "Select Trade Using"
             ),
+            "Outbound_Variety": self._outbound_variety(),
         }
+
+    def _outbound_variety(self):
+        """0 (off) to 1. Missing or None = 0."""
+        section, option = "Filtering Generated Trades", "Outbound Variety"
+        value = self.get_float_default(section, option, 0.0)
+        if value is None or value == "Not Set":  # "Not Set" is already reported
+            return 0.0
+        if not 0 <= value <= 1:
+            self.invalid_settings.append(
+                f"[{section}] {option} (must be between 0 and 1)"
+            )
+            return 0.0
+        return value
 
     def load_trading(self):
         return {
@@ -258,6 +441,62 @@ class ConfigHandler:
             "Dont_Counter_Wins": self.get_boolean(
                 "Inbound Settings", "Dont Counter Wins"
             ),
+            # On unless set to False
+            "Decline_If_No_Counter": self.get_boolean(
+                "Inbound Settings", "Decline If No Counter"
+            )
+            is not False,
+            # Off unless set: accepting a trade can't be undone
+            "Accept_Valid_Trades": bool(
+                self.get_boolean("Inbound Settings", "Accept Valid Trades")
+            ),
+            "Check_Every_Minutes": _positive_number(
+                self.get_float("Inbound Settings", "Check Inbounds Every Minutes"), 30
+            ),
+            "Gains": self.load_inbound_gains(),
+            # Counter loops (missing = these defaults, 0 = off)
+            "Max_Counters_Per_Trader": self._whole_number(
+                "Inbound Settings", "Max Counters Per Trader", 3
+            ),
+            "Instant_Reply_Seconds": 60
+            * _positive_number(
+                self.get_float_default("Inbound Settings", "Instant Reply Minutes", 20),
+                20,
+            ),
+            "Instant_Replies_For_Bot": self._whole_number(
+                "Inbound Settings", "Instant Replies To Call It A Bot", 3
+            ),
+            # Duplicates for inbounds (accepting and counters); missing = 2
+            "Max_Duplicates": self._whole_number(
+                "Inbound Settings", "Maximum Amount of Duplicate Items", 2
+            ),
+            "Max_Trader_Duplicates": self._whole_number(
+                "Inbound Settings", "Maximum Amount of Trader Duplicate Items", 2
+            ),
+            "Counter_Memory_Hours": _positive_number(
+                self.get_float_default("Inbound Settings", "Counter Memory Hours", 24),
+                24,
+            ),
+        }
+
+    def _whole_number(self, section, option, default) -> int:
+        """A whole number setting: missing = default, None = 0 (off)."""
+        if not self.config.has_option(section, option):
+            return default
+        if str(self.get_string(section, option)).strip().lower() in ("none", "false"):
+            return 0
+        value = self.get_int(section, option)
+        return value if isinstance(value, int) and value >= 0 else default
+
+    def load_inbound_gains(self) -> dict:
+        """
+        [Inbound Settings] gains, for accepting and countering. Only the ones
+        that are set: the rest use [Trading Settings] (or the account's config).
+        """
+        return {
+            key: self.get_float(section, option)
+            for (section, option), key in INBOUND_GAINS.items()
+            if self.config.has_option(section, option)
         }
 
     def load_projected_detection(self):
@@ -265,11 +504,12 @@ class ConfigHandler:
             "Detect_Rolimons_Projecteds": self.get_boolean(
                 "Projected Detection", "Detect Rolimons Projecteds"
             ),
-            "MaximumGraphDifference": self.get_float(
-                "Projected Detection", "Maximum Graph Difference"
+            # Missing = today's default (40% each way); None = don't check that way
+            "MaximumGraphDifference": self.get_float_default(
+                "Projected Detection", "Maximum Graph Difference", 0.4
             ),
-            "MinimumGraphDifference": self.get_float(
-                "Projected Detection", "Minimum Graph Difference"
+            "MinimumGraphDifference": self.get_float_default(
+                "Projected Detection", "Minimum Graph Difference", -0.4
             ),
             "MinPriceDifference": self.get_float(
                 "Projected Detection", "MinPriceDifference"
@@ -293,7 +533,10 @@ class ConfigHandler:
                 else None
             )
         except (ValueError, TypeError) as e:
-            log(f"Error retrieving integer for [{section}] {option}: {e}")
+            log(f"[CONFIG] [{section}] {option} must be a whole number: {e}")
+            self.invalid_settings.append(
+                f"[{section}] {option} (must be a whole number)"
+            )
             return "Not Set"
 
     def get_float(self, section, option):
@@ -309,9 +552,18 @@ class ConfigHandler:
                 string = self.get_string(section, option)
                 if string.lower() == "false" or string.lower() == "none":
                     return None
-            except Exception:
+            except (AttributeError, ValueError, TypeError):
                 pass
+            self.invalid_settings.append(
+                f"[{section}] {option} (must be a number or None)"
+            )
             return "Not Set"
+
+    def get_float_default(self, section, option, default):
+        """Like get_float, but a missing setting gets `default` (None still means off)."""
+        if not self.config.has_option(section, option):
+            return default
+        return self.get_float(section, option)
 
     def get_string(self, section, option):
         try:
@@ -321,7 +573,8 @@ class ConfigHandler:
                 else None
             )
         except (ValueError, TypeError) as e:
-            log(f"Error retrieving string for [{section}] {option}: {e}")
+            log(f"[CONFIG] Couldn't read [{section}] {option}: {e}")
+            self.invalid_settings.append(f"[{section}] {option}")
             return "Not Set"
 
     def get_boolean(self, section, option):
@@ -332,7 +585,10 @@ class ConfigHandler:
                 else None
             )
         except (ValueError, TypeError) as e:
-            log(f"Error retrieving boolean for [{section}] {option}: {e}")
+            log(f"[CONFIG] [{section}] {option} must be True or False: {e}")
+            self.invalid_settings.append(
+                f"[{section}] {option} (must be True or False)"
+            )
             return "Not Set"
 
     def get_list(self, section, option):
@@ -346,11 +602,16 @@ class ConfigHandler:
                 return valid_values
             return []
         except (ValueError, TypeError) as e:
-            log(f"Error retrieving list of integers for [{section}] {option}: {e}")
+            log(f"[CONFIG] [{section}] {option} must be a list of whole numbers: {e}")
             return []
 
     def validate_config(self):
-        # Check if any required values are None and raise an error
+        # Any setting that couldn't be read, named the way it's written in the file
+        if self.invalid_settings:
+            raise ConfigError(
+                "These config settings are invalid: "
+                + "; ".join(dict.fromkeys(self.invalid_settings))
+            )
         for section in [
             self.scan_items,
             self.filter_users,
@@ -359,6 +620,6 @@ class ConfigHandler:
         ]:
             for key, value in section.items():
                 if value == "Not Set":
-                    raise ValueError(
+                    raise ConfigError(
                         f"Configuration error: '{key}' is missing or invalid."
                     )

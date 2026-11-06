@@ -16,15 +16,19 @@ This bot used to be a paid service that im releasing, because I dont intend on u
 ### 🛠️ Quality of life
 - Multiple Cookie Management: Add multiple cookies to trade on and alert when premium expires.
 - Projected Detection: Identify potentially manipulated items
-- Outbound Checker: Cancel Losing outbounds
+- Outbound Checker: Cancels outbounds that turn into losses or would give you a projected item, re-checked every time Rolimons updates
 - Auto Account Setup: Can login through the browser and the bot will automatically take your cookie.
+- Clear Config Errors: A setting with a typo stops the bot at startup and tells you which one
+- Prebuilt Downloads: Windows .exe and Linux binary with every release
 
 ### 🔄 Trading Features
 - Value Trading: Integrates with Rolimons value data
 - RAP Trading: Integrates with Roblox Recent-Average-Price values
 - RAP Algorithm: Algorithm imported from [OTB](https://github.com/pydlv/otb-legacy) to determine the real recent RAP using an algorithm
 - 2FA Verifier: Solves 2FA challenge to allow trading
-- Inbound Checker: Can counter/accept inbound trades (Might have to enable it in source-code)
+- Inbound Checker: Accepts inbound trades that pass your config and counters the rest (both optional)
+- Rolimons Trade Ads: Posts trade ads for your accounts to bring in more inbounds
+- Outbound Variety: Spreads your items across outbounds, so one accepted trade doesn't make the rest invalid
 - Duplicate Control: Prevent accumulating too many identical items
 
 ### 📊 Advanced Filtering
@@ -34,7 +38,7 @@ This bot used to be a paid service that im releasing, because I dont intend on u
 
 
 #  Installation
-If you download the [exe](https://github.com/shibahex/RobloxAutoTrader/releases/tag/windows) skip these steps
+If you download the [latest release](https://github.com/shibahex/RobloxAutoTrader/releases/latest) (Windows .exe or Linux binary), skip these steps
 ### 1. Clone this repo
 ```bash
 git clone https://github.com/shibahex/RobloxAutoTrader.git
@@ -58,45 +62,76 @@ Video (skip to 0:12): https://youtu.be/2SdEivsw8yA?si=kvisNUJGlJV0dyZ9&t=12
 #### Adding an Account and 2FA Authorization Secret
 Theres two built-in ways of doing this in account manager, automatic browser login or manual setup, 
 
-for automatic login give it your 2fa authorzation secret from ROBLOX (shown in video) and then login to your account through the browser and it will add that account
+for automatic login give it your 2FA Secret Code from ROBLOX (shown in video) and then login to your account through the browser and it will add that account
 
-if that didn't work you can manually input the 2fa authorzation secret and cookie and it will make an entry into the json file.
+if that didn't work you can manually input the 2FA Secret Code and cookie and it will make an entry into the json file.
 
 
 
 # Config Guide
-In this repo ive given basic configs, but if you want to make your own heres the important notes:
+**Full guide: [docs/config/README.md](docs/config/README.md)**, every section and setting explained.
+
+The bot reads `config.cfg`. Every setting has a note above it explaining what it does.
+
+> [!IMPORTANT]
+> **`[Trading Settings]` is the section that decides which trades get sent.** Everything else is tweaking: who the bot looks for, how fast it searches, and how it handles inbound and outbound trades.
+
+### Picking a config
+`configs/` has ready-made presets. To use one: **Config Manager > Change Config**, then pick a preset. It's copied over your `config.cfg`.
+
+| Preset | Trades for |
+|---|---|
+| `rap_config.cfg` | RAP items only |
+| `rap_algorithm.cfg` | RAP items, judged by the RAP Algorithm. Don't use with valued items |
+| `small_value.cfg` | Inventories worth about 10–30k, with valued and RAP items |
+| `big_value.cfg` | Inventories with lots of valued items (50k+ Value) |
+| `rap_to_value.cfg` | Trading RAP items into valued items |
+| `value_to_rap.cfg` | Trading valued items for RAP wins |
+
+To give one account different trading settings from the rest, use **Config Manager > Add Account Configs**. Account configs only replace the `[Trading Settings]` section.
+
+### The 4 numbers
+| | What it is |
+|---|---|
+| **RAP** | Roblox's recent average price |
+| **Value** | The Rolimons value. Items without one count as **0** |
+| **Overall Value** | The Rolimons value if the item has one, otherwise its RAP |
+| **RAP Algorithm** | The bot's estimate of what an item really sells for, from its sales history |
+
+**Gain** = what you receive minus what you give. A trade is only sent if it passes **every** gain setting, and each one is checked on its own. A trade of RAP items can be +3000 RAP and still be 0 Value gain, so `Minimum Value Gain = 1` means only trades with valued items get sent.
+
+A gain between -1 and 1 is a percentage of your side: `0.1` = 10%.
+
+### Rules that trip people up
+- `None` turns a setting off, but only where the note says so. Settings marked **whole number** must be a whole number, or the bot won't start.
+- The stricter the config, the fewer trades get sent. Start loose, then tighten.
+- `Accept Valid Trades` accepts inbound trades automatically, which can't be undone. Leave it off until your minimum gains are set the way you want.
+- Changing your config can cancel outbound trades that don't pass the new settings. `Keep Trades Sent Before Config Change = True` stops that.
+
+### No trades getting sent?
+If the bot prints `Couldnt find valid_trades heres invalid trades reasons:`, it checked every trade with that person and none passed. The numbers show which setting blocked them most:
+
+| Reason | Setting to loosen |
+|---|---|
+| `rap_gain` | Minimum / Maximum RAP Gain |
+| `value_gain` | Minimum / Maximum Value Gain |
+| `overall_gain` | Minimum / Maximum Overall Value Gain |
+| `algo_gain` | Minimum / Maximum Rap Algorithm Gain |
+| `overall_close_percentage` | Min / Max Overall Value Score Percentage |
+| `rap_close_percentage` | Min / Max RAP Score Percentage |
+| `min_value_of_trade` | Minimum Value Sum Of Trade |
+| `min_rap_of_trade` | Minimum Rap Sum Of Trade |
+
+If one reason is far ahead of the rest on every user, that setting is too strict for your inventory. If the counts are all low, most of your items are probably on trade hold.
+
+### Testing a config
+Set these in `[debug]`, run the bot, and watch what it would send:
 ```
-Minimum RAP Gain = 150
-Maximum RAP Gain = None
-
-#NOTE: The way its calculate: Shaggy overall value would be its RAP (instead of being 0 because it has no value like in value gain)
-# and Dominus Emp: Overall Value = its value (Because its valued)
-Minimum Overall Value Gain = 0
-Maximum Overall Value Gain = 300
-
-Minimum Value Gain = 0
-Maximum Value Gain = None
+Dont Send Trades = True
+Dont Check Outbounds = True
 ```
-> [!WARNING] 
-> a trade is only sent if it meets ALL THREE gain requirements simultaneously. 
-> 
-> THESE values are all INDEPENDANT when calculating the total profit. Meaning you can profit 0 value and 3000 RAP because there is no value items in the trade.
->
-> An example of this would be that if min value gain was 1, it could ONLY send trades with VALUED items.
+`Dont Check Outbounds` matters: without it, your real outbound trades get checked against the test config and can be cancelled.
 
-
-Set most these values to None, because if your config is strict or not possible it wont send trades.
-
-`RAP Algorithm for Valued Items = ""` 
-
-This setting is for how the RAP algorithm is applied to different items, should it apply to RAP items only? or Valued Items, if you dont understand this setting the RAP algorithm could be unpredictable.
-
-When the bot prints `Couldnt find valid_trades heres invalid trades reasons:` it means its went through all the trades and couldn't generate one based on the values above, and it will have a count. 
-
-For example if its invalid reason value_gain: 900 it means your value gain was impossible to satisfy,
-
-if one value keeps coming up and you get no trades that means either most of your items are trade-locked or that value is impossible to be met in that case, and you NEED to change your config.
 # Credits
 Source code for RAP algorithm taken from https://github.com/pydlv/otb-legacy
 

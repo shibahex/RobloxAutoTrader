@@ -2,6 +2,7 @@ from discord_webhook import DiscordWebhook, DiscordEmbed
 import requests
 import time
 from handler.handle_logs import log
+from handler.exceptions_types import UnknownItem
 
 # Define status colors for better readability and maintainability
 STATUS_COLORS = {
@@ -18,50 +19,26 @@ class DiscordHandler:
     def __init__(self):
         pass
 
-    # NOTE: trade advertisement channel in rolimons is slowmode of 10 mins use a link like https://www.roblox.com/users/97483119/trade and say how much robux u have
-
-    def post_message(self):
-
-        pass
-
-    def scan_channel(self):
-        pass
-
-    def scan_value_requests(self):
-        pass
-
-    def scan_value_albums(self):
-        pass
-
-    def post_webhook(self):
-        pass
-
-    def format_trades_api(self, response):
-        """
-        Makes webhooks for trades.roblox.com/v1/trades
-        """
-
     def trade_profit(self, trade) -> int:
         """
         Calculates the profits for a trade for the webhook info
         """
-        # NOTE: the problem is that the bot adds rap + value
         their_rap = trade["their_rap"]
         their_value = trade["their_value"]
         their_algo = trade["their_rap_algo"]
         their_overall = trade["their_overall_value"]
 
-        # self_robux = trade["self_robux"]
         self_rap = trade["self_rap"]
         self_value = trade["self_value"]
         self_algo = trade["self_rap_algo"]
         self_overall = trade["self_overall_value"]
 
-        # use to add algo to this but doesnt make sense because its like the RAP
-        total_profit = their_overall - self_overall
+        # Robux counts toward everything but Value, like when the trade was checked
+        robux = (trade.get("their_robux") or 0) - (trade.get("self_robux") or 0)
+        total_profit = their_overall - self_overall + robux
 
-        algo_profit = round(their_algo - self_algo)
-        rap_profit = their_rap - self_rap
+        algo_profit = round(their_algo - self_algo + robux)
+        rap_profit = their_rap - self_rap + robux
         value_profit = their_value - self_value
 
         return total_profit, algo_profit, rap_profit, value_profit
@@ -69,21 +46,22 @@ class DiscordHandler:
     def embed_fields_from_trade(
         self, generated_trade: dict, rolimon_data: dict, projected_data
     ) -> dict:
-        # TODO: fix the bug where if theres multiple of the same item it only puts one of them in the webhook
         """
-        Takes all the item ids from generated trade and formats their names in a string that have linebreaks
+        Takes all the item ids from generated trade and formats their names in a string that have linebreaks.
+        Item id lists keep duplicates, so two of the same item are listed twice.
         """
 
         def str_from_item_ids(item_ids, is_self=False):
             string = ""
             total_sum = 0
             for item in item_ids:
-                item_name = rolimon_data[str(item)]["item_name"]
-                item_total_value = rolimon_data[str(item)]["total_value"]
-                if str(item) in projected_data:
-                    item_algo_value = round(projected_data[str(item)]["value"])
-                else:
-                    item_algo_value = 0
+                item_data = rolimon_data.get(str(item))
+                if item_data is None:
+                    raise UnknownItem(item)
+                item_name = item_data["item_name"]
+                item_total_value = item_data["total_value"] or 0
+                projected = (projected_data or {}).get(str(item)) or {}
+                item_algo_value = round(projected.get("value") or 0)
 
                 string += (
                     item_name
@@ -149,10 +127,12 @@ class DiscordHandler:
             thumbnail = requests.get(
                 f"https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds={
                     user_id
-                }&size=48x48&format=Png&isCircular=false"
+                }&size=48x48&format=Png&isCircular=false",
+                timeout=10,
             ).json()["data"][0]["imageUrl"]
-        except Exception:
+        except (requests.RequestException, ValueError, KeyError, IndexError, TypeError):
             thumbnail = PLACEHOLDER_IMAGE
+        thumbnail = thumbnail or PLACEHOLDER_IMAGE
         embed.set_author(name="Doggo Trader", icon_url=thumbnail)
         # embed.set_thumbnail(url=thumbnail)
 
@@ -161,30 +141,42 @@ class DiscordHandler:
 
         return embed
 
-    def send_webhook(self, embed: DiscordEmbed, webhook_url: str):
+    def send_webhook(self, embed: DiscordEmbed, webhook_url: str) -> bool:
         """
         Sends a webhook to Discord with a detailed message and embed.
+        Never raises: a failed webhook shouldn't stop trading. Returns True if sent.
         """
+        if not webhook_url:
+            return False
         try:
-            if webhook_url == "":
-                return None
-            # Create a webhook instance and setup embed
             webhook = DiscordWebhook(url=webhook_url, username="Doggo Tradebot")
-
             webhook.add_embed(embed)
 
-            # Wait if ratelimited
-            while True:
+            # Wait if ratelimited, but not forever
+            for _ in range(5):
                 response = webhook.execute()
-                if "429" in str(response):
-                    log("Webhook ratelimited waiting 15 secs")
+                if getattr(response, "status_code", None) == 429 or "429" in str(
+                    response
+                ):
+                    log("[WEBHOOK] Rate limited, waiting 15 seconds", dontPrint=True)
                     time.sleep(15)
                     continue
-
                 time.sleep(0.5)
-                break
+                log(f"[DOGGO] {response}", dontPrint=True)
+                return True
 
-            log(f"[DOGGO] {response}")
-        except Exception as e:
-            # Log any errors to help with debugging
-            log(f"[ERROR] Failed to send webhook: {e}")
+            log("[WEBHOOK] Gave up after repeated rate limits", severityNum=2)
+            return False
+        except (requests.RequestException, ValueError, TypeError) as e:
+            log(f"[WEBHOOK] Couldn't send: {e}", severityNum=2)
+            return False
+
+    def send_error(self, webhook_url: str, title: str, details: str) -> bool:
+        """Posts an error alert to the optional Error Webhook. Never raises."""
+        if not webhook_url:
+            return False
+        embed = DiscordEmbed(
+            title=title[:256], description=details[:4000], color=STATUS_COLORS[0]
+        )
+        embed.set_timestamp()
+        return self.send_webhook(embed, webhook_url)

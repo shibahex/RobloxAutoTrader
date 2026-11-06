@@ -7,15 +7,18 @@ import handler.handle_cli as handle_cli
 import time
 from datetime import datetime, timedelta
 from handler.handle_logs import log
-
-# NOTE: I can optimize json reading and stuff by not having cookies.json a list of dicts
-# rather it could be dicts with the keys as the userids
+from handler.exceptions_types import DataFileError
 
 
 class JsonHandler:
+    # filename -> ((mtime_ns, size), data): shared read-only snapshots
+    _snapshots: dict = {}
+    _snapshots_lock = threading.Lock()
+
     def __init__(self, filename):
         self.filename = filename
-        self.lock = threading.Lock()
+        # RLock so read_data can call write_data while holding it
+        self.lock = threading.RLock()
         self.cli = handle_cli.Terminal()
         if self.filename == "cookies.json" and not os.path.exists(self.filename):
             initial_data = {"roblox_accounts": []}
@@ -28,34 +31,73 @@ class JsonHandler:
             if self.filename[0] == "." and os.name == "nt":
                 os.system(f"attrib +h +s {self.filename}")  # Hide the file
 
+    def _empty_data(self) -> dict:
+        if self.filename == "cookies.json":
+            return {"roblox_accounts": []}
+        return {}
+
+    def read_cached(self) -> dict:
+        """
+        Read-only snapshot of the file, kept in memory and re-read only when the
+        file changes on disk. Much faster for hot paths (pricing reads the
+        projected data hundreds of times a minute). Never modify what this
+        returns: use read_data() + write_data() to change the file.
+        """
+        try:
+            stat = os.stat(self.filename)
+        except OSError:
+            return self.read_data()
+        version = (stat.st_mtime_ns, stat.st_size)
+        cached = JsonHandler._snapshots.get(self.filename)
+        if cached and cached[0] == version:
+            return cached[1]
+        data = self.read_data()
+        with JsonHandler._snapshots_lock:
+            JsonHandler._snapshots[self.filename] = (version, data)
+        return data
+
     def read_data(self) -> dict:
-        """Reads data from the JSON file."""
+        """
+        Reads data from the JSON file.
+        A corrupt file is backed up next to the original and replaced with empty data.
+        Raises DataFileError if the file can't be read at all (permissions, disk).
+        """
         with self.lock:
             try:
                 if self.filename[0] == "." and os.name == "nt":
                     os.system(f"attrib -h -s {self.filename}")
-                with open(self.filename, "r") as file:
+                with open(self.filename, "r", encoding="utf-8") as file:
                     return json.load(file)
-            except json.JSONDecodeError:
+            except FileNotFoundError:
+                log(f"[FILES] {self.filename} is missing, creating an empty one", severityNum=2)
+                initial_data = self._empty_data()
+                self.write_data(initial_data)
+                return initial_data
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                backup = f"{self.filename}.corrupt-{int(time.time())}"
+                try:
+                    os.replace(self.filename, backup)
+                except OSError as move_error:
+                    raise DataFileError(
+                        f"{self.filename} is corrupt ({e}) and couldn't be backed up: {move_error}"
+                    ) from e
                 log(
-                    f"Error decoding JSON, returning empty data. {
-                        self.filename
-                    } clearing file..",
+                    f"[FILES] {self.filename} was corrupt ({e}). Backed it up to {backup} and started fresh.",
                     severityNum=4,
                 )
-                time.sleep(3)
-                initial_data = {}
-                if self.filename == "cookies.json":
-                    initial_data = {"roblox_accounts": []}
+                initial_data = self._empty_data()
                 self.write_data(initial_data)
-
-                return None
+                return initial_data
+            except OSError as e:
+                raise DataFileError(f"Couldn't read {self.filename}: {e}") from e
             finally:
                 if self.filename[0] == "." and os.name == "nt":
                     os.system(f"attrib +h +s {self.filename}")
 
     def write_data(self, data: dict) -> None:
         """Safely Writes data to the JSON file."""
+        with JsonHandler._snapshots_lock:
+            JsonHandler._snapshots.pop(self.filename, None)
         temp_file = self.filename + ".tmp"  # Temporary file for atomic writing
 
         # Unhide the file if needed (Windows)
@@ -68,9 +110,12 @@ class JsonHandler:
                 with open(temp_file, "w", encoding="utf-8") as file:
                     json.dump(data, file, indent=4)
                     file.flush()
-                    os.fsync(file.fileno())
                     # Ensure data is written to disk
+                    os.fsync(file.fileno())
                 os.replace(temp_file, self.filename)
+        except (OSError, TypeError, ValueError) as e:
+            # TypeError/ValueError: data isn't JSON serializable
+            raise DataFileError(f"Couldn't write {self.filename}: {e}") from e
         finally:
             # Re-hide the file if needed (Windows)
             if self.filename[0] == "." and os.name == "nt":
@@ -113,12 +158,8 @@ class JsonHandler:
 
         # Check if the index is within bounds for the filtered list
         if 0 <= index < len(filtered_accounts):
-            try:
-                return filtered_accounts[index]["user_id"]
-            except Exception:
-                return False
-        else:
-            return False
+            return filtered_accounts[index].get("user_id", False)
+        return False
 
     def toggle_cookie(self, index: int) -> None:
         data = self.read_data()
@@ -149,26 +190,19 @@ class JsonHandler:
             if account["use_account"]:
                 current_date = datetime.now()
 
-                ratelimit_timestamp = account["ratelimit_timestamp"]
-                # Parse the timestamp string into a datetime object
+                ratelimit_timestamp = account.get("ratelimit_timestamp")
+                if not ratelimit_timestamp:
+                    return False
                 try:
                     timestamp_date = datetime.fromisoformat(ratelimit_timestamp)
-                except Exception:
-                    # Handle invalid timestamp format if needed
+                except (TypeError, ValueError):
+                    log(f"[FILES] Bad trade limit time {ratelimit_timestamp!r}, ignoring it")
                     return False
 
                 if current_date - timestamp_date >= timedelta(hours=6):
                     # greater than 6 hours
                     account["ratelimit_timestamp"] = None
                     self.write_data(data)
-                    print(
-                        "wrote data for timestamp",
-                        current_date,
-                        "minus",
-                        timestamp_date,
-                        ">=",
-                        timedelta(hours=6),
-                    )
                     return False
 
         return True
@@ -188,7 +222,7 @@ class JsonHandler:
         data = self.read_data()
         for account in data["roblox_accounts"]:
             if account.get("cookie") == cookie:
-                return account["last_completed"]
+                return account.get("last_completed")
 
     def check_ratelimit_cookie(self, cookie) -> None:
         """
@@ -198,15 +232,14 @@ class JsonHandler:
         data = self.read_data()
         for account in data["roblox_accounts"]:
             if account.get("cookie") == cookie:
-                ratelimit_timestamp = account["ratelimit_timestamp"]
-                if ratelimit_timestamp is None:
+                ratelimit_timestamp = account.get("ratelimit_timestamp")
+                if not ratelimit_timestamp:
                     return False
 
-                # Parse the timestamp string into a datetime object
                 try:
                     timestamp_date = datetime.fromisoformat(ratelimit_timestamp)
-                except Exception:
-                    # Handle invalid timestamp format if needed
+                except (TypeError, ValueError):
+                    log(f"[FILES] Bad trade limit time {ratelimit_timestamp!r}, ignoring it")
                     return False
 
                 current_date = datetime.now()
@@ -242,6 +275,20 @@ class JsonHandler:
         else:
             print("Cookie already exists.")
             time.sleep(1)
+
+    def set_rolimons_cookie(self, index: int, rolimons_cookie) -> bool:
+        """Saves (or with None, removes) an account's Rolimons cookie."""
+        data = self.read_data()
+        accounts = data["roblox_accounts"]
+        if not 0 <= index < len(accounts):
+            self.cli.print_error("Invalid number.")
+            return False
+        if rolimons_cookie:
+            accounts[index]["rolimons_cookie"] = rolimons_cookie
+        else:
+            accounts[index].pop("rolimons_cookie", None)
+        self.write_data(data)
+        return True
 
     def delete_cookie(self, index: int) -> None:
         data = self.read_data()
@@ -284,11 +331,11 @@ class JsonHandler:
                 shorten_cookie = account["cookie"][: len(account["cookie"]) // 6]
                 cookie_info = f"\nusername: {account['username']},\n user id: {
                     account['user_id']
-                }\nratelimited: {account['ratelimit_timestamp']}\nenabled: {
-                    account['use_account']
-                }\n\nshortened cookie: {shorten_cookie}\nauth secret: {
-                    account['auth_secret']
-                }\n"
+                }\nratelimited: {account['ratelimit_timestamp']}\nrolimons cookie: {
+                    'set' if account.get('rolimons_cookie') else 'not set'
+                }\nenabled: {account['use_account']}\n\nshortened cookie: {
+                    shorten_cookie
+                }\nauth secret: {account['auth_secret']}\n"
 
                 print("---" + title + "---" + cookie_info)
 
