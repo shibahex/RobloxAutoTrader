@@ -6,7 +6,7 @@ name: Build
 on:
   push:
     branches: [main, refactor-branch, community]
-    paths: [version.py]
+    paths: [version.py, .github/workflows/build.yml]
   workflow_dispatch:
     inputs:
       release:
@@ -70,7 +70,14 @@ jobs:
         run: pyinstaller --onefile --console --name TradebotRBX --collect-data seleniumwire main.py
 
       - name: Check it starts
-        run: ./dist/TradebotRBX --version
+        run: |
+          if ! out=$(./dist/TradebotRBX --version 2>&1); then
+            echo "$out"
+            # Last lines of the error as an annotation, so it shows on the run page
+            echo "::error title=TradebotRBX didn't start::$(echo "$out" | tail -n 8 | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "$out"
 
       - name: Package
         id: package
