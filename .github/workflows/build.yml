@@ -74,7 +74,7 @@ jobs:
           if ! out=$(./dist/TradebotRBX --version 2>&1); then
             echo "$out"
             # Last lines of the error as an annotation, so it shows on the run page
-            echo "::error title=TradebotRBX didn't start::$(echo "$out" | tail -n 8 | tr '\n' ' ')"
+            echo "::error title=TradebotRBX didn't start::$(echo "$out" | tr -d '\r' | tail -n 12 | tr '\n' '|')"
             exit 1
           fi
           echo "$out"
