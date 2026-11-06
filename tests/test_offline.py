@@ -2339,3 +2339,81 @@ def test_library_path_is_left_alone_when_running_from_source():
     env = {"LD_LIBRARY_PATH": "/mine"}
     restore_child_library_path(env, frozen=False)
     assert env == {"LD_LIBRARY_PATH": "/mine"}
+
+
+# --- adding an account by cookie --------------------------------------------------------
+
+TOKEN = "ABC123TOKEN"
+
+
+@pytest.mark.parametrize(
+    "pasted, expected",
+    [
+        # With Roblox's warning text: used as-is
+        (
+            "_|WARNING:-DO-NOT-SHARE-THIS.--x.|_" + TOKEN,
+            ["_|WARNING:-DO-NOT-SHARE-THIS.--x.|_" + TOKEN],
+        ),
+        # Without it: the standard warning is added first, then the raw cookie
+        (TOKEN, ["STD" + TOKEN, TOKEN]),
+        # Pasted with the name, quotes, spaces or a trailing ;
+        (f'  .ROBLOSECURITY="{TOKEN}";  ', ["STD" + TOKEN, TOKEN]),
+        ("   ", []),
+    ],
+)
+def test_cookie_candidates(pasted, expected):
+    import account_manager
+
+    std = account_manager.COOKIE_WARNING + "_"
+    expected = [
+        e.replace("STD", std, 1) if e.startswith("STD") else e for e in expected
+    ]
+    assert account_manager.cookie_candidates(pasted) == expected
+
+
+def manual_add(monkeypatch, pasted, accepted):
+    """Runs manually_add_account; RobloxAPI only accepts cookies in `accepted`."""
+    import account_manager
+
+    tried, saved = [], []
+
+    class FakeRoblox:
+        def __init__(self, cookie, auth_secret):
+            tried.append(cookie[".ROBLOSECURITY"])
+            if cookie[".ROBLOSECURITY"] not in accepted:
+                raise E.CookieInvalid(message="bad cookie")
+            self.username, self.account_id = "tester", 1
+
+    answers = iter(["2fa-secret", pasted])
+    manager = object.__new__(account_manager.AccountManager)
+    manager.cli = types.SimpleNamespace(
+        input_prompt=lambda _p: next(answers), print_error=lambda _m: None
+    )
+    manager.json_handler = types.SimpleNamespace(add_cookie=lambda *a: saved.append(a))
+    monkeypatch.setattr(account_manager, "RobloxAPI", FakeRoblox)
+    monkeypatch.setattr(
+        account_manager,
+        "AuthHandler",
+        lambda: types.SimpleNamespace(verify_auth_secret=lambda _s: True),
+    )
+    manager.manually_add_account()
+    return tried, saved
+
+
+def test_cookie_without_warning_gets_it_added(monkeypatch):
+    import account_manager
+
+    full = account_manager.COOKIE_WARNING + "_" + TOKEN
+    tried, saved = manual_add(monkeypatch, TOKEN, accepted={full})
+    assert tried == [full]
+    assert saved[0][0] == full
+
+
+def test_cookie_falls_back_to_exactly_what_was_pasted(monkeypatch):
+    tried, saved = manual_add(monkeypatch, TOKEN, accepted={TOKEN})
+    assert len(tried) == 2 and saved[0][0] == TOKEN
+
+
+def test_invalid_cookie_is_not_saved(monkeypatch):
+    tried, saved = manual_add(monkeypatch, TOKEN, accepted=set())
+    assert len(tried) == 2 and saved == []

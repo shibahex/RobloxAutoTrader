@@ -14,6 +14,31 @@ from handler.handle_trade_ads import COOKIE_NAME, check_rolimons_cookie
 
 COOKIE_WARNING = "_|WARNING:-DO-NOT-SHARE-THIS.--Sharing-this-will-allow-someone-to-log-in-as-you-and-to-steal-your-ROBUX-and-items.|"
 
+COOKIE_DISCLAIMER = (
+    "Your .ROBLOSECURITY cookie logs in as you. Giving it to the bot hands it\n"
+    "your account so it can trade for you. It's saved in cookies.json on this\n"
+    "computer only. Never share it with anyone else."
+)
+
+
+def cookie_candidates(raw: str) -> list:
+    """
+    The cookie forms to try logging in with, best first. Accepts the cookie
+    with or without Roblox's "_|WARNING:...|_" text, and also a pasted
+    ".ROBLOSECURITY=" prefix, quotes or spaces. Empty input gives [].
+    """
+    cookie = (raw or "").strip()
+    if cookie.lower().startswith(".roblosecurity="):
+        cookie = cookie.split("=", 1)[1]
+    cookie = cookie.strip().rstrip(";").strip().strip("'\"").strip()
+    if not cookie:
+        return []
+    if cookie.startswith("_|WARNING:"):
+        return [cookie]
+    # Roblox's own cookie starts with the warning text; try that first, then
+    # exactly what was pasted
+    return [COOKIE_WARNING + "_" + cookie, cookie]
+
 
 class AccountManager:
     def __init__(self):
@@ -143,23 +168,32 @@ class AccountManager:
             )
             return None
 
-        acc_cookie = self.cli.input_prompt("Enter Cookie (include warning)")
-
-        if COOKIE_WARNING not in acc_cookie:
-            self.cli.print_error("Invalid cookie format try again")
+        print(f"\n{COOKIE_DISCLAIMER}\n")
+        candidates = cookie_candidates(
+            self.cli.input_prompt(
+                "Enter .ROBLOSECURITY Cookie (with or without the warning)"
+            )
+        )
+        if not candidates:
+            self.cli.print_error("No cookie entered, skipping account...")
             return None
 
-        try:
-            roblox_login = RobloxAPI(
-                cookie={".ROBLOSECURITY": acc_cookie}, auth_secret=auth_secret
-            )
-        except CookieInvalid:
+        roblox_login = acc_cookie = None
+        for acc_cookie in candidates:
+            try:
+                roblox_login = RobloxAPI(
+                    cookie={".ROBLOSECURITY": acc_cookie}, auth_secret=auth_secret
+                )
+                break
+            except CookieInvalid:
+                continue
+            except TradebotError as error:
+                self.cli.print_error(f"{error}\nSkipping account...")
+                return None
+        if roblox_login is None:
             self.cli.print_error(
                 "That cookie is expired or invalid.\nSkipping account..."
             )
-            return None
-        except TradebotError as error:
-            self.cli.print_error(f"{error}\nSkipping account...")
             return None
 
         self.json_handler.add_cookie(
@@ -175,6 +209,7 @@ class AccountManager:
             )
             return None
 
+        print(f"\n{COOKIE_DISCLAIMER}\n")
         firefox = FirefoxLogin()
 
         try:
