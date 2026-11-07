@@ -57,6 +57,14 @@ pip install -r requirements.txt
 python main.py
 ```
 
+### Updating
+The main menu tells you when a new version is out, and how to get it. From a clone:
+```bash
+git pull
+pip install -r requirements.txt
+```
+Your `config.cfg` isn't in git (the bot makes it from `config.default.cfg` the first time it runs), so pulling never touches your settings. Clones from before this change get one-time commands from the bot instead, which keep your `config.cfg`.
+
 ### Setup
 Video (skip to 0:12): https://youtu.be/2SdEivsw8yA?si=kvisNUJGlJV0dyZ9&t=12
 #### Adding an Account and 2FA Authorization Secret
@@ -71,7 +79,7 @@ if that didn't work you can manually input the 2FA Secret Code and cookie and it
 # Config Guide
 **Full guide: [docs/config/README.md](docs/config/README.md)**, every section and setting explained.
 
-The bot reads `config.cfg`. Every setting has a note above it explaining what it does.
+The bot reads `config.cfg` (made from `config.default.cfg` the first time it runs). Every setting has a note above it explaining what it does.
 
 > [!IMPORTANT]
 > **`[Trading Settings]` is the section that decides which trades get sent.** Everything else is tweaking: who the bot looks for, how fast it searches, and how it handles inbound and outbound trades.

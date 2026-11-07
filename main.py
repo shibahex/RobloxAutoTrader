@@ -1,5 +1,6 @@
 # Must run first: fixes for the packaged build (see handler/startup.py)
 import handler.startup  # noqa: F401
+import re
 import time
 import traceback
 from rolimons_api import RolimonAPI
@@ -16,6 +17,7 @@ from handler.handle_discord import DiscordHandler
 from handler import exceptions_types
 from handler.handle_trade_ads import TradeAdPoster
 from version import full_version
+from handler import update_check
 
 
 """
@@ -54,6 +56,7 @@ class Doggo:
         """
         A loop that runs the Menu and clears the console
         """
+        update_check.check_in_background()
         while True:
             self.cli.clear_console()
             self.display_main_menu()
@@ -68,6 +71,9 @@ class Doggo:
             (3, "Execute Trader"),
         )
         log(f"[BOT] Version {full_version()}")
+        update_check.wait(3)
+        if update_check.message:
+            log(update_check.message, severityNum=1)
         self.cli.print_menu("Main Menu", options)
         try:
             answer = int(self.cli.input_prompt("Enter Option"))
@@ -107,8 +113,25 @@ class Doggo:
                 traceback.format_exception(type(error), error, error.__traceback__)
             )
         log(f"[BOT] {title}: {details}", severityNum=4 if with_traceback else 3)
-        webhook = self.rolimons.config.discord_settings.get("Error_Webhook")
-        self.discord_webhook.send_error(webhook, title, f"```{details[-3900:]}```")
+        settings = self.rolimons.config.discord_settings
+        if settings.get("Hide_Username", True):
+            title, details = self.hide_usernames(title), self.hide_usernames(details)
+        self.discord_webhook.send_error(
+            settings.get("Error_Webhook"), title, f"```{details[-3900:]}```"
+        )
+
+    def hide_usernames(self, text: str) -> str:
+        """Swaps each account's username for 'account N' (its Account Manager number)."""
+        try:
+            accounts = self.json.read_data().get("roblox_accounts", [])
+        except Exception:  # an error report must never fail
+            return text
+        names = [(n, str(a.get("username") or "")) for n, a in enumerate(accounts, 1)]
+        # Longest first, so a name inside another name can't break it
+        for n, name in sorted(names, key=lambda item: -len(item[1])):
+            if len(name) >= 3:
+                text = re.sub(re.escape(name), f"account {n}", text, flags=re.I)
+        return text
 
     def disable_account(self, account, error: BaseException):
         """Stops using an account for this session, e.g. when its cookie expires."""
@@ -450,7 +473,8 @@ class Doggo:
         if not current_account.config.debug["ignore_limit"]:
             if self.json.is_all_ratelimited():
                 log(
-                    "[TRADING] Every account hit its daily trade limit. Checking again in 20 minutes"
+                    "[TRADING] Every account is paused, checking again in 20 minutes:\n"
+                    + self.json.paused_text()
                 )
                 time.sleep(20 * 60)
                 return False
@@ -459,7 +483,7 @@ class Doggo:
                 current_account.cookies[".ROBLOSECURITY"]
             ):
                 log(
-                    f"[TRADING] {current_account.username} hit its daily trade limit, moving to the next account"
+                    f"[TRADING] {current_account.username} is paused, moving to the next account"
                 )
                 return True
 
@@ -474,8 +498,10 @@ class Doggo:
             return True
 
         if not current_account.account_inventory:
-            log(f"[TRADING] {current_account.username} has no items it can trade, skipping it")
-            self.json.add_ratelimit_timestamp(current_account.cookies[".ROBLOSECURITY"])
+            log(f"[TRADING] {current_account.username} has no items it can trade, pausing it for an hour")
+            self.json.add_ratelimit_timestamp(
+                current_account.cookies[".ROBLOSECURITY"], "had no items it can trade", hours=1
+            )
             time.sleep(5)
             return True
 
@@ -492,8 +518,10 @@ class Doggo:
             return True
 
         if not is_premium:
-            log(f"[TRADING] {current_account.username} doesn't have Premium, so it can't trade. Skipping it")
-            self.json.add_ratelimit_timestamp(current_account.cookies[".ROBLOSECURITY"])
+            log(f"[TRADING] {current_account.username} doesn't have Premium, so it can't trade. Pausing it for an hour")
+            self.json.add_ratelimit_timestamp(
+                current_account.cookies[".ROBLOSECURITY"], "doesn't have Premium", hours=1
+            )
             time.sleep(5)
             return True
 

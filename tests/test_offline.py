@@ -20,6 +20,7 @@ from handler.handle_requests import RequestsHandler
 
 U = "https://api.test/"
 SEND = "https://trades.roblox.com/v2/trades/send"
+REAL_GENERATE_CSRF = RequestsHandler.generate_csrf
 INVENTORY = "https://trades.roblox.com/v2/users/"
 
 
@@ -76,6 +77,31 @@ def test_csrf_refreshed_from_header_then_succeeds(router):
     )
     assert h.requestAPI(U).json() == {"ok": True}
     assert h.headers["x-csrf-token"] == "NEW"
+
+
+def _real_csrf(monkeypatch):
+    """The router fixture stubs generate_csrf; put the real one back."""
+    monkeypatch.setattr(RequestsHandler, "generate_csrf", REAL_GENERATE_CSRF)
+
+
+def test_csrf_refresh_retries_dropped_connection(router, monkeypatch):
+    _real_csrf(monkeypatch)
+    dropped = requests.ConnectionError("Remote end closed connection without response")
+    router.set(
+        "https://auth.roblox.com/", dropped, resp(403, headers={"x-csrf-token": "T"})
+    )
+    h = RequestsHandler(cookie={".ROBLOSECURITY": "x"})
+    assert h.generate_csrf() is True
+    assert h.headers["x-csrf-token"] == "T"
+
+
+def test_csrf_refresh_gives_up_quietly(router, monkeypatch):
+    _real_csrf(monkeypatch)
+    router.set("https://auth.roblox.com/", requests.ConnectionError("down"))
+    h = RequestsHandler()
+    h.headers["x-csrf-token"] = "OLD"
+    assert h.generate_csrf() is False
+    assert h.headers["x-csrf-token"] == "OLD"
 
 
 def test_csrf_keeps_failing_raises_auth_error(router):
@@ -2715,14 +2741,27 @@ def test_gains_table_shows_every_gain_and_the_failed_one():
 def test_failed_field_lists_what_stopped_the_trades():
     from trade_algorithm import failed_field
 
-    text = failed_field({"value_gain": 43, "overall_gain": 1399, "rap_gain": 0})
-    assert text.startswith("Tried 1,442 trades.")
+    stats = {
+        "tried": 1442,
+        "passed": 0,
+        "failed": {"value_gain": 43, "overall_gain": 1399, "algo_gain": 900},
+        "only": {"value_gain": 0, "overall_gain": 0, "algo_gain": 545},
+    }
+    text = failed_field(stats)
+    assert text.startswith(
+        "Tried 1,442 trades, none passed.\n"
+        "Loosening only RAP Algorithm gain (below min) would let 545 pass."
+    )
     body = text.split("```")[1].strip().split("\n")
     assert body == [
-        "Overall Value gain      1,399",
-        "Value gain                 43",
-        "RAP gain                    0",
+        "Setting                         Failed  Sole Failure",
+        "RAP Algorithm gain (below min)     900           545",
+        "Overall Value gain (below min)   1,399             0",
+        "Value gain (below min)              43             0",
     ]
+    assert "Sole Failure = " in text.split("```")[2]
+    # Old style counts still work
+    assert failed_field({"rap_gain": 3}).startswith("Tried 3 trades, none passed.")
     assert "No trades to try" in failed_field({})
 
 
@@ -2909,16 +2948,80 @@ def test_log_clock_is_12_hour_and_same_width(monkeypatch):
         assert handle_logs.clock_time() == shown
 
 
-def test_failed_table_fits_the_terminal():
+def test_failed_table_is_one_column():
     from trade_algorithm import failed_text
 
-    reasons = {"overall_gain": 2355, "value_gain": 186, "rap_gain": 0, "algo_gain": 0}
-    wide = failed_text(reasons, width=120).split("\n")
-    assert wide[0] == "Tried 2,541 trades. What stopped them:"
-    assert len(wide) == 3 and " | " in wide[1]  # two columns
-    assert wide[1].startswith("Overall Value gain  2,355")
-    narrow = failed_text(reasons, width=50).split("\n")
-    assert len(narrow) == 5 and all(" | " not in row for row in narrow)
+    stats = {
+        "tried": 2541,
+        "failed": {"overall_gain_max": 2355, "value_gain": 186, "rap_gain": 0},
+        "only": {"overall_gain_max": 2000, "value_gain": 0, "rap_gain": 0},
+    }
+    lines = failed_text(stats, width=200).split("\n")
+    assert lines[0] == "Tried 2,541 trades, none passed."
+    assert lines[1] == "Loosening only Overall Value gain (above max) would let 2,000 pass."
+    assert lines[2].startswith("Setting") and " | " not in lines[2]
+    assert lines[3].startswith("Overall Value gain (above max)")
+    assert len(lines) == 7 and lines[-1].startswith("Sole Failure =")
+
+
+def test_failures_say_if_it_was_the_min_or_the_max():
+    maker, mine, theirs = _simple_maker(min_overall=-10_000)
+    maker.max_overall_gain = 100  # a+b is +500
+    maker.min_items_their = 2
+    assert maker.generate_trade(mine, theirs) is None
+    assert maker.last_failed["only"]["overall_gain_max"] == 1
+    assert maker.last_failed["failed"].get("overall_gain", 0) == 0
+    assert maker.validate_trade(
+        self_rap=1000, self_rap_algo=1000, self_value=0, their_rap=1500,
+        their_rap_algo=1500, their_value=0, self_overall_value=1000,
+        their_overall_value=1500,
+    ) == (False, "overall_gain_max")
+
+
+def test_what_stopped_them_finds_the_setting_that_blocks_alone():
+    """Overall is checked first, but only RAP Algorithm blocks these trades."""
+    maker, mine, theirs = _simple_maker(min_overall=350)
+    maker.min_algo_gain = 600  # a+b is +500
+    assert maker.generate_trade(mine, theirs) is None
+    stats = maker.last_failed
+    assert stats["only"]["algo_gain"] > 0
+    assert stats["only"]["overall_gain"] == 0
+    assert "Loosening only RAP Algorithm gain (below min)" in failed_text_of(stats)
+
+
+def failed_text_of(stats):
+    from trade_algorithm import failed_text
+
+    return failed_text(stats, width=80)
+
+
+def _simple_maker(min_overall=None):
+    """Our 1000 item for their 800 + 700 items: a+b is +500."""
+    from trade_algorithm import TradeMaker
+    from handler.handle_config import ConfigHandler
+
+    config = ConfigHandler("config.cfg")
+    for key in list(config.trading):
+        if key.startswith(("Minimum_", "Maximum_")) and key.endswith("_Gain"):
+            config.trading[key] = None
+    config.trading.update(
+        Minimum_Overall_Gain=min_overall,
+        MinimumItemsYourSide=1, MaximumItemsYourSide=1,
+        MinimumItemsTheirSide=1, MaximumItemsTheirSide=2,
+        MinimumValueOfTrade=None, MinimumRapOfTrade=None,
+        MinRapScorePercentage=None, MaxRapScorePercentage=None,
+        MinOverallValueScorePercentage=None, MaxOverallValueScorePercentage=None,
+        TradeRobux=False,
+    )
+    maker = TradeMaker(config=config)
+
+    def item(item_id, total):
+        return {"item_id": item_id, "value": 0, "rap": total, "rap_algorithm": total,
+                "demand": 1, "total_value": total, "item_volume": 1}
+
+    mine = {"m": item("1:1", 1000)}
+    theirs = {"a": item("1:2", 800), "b": item("1:3", 700)}
+    return maker, mine, theirs
 
 
 def test_endpoint_hides_ids_and_query():
@@ -2936,3 +3039,194 @@ def test_endpoint_hides_ids_and_query():
     assert endpoint(
         "https://x.com/a/7792dea7-78d8-4f85-b608-8e5ad0d55541"
     ) == "x.com/a/{id}"
+
+
+# --- paused accounts ----------------------------------------------------------
+
+
+def _accounts_file(tmp_path, monkeypatch, *accounts):
+    import json
+    from handler.handle_json import JsonHandler
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "cookies.json").write_text(json.dumps({"roblox_accounts": list(accounts)}))
+    return JsonHandler("cookies.json")
+
+
+def test_only_paused_when_every_on_account_is(tmp_path, monkeypatch):
+    j = _accounts_file(
+        tmp_path,
+        monkeypatch,
+        {"cookie": "a", "username": "A", "use_account": True},
+        {"cookie": "b", "username": "B", "use_account": True},
+        {"cookie": "c", "username": "C", "use_account": False},
+    )
+    assert not j.is_all_ratelimited()
+    j.add_ratelimit_timestamp("a")
+    assert not j.is_all_ratelimited()
+    j.add_ratelimit_timestamp("b", "doesn't have Premium", hours=1)
+    assert j.is_all_ratelimited()
+    text = j.paused_text()
+    assert "A: hit the trade limit, until" in text
+    assert "B: doesn't have Premium, until" in text and "C" not in text
+
+
+def test_pause_ends_after_its_hours(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta
+
+    old = (datetime.now() - timedelta(hours=2)).isoformat()
+    j = _accounts_file(
+        tmp_path,
+        monkeypatch,
+        {"cookie": "a", "username": "A", "use_account": True,
+         "ratelimit_timestamp": old, "ratelimit_hours": 1},
+        {"cookie": "b", "username": "B", "use_account": True,
+         "ratelimit_timestamp": old},
+    )
+    assert not j.check_ratelimit_cookie("a")
+    assert j.check_ratelimit_cookie("b")  # old stamps default to 6 hours
+
+
+def test_no_accounts_on_is_not_all_paused(tmp_path, monkeypatch):
+    j = _accounts_file(tmp_path, monkeypatch)
+    assert not j.is_all_ratelimited()
+
+
+def test_webhook_footer_hides_the_username_by_default(account):
+    footers = []
+    account.discord_webhook.setup_embed = (
+        lambda title, color, user_id, embed_fields, footer, description="":
+        footers.append(footer) or (title, color)
+    )
+    account.config.discord_settings["Send_Webhook"] = "send-url"
+    trade = {"their_id": 9}
+    assert account.post_trade_webhook("Send_Webhook", trade, "t", 1)
+    account.config.discord_settings["Hide_Username"] = False
+    assert account.post_trade_webhook("Send_Webhook", trade, "t", 1)
+    assert footers == ["", "tester"]
+
+
+def test_embed_footer_without_a_name_is_just_the_id():
+    from handler.handle_discord import DiscordHandler
+
+    d = DiscordHandler.__new__(DiscordHandler)
+    import requests as rq
+
+    real = rq.get
+    rq.get = lambda *a, **k: (_ for _ in ()).throw(rq.RequestException())
+    try:
+        assert d.setup_embed("t", 1, 42, {}, "").footer["text"] == "42"
+        assert d.setup_embed("t", 1, 42, {}, "bob").footer["text"] == "bob • 42"
+    finally:
+        rq.get = real
+
+
+def test_error_alerts_hide_usernames(doggo):
+    doggo.json = types.SimpleNamespace(read_data=lambda: {"roblox_accounts": [
+        {"username": "tisiallyyy"}, {"username": "DesiredDesigner"}]})
+    assert doggo.hide_usernames("DesiredDesigner disabled; tisiallyyy too") == (
+        "account 2 disabled; account 1 too"
+    )
+
+
+def test_hide_username_setting(tmp_path):
+    from handler.handle_config import ConfigHandler
+
+    path = tmp_path / "c.cfg"
+    path.write_text("[Discord]\nSend Webhook =\n")
+    assert ConfigHandler(str(path)).discord_settings["Hide_Username"] is True
+    path.write_text("[Discord]\nHide Username = False\n")
+    assert ConfigHandler(str(path)).discord_settings["Hide_Username"] is False
+
+
+# --- update check ---------------------------------------------------------------
+
+
+def test_version_compare():
+    from handler.update_check import is_newer
+
+    assert is_newer("v2.0", "2.0", "BETA")  # stable after its beta
+    assert is_newer("v2.0.1", "2.0", "")
+    assert not is_newer("v2.0", "2.0", "")
+    assert not is_newer("v2.0-beta", "2.0", "")
+    assert not is_newer("v1.9", "2.0", "BETA")
+    assert not is_newer("nightly", "2.0", "")
+
+
+def test_update_message_for_each_install(monkeypatch):
+    from handler import update_check as u
+
+    release = {"tag": "v2.1", "url": "https://github.com/x/releases/tag/v2.1"}
+    exe = u.update_message(release, True, False, False, True)
+    assert "2.1 is out" in exe and release["url"] in exe and "git pull" not in exe
+    clone = u.update_message(release, False, True, False, False)
+    assert "  git pull" in clone and "config.cfg" in clone and "checkout" not in clone
+    old_clone = u.update_message(release, False, True, True, True)
+    steps = [line.strip() for line in old_clone.splitlines() if line.startswith("  ")]
+    assert steps[:4] == [
+        "copy config.cfg config.backup.cfg",
+        "git checkout -- config.cfg",
+        "git pull",
+        "copy /Y config.backup.cfg config.cfg",
+    ]
+    no_git = u.update_message(release, False, False, False, False)
+    assert u.SOURCE_ZIP in no_git
+
+
+def test_update_check_only_speaks_when_newer(monkeypatch):
+    from handler import update_check as u
+
+    def fake_get(tag, status=200):
+        return lambda *a, **k: types.SimpleNamespace(
+            status_code=status, json=lambda: {"tag_name": tag, "html_url": "u"}
+        )
+
+    monkeypatch.setattr(u.version, "VERSION", "2.0")
+    monkeypatch.setattr(u.version, "STAGE", "")
+    monkeypatch.setattr(u, "message", None)
+    assert u.check(get=fake_get("v2.0")) is None
+    assert u.check(get=fake_get("v9.0", status=403)) is None
+    assert "9.0 is out" in u.check(get=fake_get("v9.0"))
+    assert u.message and "9.0 is out" in u.message
+    assert u.check(get=lambda *a, **k: (_ for _ in ()).throw(requests.ConnectionError())) is None
+
+
+def test_config_cfg_is_made_from_the_default(tmp_path):
+    from handler.handle_config import ConfigHandler, DEFAULT_CONFIG
+
+    (tmp_path / DEFAULT_CONFIG).write_text("[Discord]\nHide Username = False\n")
+    config = ConfigHandler(str(tmp_path / "config.cfg"))
+    assert (tmp_path / "config.cfg").exists()
+    assert config.discord_settings["Hide_Username"] is False
+    # An existing config.cfg is never replaced
+    (tmp_path / "config.cfg").write_text("[Discord]\nHide Username = True\n")
+    assert ConfigHandler(str(tmp_path / "config.cfg")).discord_settings["Hide_Username"]
+
+
+def test_rate_limit_waits_as_long_as_roblox_says(router, monkeypatch):
+    from handler import handle_requests
+
+    waits = []
+    monkeypatch.setattr(handle_requests.time, "sleep", waits.append)
+    h = handler(router, U, resp(429, headers={"Retry-After": "7"}), resp(200, {"ok": 1}))
+    assert h.requestAPI(U).json() == {"ok": 1}
+    assert waits == [7.0]
+    h = handler(router, U, resp(429), resp(200, {"ok": 1}))
+    waits.clear()
+    h.requestAPI(U)
+    assert waits == [20]  # nothing said: our own backoff
+
+
+def test_retry_after_forms():
+    from handler.handle_requests import retry_after, rate_limit_headers
+
+    def r(headers):
+        return types.SimpleNamespace(headers=headers)
+
+    assert retry_after(r({})) is None
+    assert retry_after(r({"x-ratelimit-reset": "12"})) == 12
+    assert retry_after(r({"Retry-After": "9999"})) == 300  # capped
+    assert retry_after(r({"Retry-After": "0"})) == 1
+    assert 55 <= retry_after(r({"x-ratelimit-reset": str(time.time() + 60)})) <= 60
+    assert retry_after(r({"Retry-After": "soon"})) is None
+    assert rate_limit_headers(r({"Retry-After": "1", "set-cookie": "x"})) == {"Retry-After": "1"}

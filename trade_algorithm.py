@@ -1,6 +1,7 @@
+import functools
 from collections import Counter
 from handler.counter_history import trade_signature
-from handler.handle_config import ConfigHandler
+from handler.handle_config import ConfigHandler, _convert_gain
 from itertools import combinations
 import math
 import random
@@ -58,15 +59,22 @@ def changed_items(side, inventory, item_ids) -> int:
 
 
 # validate_trade's reasons, as people read them
+# A reason ending in "_max" failed the setting's maximum, otherwise its minimum.
 REASON_NAMES = {
-    "value_gain": "Value gain",
-    "overall_gain": "Overall Value gain",
-    "rap_gain": "RAP gain",
-    "algo_gain": "RAP Algorithm gain",
-    "min_value_of_trade": "Value sum of trade",
-    "min_rap_of_trade": "RAP sum of trade",
-    "overall_close_percentage": "Overall Value score %",
-    "rap_close_percentage": "RAP score %",
+    "value_gain": "Value gain (below min)",
+    "value_gain_max": "Value gain (above max)",
+    "overall_gain": "Overall Value gain (below min)",
+    "overall_gain_max": "Overall Value gain (above max)",
+    "rap_gain": "RAP gain (below min)",
+    "rap_gain_max": "RAP gain (above max)",
+    "algo_gain": "RAP Algorithm gain (below min)",
+    "algo_gain_max": "RAP Algorithm gain (above max)",
+    "min_value_of_trade": "Value sum of trade (below min)",
+    "min_rap_of_trade": "RAP sum of trade (below min)",
+    "overall_close_percentage": "Overall Value score % (below min)",
+    "overall_close_percentage_max": "Overall Value score % (above max)",
+    "rap_close_percentage": "RAP score % (below min)",
+    "rap_close_percentage_max": "RAP score % (above max)",
     "already_sent": "Already sent to them",
 }
 
@@ -85,60 +93,137 @@ def gain_text(gain) -> str:
     return f"{gain:,g}"
 
 
-def failed_counts(invalid_reasons: dict) -> list:
-    """Every reason with how many trades it stopped, biggest first."""
-    return sorted(invalid_reasons.items(), key=lambda item: -item[1])
-
-
-def failed_counts(invalid_reasons: dict) -> list:
-    """Every reason with how many trades it stopped, biggest first."""
-    return sorted(invalid_reasons.items(), key=lambda item: -item[1])
-
-
-def failed_text(invalid_reasons: dict, width=None) -> str:
+@functools.lru_cache(maxsize=256)
+def gain_bounds(min_gain, max_gain) -> tuple:
     """
-    "Tried N trades. What stopped them:" then a table of every setting with how
-    many trades it stopped, biggest first. Two columns when the terminal fits
-    them, one when it's narrow. width: terminal columns (None = look it up).
+    A gain setting pair as (low, low is %, high, high is %), worked out once.
+    Same rules as ConfigHandler.check_gain: -1 to 1 is a percentage.
     """
-    counts = failed_counts(invalid_reasons)
-    total = sum(n for _, n in counts)
-    if not total:
-        return "There were no trades to try with these items."
-    names = [reason_text(r) for r, _ in counts]
-    name_width = max(len(name) for name in names)
-    number_width = max(3, len(f"{counts[0][1]:,}"))
-    cells = [
-        f"{name:<{name_width}}  {n:>{number_width},}"
-        for name, (_, n) in zip(names, counts)
-    ]
-    cell = name_width + 2 + number_width
-    if width is None:
-        width = terminal_width() or 100
-    # The log line puts the table under the tag column, 13 characters in
-    if width - 13 >= cell * 2 + 3:
+
+    def bound(gain):
+        if gain is None:
+            return None, False
+        number, is_percentage = _convert_gain(gain)
+        return (number * 100 if is_percentage else number), is_percentage
+
+    return (*bound(min_gain), *bound(max_gain))
+
+
+BELOW_MIN, ABOVE_MAX = 1, 2
+
+
+def gain_miss(gain, base, bounds) -> int:
+    """
+    ConfigHandler.check_gain on bounds from gain_bounds, without the setup:
+    0 = passes, BELOW_MIN or ABOVE_MAX.
+    """
+    low, low_percentage, high, high_percentage = bounds
+    if low is not None:
+        profit = (gain / base * 100 if base else 0) if low_percentage else gain
+        if profit < low:
+            return BELOW_MIN
+    if high is not None:
+        profit = (gain / base * 100 if base else 0) if high_percentage else gain
+        if profit > high:
+            return ABOVE_MAX
+    return 0
+
+
+def gain_in_range(gain, base, bounds) -> bool:
+    return not gain_miss(gain, base, bounds)
+
+
+def failed_stats(failed) -> dict:
+    """
+    {"tried": n, "failed": {reason: n}, "only": {reason: n}} from
+    TradeMaker.last_failed. A plain {reason: n} counts as failed only.
+    """
+    if failed and "failed" in failed:
+        return failed
+    counts = {r: n for r, n in (failed or {}).items() if r != "already_sent"}
+    return {"tried": sum(counts.values()), "failed": counts, "only": {}}
+
+
+def failed_rows(failed) -> list:
+    """(setting, failed, only) for every setting, the most useful first."""
+    stats = failed_stats(failed)
+    only = stats["only"]
+    rows = [(reason_text(r), n, only.get(r, 0)) for r, n in stats["failed"].items()]
+    return sorted(rows, key=lambda row: (-row[2], -row[1]))
+
+
+def failed_summary(failed) -> str:
+    """'Tried 5,096 trades, none passed.' plus which setting to loosen, if one."""
+    stats = failed_stats(failed)
+    passed = stats.get("passed", 0)
+    tried = stats["tried"]
+    text = (
+        f"Tried {tried:,} trade{'' if tried == 1 else 's'}, "
+        f"{f'{passed:,}' if passed else 'none'} passed."
+    )
+    rows = failed_rows(stats)
+    if rows and rows[0][2]:
+        name, _, only = rows[0]
+        text += f"\nLoosening only {name} would let {only:,} pass."
+    elif stats["only"] and stats["tried"] > passed:
+        text += "\nEvery trade failed 2+ settings, so no single one blocks them."
+    already = (failed or {}).get("already_sent")
+    if already:
+        text += f"\n{already:,} that passed were already sent to them."
+    return text
+
+
+def failed_table(failed, columns=1) -> list:
+    """The rows as lined-up text: setting, how many failed it, how many failed only it."""
+    rows = failed_rows(failed)
+    name_width = max([len("Setting")] + [len(name) for name, _, _ in rows])
+    number_width = max([6] + [len(f"{n:,}") for _, n, _ in rows])
+    show_only = bool(failed_stats(failed)["only"])
+
+    def cell(name, n, only):
+        text = f"{name:<{name_width}}  {n:>{number_width}}"
+        return text + (f"  {only:>12}" if show_only else "")
+
+    head = cell("Setting", "Failed", "Sole Failure")
+    cells = [cell(name, f"{n:,}", f"{only:,}") for name, n, only in rows]
+    if columns == 2 and len(cells) > 1:
         half = (len(cells) + 1) // 2
-        rows = [
-            left + (" | " + right if right else "")
-            for left, right in zip(cells[:half], cells[half:] + [""])
+        lefts, rights = cells[:half], cells[half:] + [""]
+        return [f"{head} | {head}"] + [
+            left + (" | " + right if right else "") for left, right in zip(lefts, rights)
         ]
-    else:
-        rows = cells
-    return f"Tried {total:,} trades. What stopped them:\n" + "\n".join(rows)
+    return [head] + cells
 
 
-def failed_field(invalid_reasons: dict) -> str:
-    """A Discord field: how many tries each setting stopped, as a lined-up list."""
-    counts = failed_counts(invalid_reasons)
-    total = sum(n for _, n in counts)
-    if not total:
+ONLY_NOTE = "Sole Failure = trades that failed only that limit, so they pass without it."
+
+
+def failed_text(failed, width=None) -> str:
+    """
+    For the console: the summary, then a table of every setting with how many
+    trades failed it, one setting per line. width is unused (kept for callers).
+    """
+    stats = failed_stats(failed)
+    if not stats["tried"]:
+        return "There were no trades to try with these items."
+    lines = [failed_summary(stats)] + failed_table(stats)
+    if stats["only"]:
+        lines.append(ONLY_NOTE)
+    return "\n".join(lines)
+
+
+def failed_field(failed) -> str:
+    """A Discord field: the summary, then the table in a code block."""
+    stats = failed_stats(failed)
+    if not stats["tried"]:
         return "No trades to try with these items (item limits or filters)."
-    width = max(len(reason_text(r)) for r, _ in counts)
-    lines = [f"{reason_text(r):<{width}}  {n:>9,}" for r, n in counts]
+    note = f"\n{ONLY_NOTE}" if stats["only"] else ""
     return (
-        f"Tried {total:,} trades. What stopped them:\n```\n"
-        + "\n".join(lines)
+        failed_summary(stats)
+        + "\n```\n"
+        + "\n".join(failed_table(stats))
         + "\n```"
+        + note
     )
 
 
@@ -162,7 +247,8 @@ def gains_table(trade: dict, maker, failed_reason=None) -> str:
     ]
     lines = [f"{'Gain':<16}{'Now':>9}  {'Min':>7}  {'Max':>7}"]
     for reason, name, gain, low, high in rows:
-        mark = "  <- failed" if reason == failed_reason else ""
+        failed = str(failed_reason or "").removesuffix("_max")
+        mark = "  <- failed" if reason == failed else ""
         lines.append(
             f"{name:<16}{round(gain):>+9,}  {gain_text(low):>7}  "
             f"{gain_text(high):>7}{mark}"
@@ -197,8 +283,8 @@ class TradeMaker:
         self.min_value_gain = trading["Minimum_Value_Gain"]
         self.max_value_gain = trading["Maximum_Value_Gain"]
 
-        self.min_rap_score_percentage = self.config.trading["MinRAPScorePercentage"]
-        self.max_rap_score_percentage = self.config.trading["MaxRAPScorePercentage"]
+        self.min_rap_score_percentage = trading["MinRAPScorePercentage"]
+        self.max_rap_score_percentage = trading["MaxRAPScorePercentage"]
 
         self.min_overall_score_percentage = trading[
             "MinOverallValueScorePercentage"
@@ -595,17 +681,34 @@ class TradeMaker:
         if self.debug_print:
             log("Trade algorithm: starting trade generation", severityNum=5)
 
-        # How many tries each setting stopped, read by the declined webhook
-        self.last_failed = invalid_reasons = {
-            "value_gain": 0,
-            "min_rap_of_trade": 0,
-            "min_value_of_trade": 0,
-            "rap_gain": 0,
-            "algo_gain": 0,
-            "overall_gain": 0,
-            "overall_close_percentage": 0,
-            "rap_close_percentage": 0,
+        # How many tries failed each setting, and how many failed only that
+        # one (they'd pass with it off). Read by the "no trade passed" messages.
+        reasons = (
+            "value_gain", "min_rap_of_trade", "min_value_of_trade", "rap_gain",
+            "algo_gain", "overall_gain",
+            "overall_close_percentage", "rap_close_percentage",
+        )
+        maximums = {
+            "overall_gain_max": self.max_overall_gain,
+            "rap_gain_max": self.max_rap_gain,
+            "algo_gain_max": self.max_algo_gain,
+            "value_gain_max": self.max_value_gain,
+            "overall_close_percentage_max": self.max_overall_score_percentage,
+            "rap_close_percentage_max": self.max_rap_score_percentage,
         }
+        reasons += tuple(key for key, limit in maximums.items() if limit is not None)
+        invalid_reasons = dict.fromkeys(reasons, 0)
+        only_reasons = dict.fromkeys(reasons, 0)
+        tried = 0
+
+        def stats():
+            self.last_failed.update(
+                tried=tried,
+                passed=len(valid_trades),
+                failed=invalid_reasons,
+                only=only_reasons,
+            )
+            return self.last_failed
 
         for self_side in self.generate_combinations(
             self_keys, self.min_items_self, self.max_items_self
@@ -617,7 +720,7 @@ class TradeMaker:
                 if not counter_trade:
                     log(
                         f"[TRADING] {about}ran out of time looking for a trade.\n"
-                        + failed_text(invalid_reasons)
+                        + failed_text(stats())
                     )
                 break
             self_side_item_ids = {self_inventory[key]["item_id"] for key in self_side}
@@ -681,18 +784,19 @@ class TradeMaker:
 
                         send_robux = calc_robux
 
-                    validate_trade, reason = self.validate_trade(
-                        self_rap=self_rap,
-                        self_rap_algo=self_rap_algo,
-                        self_value=self_value,
-                        self_overall_value=self_overall_value,
-                        their_rap=their_rap,
-                        their_rap_algo=their_rap_algo,
-                        their_value=their_value,
-                        their_overall_value=their_overall_value,
-                        robux=send_robux,
+                    # Robux counts toward everything but Value (see validate_trade)
+                    reason = self.trade_failures(
+                        self_rap + send_robux,
+                        self_rap_algo + send_robux,
+                        self_value,
+                        their_rap,
+                        their_rap_algo,
+                        their_value,
+                        self_overall_value + send_robux,
+                        their_overall_value,
                     )
-                    if validate_trade:
+                    tried += 1
+                    if not reason:
                         if self.debug_print:
                             log(
                                 f"[DEBUG] Trade algorithm: validated trade {len(valid_trades)}",
@@ -775,19 +879,22 @@ class TradeMaker:
                             and len(valid_trades) > self.max_valid_trades
                         ):
                             log("[TRADING] Hit Max Valid Trades, picking from those", dontPrint=True)
+                            stats()
                             return pick_trade()
 
                     else:
-                        # print("Not valid", self_side_item_ids, "for", their_side_item_ids)
-                        if reason in invalid_reasons:
-                            invalid_reasons[reason] += 1
+                        for failure in reason:
+                            invalid_reasons[failure] = invalid_reasons.get(failure, 0) + 1
+                        if len(reason) == 1:
+                            only_reasons[reason[0]] = only_reasons.get(reason[0], 0) + 1
 
+        stats()
         if valid_trades:
             return pick_trade()
 
         log(
             f"[TRADING] {about}no trade passed your config.\n"
-            + failed_text(invalid_reasons),
+            + failed_text(self.last_failed),
             dontPrint=counter_trade,
         )
         return None
@@ -835,8 +942,11 @@ class TradeMaker:
         their_overall_value,
         robux=None,
         their_robux=None,
+        all_failures=False,
     ):
         """
+        Returns (valid, first setting it failed). all_failures: (valid, every
+        setting it failed) instead, for the "what stopped them" table.
         robux / their_robux: Robux each side adds. They count at face value
         toward RAP, Overall Value and RAP Algorithm (not Value, which is
         Rolimons values only), and toward the score percentages.
@@ -849,59 +959,101 @@ class TradeMaker:
             their_rap += their_robux
             their_overall_value += their_robux
             their_rap_algo += their_robux
+        failures = self.trade_failures(
+            self_rap, self_rap_algo, self_value, their_rap, their_rap_algo,
+            their_value, self_overall_value, their_overall_value,
+            first_only=not all_failures,
+        )
+        if all_failures:
+            return not failures, failures
+        return (False, failures[0]) if failures else (True, None)
+
+    def trade_failures(
+        self,
+        self_rap,
+        self_rap_algo,
+        self_value,
+        their_rap,
+        their_rap_algo,
+        their_value,
+        self_overall_value,
+        their_overall_value,
+        first_only=False,
+    ) -> list:
+        """
+        Every setting the trade fails, in the order they're checked (Robux
+        already added). first_only: stop at the first one. Runs for every
+        combination, so it's written for speed.
+        """
+        failures = []
         if (
             self.min_value_of_trade
             and self.min_value_of_trade > self_value + their_value
         ):
-            # print("sum of trade", self_value, their_value)
-            return False, "min_value_of_trade"
-
+            failures.append("min_value_of_trade")
+            if first_only:
+                return failures
         if self.min_rap_of_trade and self.min_rap_of_trade > self_rap + their_rap:
-            return False, "min_rap_of_trade"
+            failures.append("min_rap_of_trade")
+            if first_only:
+                return failures
 
-        # Precompute the total value and RAP for both sides in a single loop
-        # Calculate value gain and close percentage
-        rap_close_percentage = self.close_percentage(
-            self_value=self_rap, their_value=their_rap
-        )
-        overall_close_percentage = self.close_percentage(
-            self_value=self_overall_value, their_value=their_overall_value
-        )
-        # Check if close percentage is within the acceptable range
-        if (
-            self.min_overall_score_percentage
-            and overall_close_percentage < self.min_overall_score_percentage
-            or self.max_overall_score_percentage
-            and overall_close_percentage > self.max_overall_score_percentage
-        ):
-            return False, "overall_close_percentage"
+        low, high = self.min_overall_score_percentage, self.max_overall_score_percentage
+        if low or high:
+            score = self.close_percentage(self_overall_value, their_overall_value)
+            if low and score < low or high and score > high:
+                failures.append(
+                    "overall_close_percentage"
+                    if low and score < low
+                    else "overall_close_percentage_max"
+                )
+                if first_only:
+                    return failures
+        low, high = self.min_rap_score_percentage, self.max_rap_score_percentage
+        if low or high:
+            score = self.close_percentage(self_rap, their_rap)
+            if low and score < low or high and score > high:
+                failures.append(
+                    "rap_close_percentage" if low and score < low else "rap_close_percentage_max"
+                )
+                if first_only:
+                    return failures
 
-        if (
-            self.min_rap_score_percentage
-            and rap_close_percentage < self.min_rap_score_percentage
-            or self.max_rap_score_percentage
-            and rap_close_percentage > self.max_rap_score_percentage
-        ):
-            return False, "rap_close_percentage"
-
-        if not self.check_overall_gain(their_overall_value, self_overall_value):
-            return False, "overall_gain"
-        # Check if RAP gain passes the criteria
-        if not self.check_rap_gain(their_rap, self_rap):
-            # print("rap gain false their, self", their_rap, self_rap)
-            return False, "rap_gain"
-
-        if not self.check_algo_gain(their_rap_algo, self_rap_algo):
-            # print("algo gain false their, self", their_rap_algo, self_rap_algo)
-            return False, "algo_gain"
-
-        # Check if value gain passes the criteria
-        if not self.check_value_gain(their_value, self_value):
-            # print("valu gain false their, self", their_value, self_value)
-            return False, "value_gain"
-
-        # print("trade valid")
-        return True, None
+        low, high = self.min_overall_gain, self.max_overall_gain
+        if low is not None or high is not None:
+            miss = gain_miss(
+                their_overall_value - self_overall_value,
+                self_overall_value,
+                gain_bounds(low, high),
+            )
+            if miss:
+                failures.append("overall_gain" if miss == BELOW_MIN else "overall_gain_max")
+                if first_only:
+                    return failures
+        low, high = self.min_rap_gain, self.max_rap_gain
+        if low is not None or high is not None:
+            miss = gain_miss(their_rap - self_rap, self_rap, gain_bounds(low, high))
+            if miss:
+                failures.append("rap_gain" if miss == BELOW_MIN else "rap_gain_max")
+                if first_only:
+                    return failures
+        low, high = self.min_algo_gain, self.max_algo_gain
+        if low is not None or high is not None:
+            miss = gain_miss(
+                their_rap_algo - self_rap_algo, self_rap_algo, gain_bounds(low, high)
+            )
+            if miss:
+                failures.append("algo_gain" if miss == BELOW_MIN else "algo_gain_max")
+                if first_only:
+                    return failures
+        low, high = self.min_value_gain, self.max_value_gain
+        if low is not None or high is not None:
+            miss = gain_miss(their_value - self_value, self_value, gain_bounds(low, high))
+            if miss:
+                failures.append("value_gain" if miss == BELOW_MIN else "value_gain_max")
+                if first_only:
+                    return failures
+        return failures
 
     def generate_combinations(self, keys, min_items=1, max_items=4):
         """

@@ -14,6 +14,7 @@ def endpoint(url) -> str:
         "{id}" if ID_PART.match(part) else part for part in parts.path.split("/")
     )
     return (parts.netloc + path) or str(url)
+import email.utils
 import time
 
 import random
@@ -21,11 +22,48 @@ import requests
 from handler.handle_logs import log
 from handler import exceptions_types
 
+MAX_RATE_LIMIT_WAIT = 300
+
+
+def rate_limit_headers(response) -> dict:
+    """The response's rate limit headers (no cookies or other headers)."""
+    return {
+        name: value
+        for name, value in (getattr(response, "headers", None) or {}).items()
+        if "rate" in name.lower() or "retry" in name.lower()
+    }
+
+
+def retry_after(response) -> float | None:
+    """
+    Seconds Roblox says to wait before retrying, from Retry-After or
+    x-ratelimit-reset. None when it doesn't say (then we back off on our own).
+    """
+    headers = {k.lower(): v for k, v in (getattr(response, "headers", None) or {}).items()}
+    for name in ("retry-after", "x-ratelimit-reset"):
+        value = headers.get(name)
+        if value is None:
+            continue
+        try:
+            seconds = float(str(value).split(",")[0].strip())
+        except ValueError:
+            try:  # Retry-After can also be a date
+                when = email.utils.parsedate_to_datetime(value)
+                seconds = when.timestamp() - time.time()
+            except (TypeError, ValueError, IndexError):
+                continue
+        if seconds > 1e9:  # a Unix time, not a number of seconds
+            seconds -= time.time()
+        return min(max(seconds, 1.0), MAX_RATE_LIMIT_WAIT)
+    return None
+
+
 MAX_NETWORK_RETRIES = 4
 MAX_SERVER_RETRIES = 3
 MAX_CSRF_RETRIES = 2
 MAX_RATE_LIMIT_RETRIES = 4
 TRADE_SEND_PREFIX = "https://trades.roblox.com/v2/trades/"
+CSRF_URL = "https://auth.roblox.com/v2/login"
 
 
 class RequestsHandler:
@@ -96,14 +134,29 @@ class RequestsHandler:
         Posts the auth API and grabs the csrf and sets the Class headers as the csrf
         The API response has a failure status code, but we still get the token.
         Returns True if a token was set.
+        Network errors are retried on a fresh connection: Roblox closes idle
+        connections, so the 15-minute refresh often hits a dead one.
         """
-        try:
-            response = self.Session.post(
-                "https://auth.roblox.com/v2/login", data={}, timeout=30
-            )
-        except requests.RequestException as e:
-            log(f"[REQUESTS] Couldn't get a CSRF token: {e}", severityNum=3)
-            return False
+        for attempt in range(1, MAX_NETWORK_RETRIES + 1):
+            if self.cookie:
+                self.Session.cookies.update(self.cookie)
+            try:
+                # Without the current token, or Roblox won't hand out a new one
+                headers = {**self.headers, "x-csrf-token": None}
+                response = self._send("post", CSRF_URL, headers, {}, None)
+                break
+            except requests.RequestException as e:
+                self.Session.close()
+                self.Session = requests.Session()
+                if attempt == MAX_NETWORK_RETRIES:
+                    log(
+                        f"[REQUESTS] Couldn't refresh the CSRF token ({type(e).__name__}), "
+                        "keeping the old one. Roblox sends a new one when it's needed.",
+                        severityNum=2,
+                    )
+                    return False
+                log(f"CSRF refresh failed, retrying ({attempt}): {e}", dontPrint=True)
+                time.sleep(3 * attempt)
 
         token = response.headers.get("x-csrf-token")
         if token:
@@ -220,8 +273,13 @@ class RequestsHandler:
                     del self.ratelimit_urls[URL]
                     raise error
 
-                wait_time = 10 * (2**consecutive_rate_limits)
-                log(f"[REQUESTS] Roblox is rate limiting, waiting {wait_time:g}s ({endpoint(URL)})")
+                told = retry_after(Response)
+                wait_time = told if told is not None else 10 * (2**consecutive_rate_limits)
+                log(
+                    f"[REQUESTS] Roblox is rate limiting, waiting {wait_time:g}s "
+                    f"{'(Roblox said so) ' if told is not None else ''}({endpoint(URL)})"
+                )
+                log(f"429 headers on {endpoint(URL)}: {rate_limit_headers(Response)}", dontPrint=True)
                 time.sleep(wait_time)
                 continue
 

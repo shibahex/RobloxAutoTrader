@@ -28,3 +28,7 @@ webhooks
 
 # Roblox cookie for live tests
 tests/.roblox_cookie
+
+# Your settings. Made from config.default.cfg on first run; never in git
+config.cfg
+config.backup.cfg

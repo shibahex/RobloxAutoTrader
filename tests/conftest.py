@@ -22,7 +22,10 @@ COOKIE_FILE = os.path.join(REPO_ROOT, "tests", ".roblox_cookie")
 
 # --- isolate the working directory before any bot module is imported ---------
 _WORKDIR = tempfile.mkdtemp(prefix="tradebot-tests-")
-shutil.copy(os.path.join(REPO_ROOT, "config.cfg"), _WORKDIR)
+# The shipped default, so tests don't depend on your own config.cfg
+shutil.copy(
+    os.path.join(REPO_ROOT, "config.default.cfg"), os.path.join(_WORKDIR, "config.cfg")
+)
 with open(os.path.join(_WORKDIR, "cookies.json"), "w") as f:
     json.dump({"roblox_accounts": []}, f)
 with open(os.path.join(_WORKDIR, "projected_checker.json"), "w") as f:
