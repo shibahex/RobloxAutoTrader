@@ -7,7 +7,7 @@ publish them as a release.
 import importlib.util
 import sys
 
-VERSION = "2.0"
+VERSION = "2.0.1"
 # "BETA", or "" for a stable release
 STAGE = ""
 

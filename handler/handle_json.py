@@ -9,6 +9,30 @@ from datetime import datetime, timedelta
 from handler.handle_logs import log
 from handler.exceptions_types import DataFileError
 
+TRADE_LIMIT = "hit the trade limit"
+PAUSE_HOURS = 6
+
+
+def pause_until(account: dict) -> datetime | None:
+    """When the account can send trades again, or None if it isn't paused."""
+    stamp = account.get("ratelimit_timestamp")
+    if not stamp:
+        return None
+    try:
+        until = datetime.fromisoformat(stamp) + timedelta(
+            hours=float(account.get("ratelimit_hours") or PAUSE_HOURS)
+        )
+    except (TypeError, ValueError):
+        log(f"[FILES] Bad trade limit time {stamp!r}, ignoring it", dontPrint=True)
+        return None
+    return until if until > datetime.now() else None
+
+
+def clock(when: datetime) -> str:
+    """'7:12 PM', or 'Fri 7:12 PM' when it isn't today."""
+    text = when.strftime("%I:%M %p").lstrip("0")
+    return text if when.date() == datetime.now().date() else when.strftime("%a ") + text
+
 
 class JsonHandler:
     # filename -> ((mtime_ns, size), data): shared read-only snapshots
@@ -121,13 +145,17 @@ class JsonHandler:
             if self.filename[0] == "." and os.name == "nt":
                 os.system(f'attrib +h +s "{self.filename}"')
 
-    def add_ratelimit_timestamp(self, cookie) -> None:
+    def add_ratelimit_timestamp(self, cookie, reason=TRADE_LIMIT, hours=None) -> None:
+        """
+        Pauses an account: it won't send trades until the time is up.
+        reason says why (shown in the console), hours how long (default 6).
+        """
         data = self.read_data()
         for account in data["roblox_accounts"]:
             if account.get("cookie") == cookie:
-                current_date = datetime.now()
-
-                account["ratelimit_timestamp"] = current_date.isoformat()
+                account["ratelimit_timestamp"] = datetime.now().isoformat()
+                account["ratelimit_reason"] = reason
+                account["ratelimit_hours"] = hours or PAUSE_HOURS
                 self.write_data(data)
                 return True
 
@@ -183,29 +211,22 @@ class JsonHandler:
         # for some reason if theres no use account value
         return False
 
-    def is_all_ratelimited(self):
+    def is_all_ratelimited(self) -> bool:
+        """True when every account that's ON is paused (and at least one is ON)."""
+        accounts = [a for a in self.read_data()["roblox_accounts"] if a.get("use_account")]
+        return bool(accounts) and all(pause_until(a) for a in accounts)
 
-        data = self.read_data()
-        for account in data["roblox_accounts"]:
-            if account["use_account"]:
-                current_date = datetime.now()
-
-                ratelimit_timestamp = account.get("ratelimit_timestamp")
-                if not ratelimit_timestamp:
-                    return False
-                try:
-                    timestamp_date = datetime.fromisoformat(ratelimit_timestamp)
-                except (TypeError, ValueError):
-                    log(f"[FILES] Bad trade limit time {ratelimit_timestamp!r}, ignoring it")
-                    return False
-
-                if current_date - timestamp_date >= timedelta(hours=6):
-                    # greater than 6 hours
-                    account["ratelimit_timestamp"] = None
-                    self.write_data(data)
-                    return False
-
-        return True
+    def paused_text(self) -> str:
+        """One line per paused account: who, why, and until when."""
+        lines = []
+        for account in self.read_data()["roblox_accounts"]:
+            until = pause_until(account) if account.get("use_account") else None
+            if until:
+                lines.append(
+                    f"{account.get('username')}: {account.get('ratelimit_reason') or TRADE_LIMIT}, "
+                    f"until {clock(until)}"
+                )
+        return "\n".join(lines)
 
     def update_last_completed(self, cookie, last_completed: int or str) -> None:
         data = self.read_data()
@@ -224,33 +245,12 @@ class JsonHandler:
             if account.get("cookie") == cookie:
                 return account.get("last_completed")
 
-    def check_ratelimit_cookie(self, cookie) -> None:
-        """
-        Checks if the cookie is ratelimited or not
-        """
-
-        data = self.read_data()
-        for account in data["roblox_accounts"]:
+    def check_ratelimit_cookie(self, cookie) -> bool:
+        """True while the account is paused (trade limit, no items...)."""
+        for account in self.read_data()["roblox_accounts"]:
             if account.get("cookie") == cookie:
-                ratelimit_timestamp = account.get("ratelimit_timestamp")
-                if not ratelimit_timestamp:
-                    return False
-
-                try:
-                    timestamp_date = datetime.fromisoformat(ratelimit_timestamp)
-                except (TypeError, ValueError):
-                    log(f"[FILES] Bad trade limit time {ratelimit_timestamp!r}, ignoring it")
-                    return False
-
-                current_date = datetime.now()
-
-                if current_date - timestamp_date >= timedelta(hours=6):
-                    # greater than 1 day
-                    account["ratelimit_timestamp"] = None
-                    self.write_data(data)
-                    return False
-
-                return True
+                return pause_until(account) is not None
+        return False
 
     def add_cookie(self, cookie, username, user_id, auth) -> None:
         data = self.read_data()

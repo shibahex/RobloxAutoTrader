@@ -120,7 +120,7 @@ class DiscordHandler:
         embed = DiscordEmbed(
             title=title, description=description, color=STATUS_COLORS[color]
         )
-        embed.set_footer(text=footer + f" • {user_id}")
+        embed.set_footer(text=" • ".join(str(part) for part in (footer, user_id) if part))
         embed.set_timestamp()
 
         try:

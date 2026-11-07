@@ -95,7 +95,7 @@ jobs:
           cp configs/*.cfg "$name/configs/"
           # Starting config (the repo's default); switch it with
           # Config Manager > Change Config
-          cp config.cfg "$name/config.cfg"
+          cp config.default.cfg "$name/config.cfg"
           cp -r docs/config "$name/docs/"
           cp README.md LICENSE "$name/"
           # Linux setup scripts (e.g. scripts/waydroid/setup.sh), if the repo has any

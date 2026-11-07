@@ -3,6 +3,8 @@ from handler.handle_logs import log
 from handler.exceptions_types import ConfigError
 
 import configparser
+import os
+import shutil
 
 
 @functools.lru_cache(maxsize=256)
@@ -56,8 +58,24 @@ INBOUND_GAINS = {
 }
 
 
+DEFAULT_CONFIG = "config.default.cfg"
+
+
+def create_config(filename="config.cfg", default=DEFAULT_CONFIG) -> bool:
+    """
+    Makes config.cfg from config.default.cfg when it doesn't exist yet.
+    config.cfg isn't in git, so pulling updates never touches your settings.
+    """
+    if os.path.exists(filename) or not os.path.exists(default):
+        return False
+    shutil.copyfile(default, filename)
+    return True
+
+
 class ConfigHandler:
     def __init__(self, filename="config.cfg"):
+        if os.path.basename(filename) == "config.cfg":
+            create_config(filename, os.path.join(os.path.dirname(filename), DEFAULT_CONFIG))
         self.config = configparser.ConfigParser()
         self.config.read(filename)
         # "[Section] Option" of every setting that couldn't be read
@@ -260,6 +278,8 @@ class ConfigHandler:
             "Completed_Webhook": self.get_string("Discord", "Completed Webhook"),
             # Optional: where crashes and account problems get posted
             "Error_Webhook": self.get_string("Discord", "Error Webhook"),
+            # Missing = True: keep the bot accounts' names out of Discord
+            "Hide_Username": self.get_boolean("Discord", "Hide Username") is not False,
         }
 
     def load_scan_items(self):

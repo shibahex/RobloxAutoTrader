@@ -977,7 +977,11 @@ class RobloxAPI:
                 color=color,
                 user_id=trade["their_id"],
                 embed_fields=fields,
-                footer=self.username,
+                footer=(
+                    ""
+                    if self.config.discord_settings.get("Hide_Username", True)
+                    else self.username
+                ),
             )
             return self.discord_webhook.send_webhook(embed, url)
         except (TradebotError, KeyError, TypeError) as e:
