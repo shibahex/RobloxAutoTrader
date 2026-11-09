@@ -155,6 +155,7 @@ def _layout():
             "Check Valued Items": "Check Valued Items",
             "Maximum Graph Difference": "Max Price Rise",
             "Minimum Graph Difference": "Max Price Drop",
+            "Prioritize Sending Projecteds": "Prioritize Sending Projecteds",
         },
         ("Inbound Settings", "Inbounds"): {
             **gains,
@@ -743,12 +744,12 @@ class ConfigHandler:
             "Detect_Rolimons_Projecteds": self.get_boolean(
                 "Projected Detection", "Detect Rolimons Projecteds"
             ),
-            # Missing = today's default (40% each way); None = don't check that way
+            # Missing = today's default (35% each way); None = don't check that way
             "MaximumGraphDifference": self.get_float_default(
-                "Projected Detection", "Maximum Graph Difference", 0.4
+                "Projected Detection", "Maximum Graph Difference", 0.35
             ),
             "MinimumGraphDifference": self.get_float_default(
-                "Projected Detection", "Minimum Graph Difference", -0.4
+                "Projected Detection", "Minimum Graph Difference", -0.35
             ),
             "MinPriceDifference": self.get_float(
                 "Projected Detection", "MinPriceDifference"
@@ -758,6 +759,10 @@ class ConfigHandler:
             "Check_Valued_Items": self.get_boolean(
                 "Projected Detection", "Check Valued Items"
             ) is True,
+            # Prefer trades that give away your projected items (missing = on)
+            "Prioritize_Sending_Projecteds": self.get_boolean(
+                "Projected Detection", "Prioritize Sending Projecteds"
+            ) is not False,
         }
 
     def load_mass_sender(self):

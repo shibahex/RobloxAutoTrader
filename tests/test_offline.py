@@ -1861,7 +1861,7 @@ def test_graph_difference_settings(past, max_rise, max_drop, projected):
 @pytest.mark.parametrize(
     "lines, expected",
     [
-        ("", (0.4, -0.4)),  # missing -> today's default
+        ("", (0.35, -0.35)),  # missing -> today's default
         (
             "Maximum Graph Difference = 0.25\nMinimum Graph Difference = None\n",
             (0.25, None),
@@ -4022,3 +4022,64 @@ def test_upgrade_means_giving_more_items_than_you_get():
     four_for_one = {"num_items_self": 4, "num_items_their": 1}  # an upgrade
     assert min([one_for_four, four_for_one], key=PICK_KEYS["upgrade"]) is four_for_one
     assert min([one_for_four, four_for_one], key=PICK_KEYS["downgrade"]) is one_for_four
+
+
+def test_picker_prefers_giving_away_projecteds():
+    from trade_algorithm import TradePicker
+
+    picker = TradePicker("lowest_rap_gain")
+    plain = {"self_rap": 0, "their_rap": 100, "wanted_items": 0, "changes": 0,
+             "projected_given": 0, "self_side": [], "their_side": []}
+    dumps = dict(plain, their_rap=300, projected_given=1)
+    for t in (plain, dumps):
+        picker.add(t)
+    # Bigger RAP gain loses on Pick Trade By, but gives away a projected item
+    assert picker.pick() is dumps
+
+
+def test_prioritize_sending_projecteds_config(tmp_path):
+    from handler.handle_config import ConfigHandler
+
+    cfg = tmp_path / "c.cfg"
+    cfg.write_text("[Projected]\n")
+    assert ConfigHandler(str(cfg)).projected_detection["Prioritize_Sending_Projecteds"] is True
+    cfg.write_text("[Projected]\nPrioritize Sending Projecteds = False\n")
+    assert ConfigHandler(str(cfg)).projected_detection["Prioritize_Sending_Projecteds"] is False
+
+
+def test_generated_trade_gives_away_projected_item():
+    from handler.handle_config import ConfigHandler
+    from trade_algorithm import TradeMaker
+
+    maker = TradeMaker(ConfigHandler("configs/small_value.cfg"))
+    for name in (
+        "min_rap_gain max_rap_gain min_overall_gain max_overall_gain min_algo_gain "
+        "max_algo_gain min_value_gain max_value_gain min_rap_score_percentage "
+        "max_rap_score_percentage min_overall_score_percentage "
+        "max_overall_score_percentage max_valid_trades"
+    ).split():
+        setattr(maker, name, None)
+    maker.min_value_of_trade = maker.min_rap_of_trade = 0
+    maker.min_items_self = maker.min_items_their = 1
+    maker.max_items_self = 1
+    maker.max_items_their = 2
+    maker.trade_robux = False
+    maker.trade_timeout = 10
+    maker.outbound_variety = 0
+    maker.select_by = "highest_overall_gain"
+
+    def item(item_id, value, projected=False):
+        return {"item_id": item_id, "value": value, "rap": value, "demand": 2,
+                "rap_algorithm": value, "total_value": value, "item_volume": 5,
+                "projected": projected}
+
+    # Giving the 900 is the bigger gain, but the 1000 is projected
+    mine = {"proj": item("10", 1000, projected=True), "plain": item("11", 900)}
+    theirs = {"x": item("20", 1500), "y": item("21", 100)}
+
+    maker.prioritize_projected = True
+    trade = maker.generate_trade(mine, theirs)
+    assert trade, maker.last_failed
+    assert trade["self_side"] == ("proj",)
+    maker.prioritize_projected = False
+    assert maker.generate_trade(mine, theirs)["self_side"] == ("plain",)

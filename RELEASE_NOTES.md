@@ -22,9 +22,14 @@
 - `Pick Trade By` can combine options: `a + b` breaks ties in order, and `blend: a, b, c` weighs them all.
 - The inbound `Max Overall Profit` default is now 1500.
 
+### Projected items
+- `Max Price Rise` and `Max Price Drop` now default to `0.35` / `-0.35` (was `0.4` / `-0.4`), so pushed-up items are caught sooner.
+- New `[Projected]` `Prioritize Sending Projecteds = True` (default): when several trades pass, the bot picks the one that gives away the most of your projected items, so you get rid of them before their price drops.
+
 ### Finding traders
 - Owners are read page by page, and each scan carries on where the last one stopped. Progress is saved in `owner_scan_cache.json` and shared by all accounts (`Owner Pages Per Scan`, `Recent Owner Days`, `Remember Scanned Owners Days`).
 
 ### Other changes
+- Counters now show the full trade in the console (what you give, what you get and the breakdown), the same as trades the bot sends.
 - `[Items]` `Sales History Days` (default 90) sets how much sales history the RAP Algorithm and the sales filters use.
 - Projected detection compares today's price with the 90-day typical price, so one-day spikes no longer flag an item. New `Check Valued Items`, `Cancel If Receiving Projected` and `Cancel If Sending Projected` settings.

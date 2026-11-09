@@ -289,6 +289,25 @@ def cancel_minimum(minimum, offset):
     return max(0, lowered) if minimum >= 0 else lowered
 
 
+def trade_lines(header: str, fields: dict, profit) -> str:
+    """The console version of a trade's webhook: header, items both ways, breakdown."""
+
+    def items(name):
+        text = fields[name][0]
+        return "\n".join(map(str, text)) if isinstance(text, tuple) else text
+
+    return "\n".join(
+        [
+            f"{header} ({profit:+,} overall)",
+            "You give:",
+            *("  " + line for line in items("Send").splitlines()),
+            "You get:",
+            *("  " + line for line in items("Receive").splitlines()),
+            fields["Trade Breakdown"][0],
+        ]
+    )
+
+
 def failed_stats(failed) -> dict:
     """
     {"tried": n, "failed": {reason: n}, "only": {reason: n}} from
@@ -439,7 +458,8 @@ class TradePicker:
     Picks generate_trade's trade while the search runs. It keeps only the best
     trade for each Outbound Variety count rather than every passing trade, so
     memory stays flat however many pass, and it picks the same trade a full
-    list would. Order of preference: Outbound Variety, not already sent, the
+    list would. Order of preference: Outbound Variety, the most of our
+    projected items given away, not already sent, the
     fewest changed items (counters), then Pick Trade By (or random).
     """
 
@@ -476,6 +496,7 @@ class TradePicker:
             self.avoided[reuse] += 1
             return
         rank = (
+            -trade.get("projected_given", 0),
             trade["changes"],
             self.key(trade) if self.key else 0,
         )
@@ -567,6 +588,11 @@ class TradeMaker:
         self.min_items_their = trading["MinimumItemsTheirSide"]
         self.max_items_their = trading["MaximumItemsTheirSide"]
         self.select_by = self.config.filter_generated["Select_Trade_Using"]
+        # [Projected] Prioritize Sending Projecteds: trades that give away
+        # more of our projected items win
+        self.prioritize_projected = (
+            getattr(self.config, "projected_detection", None) or {}
+        ).get("Prioritize_Sending_Projecteds", True)
         self.outbound_variety = self.config.filter_generated.get("Outbound_Variety")
 
         self.max_robux = trading["MaxRobux"]
@@ -730,6 +756,11 @@ class TradeMaker:
             return None
 
         self_keys = list(self_inventory.keys())
+        self_projected = (
+            {key for key, item in self_inventory.items() if item.get("projected")}
+            if getattr(self, "prioritize_projected", True)
+            else set()
+        )
         their_keys = list(their_inventory.keys())
         if original:
             # Their trade's items first, so close counters are found before a timeout
@@ -1174,6 +1205,11 @@ class TradeMaker:
                                 "num_items_their": num_items_their,
                                 "self_overall_value": self_overall_value,
                                 "their_overall_value": their_overall_value,
+                                "projected_given": (
+                                    len(self_projected.intersection(self_side))
+                                    if self_projected
+                                    else 0
+                                ),
                                 "changes": (
                                     changed_items(
                                         self_side, self_inventory, original["self"]

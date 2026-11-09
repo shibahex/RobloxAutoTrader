@@ -20,6 +20,7 @@ from trade_algorithm import (
     failed_text,
     gains_table,
     reason_text,
+    trade_lines,
 )
 from handler.account_settings import HandleConfigs
 from handler.handle_logs import log
@@ -1030,7 +1031,6 @@ class RobloxAPI:
             counter_id=trade_id,
             self_robux=generated_trade["self_robux"],
         )
-        log(f"[INBOUND] Countered trade {trade_id}")
         self.counter_history.record_counter(
             trader_id,
             trade_signature(
@@ -1051,10 +1051,23 @@ class RobloxAPI:
                 for key in generated_trade["their_side"]
             ],
         )
+        header = f"[INBOUND] {self.username} countered trade {trade_id} from {trader_id}"
+        try:
+            log(trade_lines(header, *self.trade_fields(counter)))
+        except (TradebotError, KeyError, TypeError, ValueError):
+            log(header)
         self.post_trade_webhook(
             "Send_Webhook", counter, "Countered a trade ({profit} profit)", color=3
         )
         return "countered"
+
+    def trade_fields(self, trade) -> tuple[dict, int]:
+        """(webhook fields, overall profit) for an inbound or counter trade."""
+        return self.discord_webhook.embed_fields_from_trade(
+            trade,
+            self.rolimon.item_data,
+            self.rolimon.projected_json.read_cached(),
+        )
 
     def post_trade_webhook(
         self, webhook, trade, title, color, extra_fields=None
@@ -1069,11 +1082,7 @@ class RobloxAPI:
         if not url:
             return False
         try:
-            fields, profit = self.discord_webhook.embed_fields_from_trade(
-                trade,
-                self.rolimon.item_data,
-                self.rolimon.projected_json.read_cached(),
-            )
+            fields, profit = self.trade_fields(trade)
             fields.update(extra_fields or {})
             embed = self.discord_webhook.setup_embed(
                 title=title.format(profit=profit),

@@ -5,6 +5,7 @@ import time
 import traceback
 from rolimons_api import RolimonAPI
 from roblox_api import RobloxAPI
+from trade_algorithm import trade_lines
 import threading
 from handler.handle_json import JsonHandler
 from account_manager import AccountManager
@@ -763,24 +764,13 @@ class Doggo:
             embed, account.config.discord_settings["Send_Webhook"]
         )
 
-        send_items = embed_fields["Send"][0]
-        receive_items = embed_fields["Receive"][0]
-        if isinstance(send_items, tuple):
-            send_items = "\n".join(map(str, send_items))
-        if isinstance(receive_items, tuple):
-            receive_items = "\n".join(map(str, receive_items))
-
-        breakdown = embed_fields["Trade Breakdown"][0]
-        lines = [
-            f"[TRADING] {account.username} sent a trade to {trader} "
-            f"({total_profit:+,} overall)",
-            "You give:",
-            *("  " + line for line in send_items.splitlines()),
-            "You get:",
-            *("  " + line for line in receive_items.splitlines()),
-            breakdown,
-        ]
-        log("\n".join(lines))
+        log(
+            trade_lines(
+                f"[TRADING] {account.username} sent a trade to {trader}",
+                embed_fields,
+                total_profit,
+            )
+        )
 
     def load_roblox_accounts(self):
         """

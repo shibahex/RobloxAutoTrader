@@ -148,8 +148,10 @@ jobs:
             flags+=(--prerelease)
           fi
           # First build of this version creates the release; later ones
-          # (e.g. pressing Run workflow again) replace its files
+          # (e.g. pressing Run workflow again) replace its files and notes
           if ! gh release view "$tag" > /dev/null 2>&1; then
             gh release create "$tag" "${flags[@]}"
+          elif [ -f RELEASE_NOTES.md ]; then
+            gh release edit "$tag" --notes-file RELEASE_NOTES.md
           fi
           gh release upload "$tag" release/* --clobber

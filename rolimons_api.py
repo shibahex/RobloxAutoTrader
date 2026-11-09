@@ -341,6 +341,10 @@ class RolimonAPI:
                         "[CONFIG] Algorithm For Valued Items isn't set right, using rap_algo"
                     )
 
+            # [Projected] Check Valued Items off: valued items never count
+            if is_projected and value != 0 and not check_valued:
+                is_projected = False
+
             if not is_self:
                 # Sales checks only apply to RAP items (value 0); None = no limit
                 too_few_sales = (
@@ -352,9 +356,6 @@ class RolimonAPI:
                     and sale_gap is not None
                     and float(sale_gap) > max_sales_gap
                 )
-                # [Projected] Check Valued Items off: valued items never count
-                if is_projected and value != 0 and not check_valued:
-                    is_projected = False
                 if (
                     is_projected
                     or item_volume is None
@@ -371,6 +372,9 @@ class RolimonAPI:
                 "rap_algorithm": rap_algo_value,
                 "total_value": total_value,
                 "item_volume": item_volume,
+                # Only ours can be (theirs are skipped above), for
+                # [Projected] Prioritize Sending Projecteds
+                "projected": bool(is_projected),
             }
 
         # apply more usefull info about the item
