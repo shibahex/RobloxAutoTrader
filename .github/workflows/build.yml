@@ -136,7 +136,13 @@ jobs:
         run: |
           tag=$(python -c 'import version; print(version.release_tag())')
           title="TradebotRBX $(python -c 'import version; print(version.full_version())')"
-          flags=(--target "$GITHUB_SHA" --title "$title" --generate-notes)
+          flags=(--target "$GITHUB_SHA" --title "$title")
+          # RELEASE_NOTES.md is the release text; without it GitHub lists the changes
+          if [ -f RELEASE_NOTES.md ]; then
+            flags+=(--notes-file RELEASE_NOTES.md)
+          else
+            flags+=(--generate-notes)
+          fi
           # A BETA (or any STAGE) version is marked as a pre-release
           if [ -n "$(python -c 'import version; print(version.STAGE)')" ]; then
             flags+=(--prerelease)
