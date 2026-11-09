@@ -1,5 +1,11 @@
 ## What's new
 
+### Faster trade searching
+- The bot only builds trades that can land inside your profit range. Trades that would go over your maximum or can't reach your minimum are skipped before they're built, so it checks far fewer trades for the same result.
+- The other person's side of the trade is worked out once and reused instead of rebuilt for every one of your items.
+- Your profit limits are worked out once per search, and each trade stops being checked at the first rule it fails.
+- Picking which trade to send uses less memory: it keeps only the best trades instead of every one that passed, and still picks the same trade.
+
 ### Inbounds: biggest win first
 - The bot checks all your inbounds first, then accepts the passing ones from the biggest Overall win down.
 - A trade that asks for items you just gave away is skipped, and items you just received count toward `Max Duplicates Owned` for the next one.
