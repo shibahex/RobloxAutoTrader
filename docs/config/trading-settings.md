@@ -1,6 +1,6 @@
 [← Config guide](README.md)
 
-# [Trading Settings]
+# [Profit] and [Trade Rules]
 
 **This is the section that decides your trades.** Every trade the bot comes up with is checked against these settings, and it's only sent if it passes all of them.
 
@@ -11,10 +11,11 @@ Each number has a minimum and a maximum gain. They're checked separately, and a 
 
 | Setting | What it does |
 |---|---|
-| `Minimum RAP Gain` / `Maximum RAP Gain` | Range for RAP received minus RAP given. |
-| `Minimum Overall Value Gain` / `Maximum Overall Value Gain` | Same, for Overall Value. |
-| `Minimum Value Gain` / `Maximum Value Gain` | Same, for Value. |
-| `Minimum Rap Algorithm Gain` / `Maximum Rap Algorithm Gain` | Same, for the RAP Algorithm. |
+| `Min RAP Profit` / `Max RAP Profit` | Range for RAP received minus RAP given. |
+| `Min Overall Profit` / `Max Overall Profit` | Same, for Overall Value. |
+| `Min Value Profit` / `Max Value Profit` | Same, for Value. |
+| `Skip Value Profit If No Valued Items` | `True` = a trade with only RAP items (no valued items on either side) skips the Value Gain check. `False` (default) = its Value gain is 0, so a Min Value Profit above 0 blocks it. |
+| `Min Algorithm Profit` / `Max Algorithm Profit` | Same, for the RAP Algorithm. |
 
 - **Minimum** is the least you'll accept. It can be negative if you're fine taking a small loss in one number to win in another (e.g. lose RAP to gain Value).
 - **Maximum** stops offers so lopsided that nobody accepts them.
@@ -27,7 +28,7 @@ Each number has a minimum and a maximum gain. They're checked separately, and a 
 > A trade can also lose Value and still be a win in Overall Value. See [Value vs Overall Value](README.md#value-vs-overall-value) for a real example (−500 Value, +612 Overall).
 
 ## RAP Algorithm for valued items
-`RAP Algorithm for Valued Items` sets which RAP Algorithm number a **valued** item counts as:
+`Algorithm For Valued Items` sets which RAP Algorithm number a **valued** item counts as:
 
 | Option | Valued items count as |
 |---|---|
@@ -38,7 +39,7 @@ Each number has a minimum and a maximum gain. They're checked separately, and a 
 ## Robux
 | Setting | What it does |
 |---|---|
-| `Trade Robux` | `True` adds Robux to your side when you'd receive more RAP than you give. |
+| `Add Robux` | `True` adds Robux to your side when you'd receive more RAP than you give. |
 | `Max Robux` | The most Robux it adds to one trade. |
 
 The amount is (their RAP − your RAP) ÷ 4, capped at half your side's RAP and at `Max Robux`.
@@ -60,31 +61,31 @@ Score measures how uneven a trade is, as a percent of the whole trade:
 
 | Setting | What it does |
 |---|---|
-| `Min Overall Value Score Percentage` / `Max Overall Value Score Percentage` | How uneven a trade can be, by Overall Value. |
-| `Min RAP Score Percentage` / `Max RAP Score Percentage` | Same, by RAP. |
+| `Min Overall Score` / `Max Overall Score` | How uneven a trade can be, by Overall Value. |
+| `Min RAP Score` / `Max RAP Score` | Same, by RAP. |
 
 `None` = no limit. These are a second way to stop greedy offers, relative to the size of the trade instead of a fixed number.
 
 ## Items per side
 | Setting | What it does |
 |---|---|
-| `Minimum Items on Your Side` / `Maximum Items on Your Side` | How many of your items a trade can have. |
-| `Minimum Items on Their Side` / `Maximum Items on Their Side` | How many of their items a trade can have. |
+| `Min Items Yours` / `Max Items Yours` | How many of your items a trade can have. |
+| `Min Items Theirs` / `Max Items Theirs` | How many of their items a trade can have. |
 
-Whole numbers only. 1-for-1 trades are never sent. Higher maximums mean far more combinations to check, so each search is slower (see [`Max Seconds Spent on Generating Trades`](filtering-generated-trades.md)).
+Whole numbers only. 1-for-1 trades are never sent. Higher maximums mean far more combinations to check, so each search is slower (see [`Max Seconds Per Trader`](filtering-generated-trades.md)).
 
 ## Trade size
 | Setting | What it does |
 |---|---|
-| `Minimum Value Sum Of Trade` | Both sides' Value added together must be at least this. Above 0 means the trade must include valued items. |
-| `Minimum Rap Sum Of Trade` | Both sides' RAP added together must be at least this. |
+| `Min Trade Value` | Both sides' Value added together must be at least this. Above 0 means the trade must include valued items. |
+| `Min Trade RAP` | Both sides' RAP added together must be at least this. |
 
 `0` = no limit.
 
 ## Faces and gears
 | Setting | What it does |
 |---|---|
-| `Trade For Faces` | `True` allows **receiving** faces. |
-| `Trade For Gears` | `True` allows **receiving** gears. |
+| `Receive Faces` | `True` allows **receiving** faces. |
+| `Receive Gears` | `True` allows **receiving** gears. |
 
 Your own faces and gears can always be traded away.

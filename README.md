@@ -82,10 +82,10 @@ if that didn't work you can manually input the 2FA Secret Code and cookie and it
 The bot reads `config.cfg` (made from `config.default.cfg` the first time it runs). Every setting has a note above it explaining what it does.
 
 > [!IMPORTANT]
-> **`[Trading Settings]` is the section that decides which trades get sent.** Everything else is tweaking: who the bot looks for, how fast it searches, and how it handles inbound and outbound trades.
+> **`[Profit]` and `[Trade Rules]` decide which trades get sent.** Everything else is tweaking: who the bot looks for, how fast it searches, and how it handles inbound and outbound trades.
 
 ### Picking a config
-`configs/` has ready-made presets. To use one: **Config Manager > Change Config**, then pick a preset. It's copied over your `config.cfg`.
+`configs/` has ready-made presets. To use one: **Config Manager > Use a preset for config.cfg**, then pick a preset. It's copied over your `config.cfg`.
 
 | Preset | Trades for |
 |---|---|
@@ -96,7 +96,9 @@ The bot reads `config.cfg` (made from `config.default.cfg` the first time it run
 | `rap_to_value.cfg` | Trading RAP items into valued items |
 | `value_to_rap.cfg` | Trading valued items for RAP wins |
 
-To give one account different trading settings from the rest, use **Config Manager > Add Account Configs**. Account configs only replace the `[Trading Settings]` section.
+To change `config.cfg` without opening the file, use **Config Manager > Edit config.cfg**: pick a section and a setting, and it shows the setting's notes and the easiest way to change it (a numbered list for settings with a few options, True/False, add/remove for item lists like `Never Give` by ID or name, on/off for tags, and a builder for `Pick Trade By`). Comments are kept, the old file is saved as `config.backup.cfg`, and a change that would stop the config from loading isn't saved.
+
+To give one account its own settings, use **Config Manager > Account configs**, pick the account, then a section (`[Profit]`, `[Trade Rules]`, `[Items]`, `[Picking Trades]`, `[Outbounds]` offsets). An account config only holds the settings you change there; everything else comes from `config.cfg`.
 
 ### The 4 numbers
 | | What it is |
@@ -113,7 +115,7 @@ A gain between -1 and 1 is a percentage of your side: `0.1` = 10%.
 ### Rules that trip people up
 - `None` turns a setting off, but only where the note says so. Settings marked **whole number** must be a whole number, or the bot won't start.
 - The stricter the config, the fewer trades get sent. Start loose, then tighten.
-- `Accept Valid Trades` accepts inbound trades automatically, which can't be undone. Leave it off until your minimum gains are set the way you want.
+- `Accept Good Trades` accepts inbound trades automatically, which can't be undone. Leave it off until your minimum gains are set the way you want.
 - Changing your config can cancel outbound trades that don't pass the new settings. `Keep Trades Sent Before Config Change = True` stops that.
 
 ### No trades getting sent?
@@ -121,19 +123,19 @@ If the bot prints `Couldnt find valid_trades heres invalid trades reasons:`, it 
 
 | Reason | Setting to loosen |
 |---|---|
-| `rap_gain` | Minimum / Maximum RAP Gain |
-| `value_gain` | Minimum / Maximum Value Gain |
-| `overall_gain` | Minimum / Maximum Overall Value Gain |
-| `algo_gain` | Minimum / Maximum Rap Algorithm Gain |
-| `overall_close_percentage` | Min / Max Overall Value Score Percentage |
-| `rap_close_percentage` | Min / Max RAP Score Percentage |
-| `min_value_of_trade` | Minimum Value Sum Of Trade |
-| `min_rap_of_trade` | Minimum Rap Sum Of Trade |
+| `rap_gain` | Minimum / Max RAP Profit |
+| `value_gain` | Minimum / Max Value Profit |
+| `overall_gain` | Minimum / Max Overall Profit |
+| `algo_gain` | Minimum / Max Algorithm Profit |
+| `overall_close_percentage` | Min / Max Overall Score |
+| `rap_close_percentage` | Min / Max RAP Score |
+| `min_value_of_trade` | Min Trade Value |
+| `min_rap_of_trade` | Min Trade RAP |
 
 If one reason is far ahead of the rest on every user, that setting is too strict for your inventory. If the counts are all low, most of your items are probably on trade hold.
 
 ### Testing a config
-Set these in `[debug]`, run the bot, and watch what it would send:
+Set these in `[Debug]`, run the bot, and watch what it would send:
 ```
 Dont Send Trades = True
 Dont Check Outbounds = True

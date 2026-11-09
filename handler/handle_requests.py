@@ -36,10 +36,13 @@ def rate_limit_headers(response) -> dict:
 
 def retry_after(response) -> float | None:
     """
-    Seconds Roblox says to wait before retrying, from Retry-After or
-    x-ratelimit-reset. None when it doesn't say (then we back off on our own).
+    Seconds Roblox says to wait before retrying: the longer of Retry-After and
+    x-ratelimit-reset. Roblox often sends Retry-After 5 while the limit only
+    resets in 13s, and retrying at 5s just gets limited again. None when it
+    doesn't say (then we back off on our own).
     """
     headers = {k.lower(): v for k, v in (getattr(response, "headers", None) or {}).items()}
+    waits = []
     for name in ("retry-after", "x-ratelimit-reset"):
         value = headers.get(name)
         if value is None:
@@ -54,8 +57,10 @@ def retry_after(response) -> float | None:
                 continue
         if seconds > 1e9:  # a Unix time, not a number of seconds
             seconds -= time.time()
-        return min(max(seconds, 1.0), MAX_RATE_LIMIT_WAIT)
-    return None
+        waits.append(seconds)
+    if not waits:
+        return None
+    return min(max(max(waits), 1.0), MAX_RATE_LIMIT_WAIT)
 
 
 MAX_NETWORK_RETRIES = 4
@@ -276,8 +281,7 @@ class RequestsHandler:
                 told = retry_after(Response)
                 wait_time = told if told is not None else 10 * (2**consecutive_rate_limits)
                 log(
-                    f"[REQUESTS] Roblox is rate limiting, waiting {wait_time:g}s "
-                    f"{'(Roblox said so) ' if told is not None else ''}({endpoint(URL)})"
+                    f"[REQUESTS] Roblox is rate limiting, waiting {wait_time:g}s ({endpoint(URL)})"
                 )
                 log(f"429 headers on {endpoint(URL)}: {rate_limit_headers(Response)}", dontPrint=True)
                 time.sleep(wait_time)
@@ -362,7 +366,7 @@ class RequestsHandler:
                 self.proxies = [
                     "http://" + line.strip() for line in file if line.strip()
                 ]
-        except OSError as e:
+        except OSError:
             log("[REQUESTS] No proxy file, not using proxies")
 
     def refresh_proxies(self, file_path="proxies.txt"):

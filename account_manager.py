@@ -4,13 +4,9 @@ from handler.handle_cli import Terminal
 from handler.handle_2fa import AuthHandler
 from handler.handle_login import FirefoxLogin
 from handler.exceptions_types import (
-    NetworkError,
-    RolimonsCookieInvalid,
-    RolimonsError,
     TradebotError,
     CookieInvalid,
 )
-from handler.handle_trade_ads import COOKIE_NAME, check_rolimons_cookie
 
 COOKIE_WARNING = "_|WARNING:-DO-NOT-SHARE-THIS.--Sharing-this-will-allow-someone-to-log-in-as-you-and-to-steal-your-ROBUX-and-items.|"
 
@@ -54,8 +50,7 @@ class AccountManager:
                 ("2", "Add Account (Manual)"),
                 ("3", "Remove Accounts"),
                 ("4", "Toggle Accounts"),
-                ("5", "Rolimons Cookies (optional, for trade ads)"),
-                ("6", "Back to Main Menu"),
+                ("5", "Back to Main Menu"),
             )
             self.cli.print_menu("Account Manager", options)
             try:
@@ -74,55 +69,7 @@ class AccountManager:
                 case 4:
                     self.toggle_accounts()
                 case 5:
-                    self.rolimons_cookies()
-                case 6:
                     break
-
-    def rolimons_cookies(self):
-        """Add, replace or remove an account's Rolimons cookie (for [Trade Ads])."""
-        while True:
-            self.cli.clear_console()
-            print(
-                "A Rolimons cookie lets the bot post trade ads for that account.\n"
-                "Get it from rolimons.com while logged in as that Roblox account:\n"
-                f"browser dev tools > Application/Storage > Cookies > rolimons.com > {COOKIE_NAME}\n"
-                "It works like a password for your Rolimons account; don't share it.\n"
-            )
-            self.json_handler.list_cookies()
-            index = self.cli.input_prompt(
-                "Number of the account (Press enter to stop)"
-            ).strip()
-            if not index:
-                break
-            if not index.isdigit():
-                self.cli.print_error(f"Invalid input: '{index}' is not a number.")
-                continue
-
-            value = self.cli.input_prompt(
-                f"Paste the {COOKIE_NAME} cookie (type remove to delete it, enter to cancel)"
-            ).strip()
-            if not value:
-                continue
-            try:
-                if value.lower() == "remove":
-                    if self.json_handler.set_rolimons_cookie(int(index) - 1, None):
-                        self.cli.print_success("Rolimons cookie removed.")
-                    continue
-                try:
-                    check_rolimons_cookie(value)
-                except RolimonsCookieInvalid as e:
-                    self.cli.print_error(f"Rolimons refused that cookie: {e}")
-                    self.cli.input_prompt("Press enter to continue")
-                    continue
-                except (RolimonsError, NetworkError) as e:
-                    self.cli.print_error(
-                        f"Couldn't check it with Rolimons ({e}), saving it anyway."
-                    )
-                if self.json_handler.set_rolimons_cookie(int(index) - 1, value):
-                    self.cli.print_success("Rolimons cookie saved.")
-            except TradebotError as e:
-                self.cli.print_error(f"Couldn't update cookies.json: {e}")
-                break
 
     def toggle_accounts(self):
         while True:

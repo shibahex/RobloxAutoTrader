@@ -9,7 +9,7 @@ def restore_child_library_path(environ=os.environ, frozen=None):
     """
     The packaged Linux build points LD_LIBRARY_PATH at its own bundled
     libraries. Programs the bot starts (sh to clear the screen, Firefox,
-    Sober...) inherit that and can crash, e.g. "sh: symbol lookup error".
+    Waydroid...) inherit that and can crash, e.g. "sh: symbol lookup error".
     Put back the user's own value (PyInstaller saves it as LD_LIBRARY_PATH_ORIG).
     The bot itself keeps working: the library path is only read when a
     program starts.
