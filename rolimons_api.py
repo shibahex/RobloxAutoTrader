@@ -143,7 +143,11 @@ class RolimonAPI:
         self.scanned_items_for_owners = {}
         # print(self.config.filter_users)
 
-    def return_item_to_scan(self) -> Item:
+    def return_item_to_scan(self, skip=()) -> Item:
+        """
+        A random item to find owners of.
+        skip: ids of items whose owners were all read already.
+        """
         minimum_value = self.config.scan_items["Minimum_Value_of_Item"]
         minimum_rap = self.config.scan_items["Minimum_Rap_of_Item"]
         minimum_owners = self.config.scan_items["Minimum_Owners_of_Item"]
@@ -180,10 +184,21 @@ class RolimonAPI:
             )
         ]
 
+        def unread(items):
+            return [i for i in items if str(i.get("original_asset_id")) not in skip]
+
+        filtered_items = unread(filtered_items)
+
         if self.config.debug["show_scanning_users"]:
             log(f"[OWNERS] Picking a random item out of {len(filtered_items)}", dontPrint=True)
 
         if not filtered_items:
+            if skip:
+                raise NoItemsToScan(
+                    "Every owner of every item that matches your filters was read "
+                    "already. They're read again after Remember Scanned Owners Days, "
+                    "or loosen the [Scan Items] filters"
+                )
             raise NoItemsToScan(
                 f"No items match the [Scan Items] filters (scan type {scan_type}); loosen them in config.cfg"
             )
@@ -265,6 +280,7 @@ class RolimonAPI:
         minimum_daily_sales = self.config.filter_items["MinDailySales"]
         max_sales_gap = self.config.filter_items["MaxSalesGap"]
         rap_algo_for_valued = self.config.trading["Rap_Algo_For_Valued"]
+        check_valued = self.config.projected_detection.get("Check_Valued_Items", False)
         for item in inventory:
             asset_id = inventory[item]["item_id"]
             if asset_id not in self.item_data:
@@ -322,7 +338,7 @@ class RolimonAPI:
                     rap_algo_value = 0
                 elif mode != "rap_algo":
                     log(
-                        "[CONFIG] RAP Algorithm for Valued Items isn't set right, using rap_algo"
+                        "[CONFIG] Algorithm For Valued Items isn't set right, using rap_algo"
                     )
 
             if not is_self:
@@ -336,6 +352,9 @@ class RolimonAPI:
                     and sale_gap is not None
                     and float(sale_gap) > max_sales_gap
                 )
+                # [Projected] Check Valued Items off: valued items never count
+                if is_projected and value != 0 and not check_valued:
+                    is_projected = False
                 if (
                     is_projected
                     or item_volume is None

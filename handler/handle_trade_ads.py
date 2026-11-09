@@ -1,5 +1,6 @@
 """
-Posts Rolimons trade ads for accounts that have a Rolimons cookie.
+Posts Rolimons trade ads for accounts that have a Rolimons cookie
+(the bot gets it itself, see handler/rolimons_login.py).
 
 Rolimons doesn't publish docs for this API; it's the one rolimons.com uses
 when you post an ad. Errors are logged with Rolimons' own message, so a format
@@ -38,6 +39,8 @@ OUTBOUND_FALLBACK = "highest_value"
 MAX_ITEMS_PER_SIDE = 4
 # Rolimons only lets an account post one ad every 15 minutes
 MIN_MINUTES_BETWEEN_ADS = 15
+# A refused cookie is replaced by logging in again at most this often per account
+RELOGIN_SECONDS = 60 * 60
 # Rolimons error codes for a missing / wrong verification cookie
 COOKIE_ERROR_CODES = (4, 5)
 
@@ -142,23 +145,15 @@ def post_trade_ad(rolimons_cookie: str, ad: dict, session=requests) -> None:
     raise TradeAdRejected(message)
 
 
-def check_rolimons_cookie(rolimons_cookie: str, session=requests) -> None:
-    """
-    Asks Rolimons if the cookie is valid by sending an empty ad, which can't be
-    posted. Raises RolimonsCookieInvalid if Rolimons refuses the cookie.
-    """
-    try:
-        post_trade_ad(rolimons_cookie, {}, session)
-    except TradeAdRejected:
-        pass  # the cookie was accepted; the empty ad wasn't
-
-
 class TradeAdPoster:
     """Posts an ad for each account with a Rolimons cookie every few minutes."""
 
-    def __init__(self, settings: dict, session=requests):
+    def __init__(self, settings: dict, session=requests, login=None):
+        """login(account) -> bool: gets the account a new Rolimons cookie."""
         self.settings = settings
         self.session = session
+        self.login = login
+        self.last_login = {}  # account id -> unix time of the last re-login
         self.next_post = {}  # account id -> unix time the next ad is due
         self.bad_cookie = set()  # account ids whose cookie Rolimons refused
         self.advertised = {}  # account id -> outbound trade ids already advertised
@@ -195,10 +190,21 @@ class TradeAdPoster:
         try:
             post_trade_ad(cookie, ad, self.session)
         except RolimonsCookieInvalid as e:
+            log(
+                f"[TRADE ADS] Rolimons refused {account.username}'s cookie ({e}), "
+                "logging in again",
+                severityNum=2,
+            )
+            recent = now - self.last_login.get(key, -RELOGIN_SECONDS) < RELOGIN_SECONDS
+            if self.login is not None and not recent:
+                self.last_login[key] = now
+                if self.login(account):
+                    self.next_post[key] = now  # post with the new cookie next round
+                    return False
             self.bad_cookie.add(key)
             log(
-                f"[TRADE ADS] Rolimons refused {account.username}'s cookie ({e}). "
-                "Update it in Account Manager > Rolimons Cookies.",
+                f"[TRADE ADS] No more ads for {account.username}: couldn't log "
+                "into Rolimons",
                 severityNum=3,
             )
             return False
@@ -223,7 +229,7 @@ class TradeAdPoster:
             if missing and account.account_inventory:
                 log(
                     f"[TRADE ADS] {account.username} doesn't own {missing} "
-                    "(or they're on hold / in NFT), leaving them out",
+                    "(or they're on hold / in Never Give), leaving them out",
                     dontPrint=True,
                 )
             return offer, request

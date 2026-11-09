@@ -10,7 +10,8 @@ import rolimons_api
 from handler.handle_requests import RequestsHandler
 from handler.counter_history import CounterHistory, trade_signature
 from handler.handle_discord import DiscordHandler
-from handler.handle_config import ConfigHandler
+from handler.handle_config import ConfigHandler, on_item_list
+from handler.owner_pages import OwnerPages
 from handler.handle_json import JsonHandler
 from handler.handle_2fa import AuthHandler
 from trade_algorithm import (
@@ -50,6 +51,9 @@ SEND_TRADE_ATTEMPTS = 3
 # Outbound checker re-scans an item's price history if it's older than this
 OUTBOUND_RESCAN_AGE_SECONDS = 6 * 60 * 60
 SECONDS_PER_DAY = 86400
+# account id -> {trade id: [config fingerprint, sent at]} for trades the bot sent
+SENT_CONFIGS_FILE = "outbound_sent_configs.json"
+_sent_configs_lock = threading.Lock()
 
 # Roblox trade error codes
 TRADE_CODE_ITEMS_UNAVAILABLE = 12
@@ -76,10 +80,10 @@ def parse_created(created) -> float | None:
 
 def price_swing_is_projected(current, past, max_rise, max_drop) -> bool:
     """
-    [Projected Detection] Maximum/Minimum Graph Difference. Compares one past
-    day's price with today's:
-      max_rise  how far BELOW today a past day can be (price went up since)
-      max_drop  how far ABOVE today a past day can be, as a negative number
+    [Projected] Max Price Rise / Max Price Drop. Compares the typical price
+    (see typical_price) with today's:
+      max_rise  how far BELOW today it can be (price went up since)
+      max_drop  how far ABOVE today it can be, as a negative number
     Between -1 and 1 = a share of today's price (0.4 = 40%); otherwise Robux.
     None skips that direction. Defaults 0.4 / -0.4.
     """
@@ -90,6 +94,19 @@ def price_swing_is_projected(current, past, max_rise, max_drop) -> bool:
     if max_rise is not None and change(max_rise) > max_rise:
         return True
     return max_drop is not None and change(max_drop) < max_drop
+
+
+def typical_price(prices) -> float | None:
+    """
+    The median of the daily prices: what the item usually sells for. One-day
+    spikes or dips (a single big sale) don't move it, so an item whose price
+    went back to normal isn't projected.
+    """
+    prices = sorted(prices)
+    if not prices:
+        return None
+    middle = len(prices) // 2
+    return prices[middle] if len(prices) % 2 else (prices[middle - 1] + prices[middle]) / 2
 
 
 class RobloxAPI:
@@ -142,11 +159,8 @@ class RobloxAPI:
             self.auth_handler = AuthHandler()
             self.account_id, self.username = self.fetch_userid_and_name()
 
-            user_config = self.account_configs.get_config(str(self.account_id))
-            if user_config:
-                self.config.trading = user_config
-            else:
-                pass
+            # This account's own settings over config.cfg's
+            self.account_configs.apply(self.config, self.account_id)
             self.trade_maker = TradeMaker(config=self.config)
             self.outbound_trader = TradeMaker(
                 config=self.config, is_outbound_checker=True
@@ -360,9 +374,9 @@ class RobloxAPI:
                     is_self = True
                     nft_list = self.config.filter_items["NFT"]
 
-                    if nft_list and itemId in nft_list:
+                    if on_item_list(itemId, nft_list):
                         if self.config.debug["show_scanning_inventory"]:
-                            log(f"[INVENTORY] {itemId} is in your NFT list, skipping it")
+                            log(f"[INVENTORY] {itemId} is in your Never Give list, skipping it")
                         continue
 
                     inventory[uaid] = {
@@ -410,14 +424,14 @@ class RobloxAPI:
                         continue
 
                     nfr_list = self.config.filter_items["NFR"]
-                    if itemId not in nfr_list:
+                    if not on_item_list(itemId, nfr_list):
                         inventory[uaid] = {
                             "item_id": itemId,
                             "collectibleItemId": collectibleItemId,
                         }
                     else:
                         if self.config.debug["show_scanning_inventory"]:
-                            log(f"[INVENTORY] {itemId} is in your NFR list, skipping it")
+                            log(f"[INVENTORY] {itemId} is in your Never Receive list, skipping it")
 
         minimum_items = self.config.filter_users["Minimum_Total_Items"]
         if not is_self:
@@ -531,36 +545,35 @@ class RobloxAPI:
 
     def handle_inbounds(self, accept=True, counter=True) -> dict:
         """
-        Goes through every inbound trade:
-          - accept: accepts it if it passes this account's trading config
-          - counter: counters it unless it's already a win in overall value
-        Returns how many were accepted/countered/kept.
+        Goes through every inbound trade in three steps:
+          1. scan: load every inbound and check which ones pass the config
+          2. accept: accept the passing ones biggest overall win first, since
+             accepting one usually moves items the other inbounds asked for
+          3. counter: keep, counter or decline the ones that weren't accepted
+        Returns how many were accepted/countered/declined/kept.
         A TradeLimit stops countering but accepting carries on; it's re-raised
         at the end so the caller can record the limit. CookieInvalid is raised
         right away; other errors only skip the trade they happened on.
         """
+        results = {"accepted": 0, "countered": 0, "declined": 0, "kept": 0}
+        if not accept and not counter:
+            return results
         trades = self.get_trades(
             "https://trades.roblox.com/v1/trades/inbound?limit=100&sortOrder=Desc"
         )
-        results = {"accepted": 0, "countered": 0, "declined": 0, "kept": 0}
-        trade_limit = None
+
+        scanned = []
         for trade_info in trades.values():
-            if not accept and not counter:
-                break
             trade_id = trade_info["trade_id"]
             try:
-                outcome = self._handle_one_inbound(
-                    trade_id,
-                    trade_info["user_id"],
-                    accept,
-                    counter,
-                    created=parse_created(trade_info.get("created")),
+                scanned.append(
+                    self._scan_inbound(
+                        trade_id,
+                        trade_info["user_id"],
+                        accept,
+                        created=parse_created(trade_info.get("created")),
+                    )
                 )
-            except exceptions_types.TradeLimit as e:
-                log(f"[INBOUND] Trade limit hit, only accepting from now on: {e}")
-                trade_limit = e
-                counter = False
-                continue
             except CookieInvalid:
                 raise
             except TradebotError as e:
@@ -568,25 +581,45 @@ class RobloxAPI:
                     f"[INBOUND] Skipping trade {trade_id}: {short_error(e)}",
                     severityNum=2,
                 )
-                continue
-            if outcome in results:
-                results[outcome] += 1
+
+        leftover = self._accept_best_inbounds(scanned, results) if accept else scanned
 
         if results["accepted"]:
             try:
                 self.refresh_self_inventory()
             except InventoryUnavailable as e:
-                log(f"[INBOUND] Couldn't reload inventory after accepting: {e}", severityNum=2)
+                log(
+                    f"[INBOUND] Couldn't reload inventory after accepting: {e}",
+                    severityNum=2,
+                )
+
+        trade_limit = None
+        for inbound in leftover:
+            try:
+                outcome = self._counter_inbound(inbound, counter)
+            except exceptions_types.TradeLimit as e:
+                log(f"[INBOUND] Trade limit hit, not countering anymore: {e}")
+                trade_limit = e
+                counter = False
+                continue
+            except CookieInvalid:
+                raise
+            except TradebotError as e:
+                log(
+                    f"[INBOUND] Skipping trade {inbound['trade_id']}: {short_error(e)}",
+                    severityNum=2,
+                )
+                continue
+            if outcome in results:
+                results[outcome] += 1
 
         if trade_limit is not None:
             raise trade_limit
         return results
 
-    def _handle_one_inbound(
-        self, trade_id, trader_id, accept, counter, created=None
-    ) -> str:
+    def _scan_inbound(self, trade_id, trader_id, accept, created=None) -> dict:
         """
-        Returns "accepted", "countered", "declined", "kept" or "failed".
+        Loads one inbound and works out whether it can be accepted.
         created: when they sent it (a timestamp), to spot instant counter-backs.
         """
         trade_json = read_json(
@@ -595,7 +628,6 @@ class RobloxAPI:
             )
         )
         trade = self.format_trade_api(trade_json)
-        reason = "Accept Valid Trades is off"
         reply = self.counter_history.note_inbound(trader_id, trade_id, created)
         if reply is not None:
             log(
@@ -603,6 +635,7 @@ class RobloxAPI:
                 dontPrint=True,
             )
 
+        reason = "Accept Good Trades is off"
         if accept:
             reason = self._inbound_reject_reason(trade)
             # Accepting can't be undone: make sure prices are fresh, then re-check
@@ -611,26 +644,96 @@ class RobloxAPI:
             ):
                 trade = self.format_trade_api(trade_json)
                 reason = self._inbound_reject_reason(trade)
+            if reason is not None:
+                log(
+                    f"[INBOUND] Not accepting {trade_id}: {reason_text(reason)}",
+                    dontPrint=True,
+                )
+        return {
+            "trade_id": trade_id,
+            "trader_id": trader_id,
+            "trade": trade,
+            "instance_ids": self._our_instance_ids(trade_json),
+            "reason": reason,
+        }
 
-            if reason is None:
-                if self._accept_trade(trade_id):
-                    log(
-                        f"[INBOUND] Accepted trade {trade_id} from {trader_id} "
-                        f"(overall {self._overall_profit(trade):+})"
-                    )
-                    if self.post_trade_webhook(
-                        "Completed_Webhook",
-                        trade,
-                        "Accepted an inbound trade ({profit} profit)",
-                        color=2,
-                    ):
-                        self.posted_accepts.add(str(trade_id))
-                    return "accepted"
-                return "failed"
+    def _our_instance_ids(self, trade_json) -> set:
+        """Instance ids of the items we'd give in this trade (empty if Roblox left them out)."""
+        account_id = str(getattr(self, "account_id", None))
+        for key in ("participantAOffer", "participantBOffer"):
+            offer = trade_json.get(key) or {}
+            if str((offer.get("user") or {}).get("id")) == account_id:
+                return {
+                    str(item["collectibleItemInstanceId"])
+                    for item in offer.get("items") or []
+                    if item.get("collectibleItemInstanceId")
+                }
+        return set()
+
+    def _accept_best_inbounds(self, scanned, results) -> list:
+        """
+        Accepts the inbounds that passed the config, biggest overall win first.
+        Skips ones that need an item a better trade already took, and re-checks
+        duplicate limits as items come in. Returns the inbounds left to counter.
+        """
+        passing = [i for i in scanned if i["reason"] is None]
+        passing.sort(key=lambda i: self._overall_profit(i["trade"]), reverse=True)
+        leftover = [i for i in scanned if i["reason"] is not None]
+        given_away = set()
+
+        for inbound in passing:
+            trade_id, trade = inbound["trade_id"], inbound["trade"]
+            if inbound["instance_ids"] & given_away:
+                log(
+                    f"[INBOUND] Skipping {trade_id}: a bigger win already took "
+                    "items it asks for",
+                    dontPrint=True,
+                )
+                continue
+            if results["accepted"]:  # items we just received can hit duplicate limits
+                reason = self._inbound_reject_reason(trade)
+                if reason is not None:
+                    inbound["reason"] = reason
+                    leftover.append(inbound)
+                    continue
+            try:
+                if not self._accept_trade(trade_id):
+                    continue
+            except CookieInvalid:
+                raise
+            except TradebotError as e:
+                log(
+                    f"[INBOUND] Skipping trade {trade_id}: {short_error(e)}",
+                    severityNum=2,
+                )
+                continue
+
+            results["accepted"] += 1
+            given_away |= inbound["instance_ids"]
+            # same counting as fetch_inventory: first copy is 0, each extra +1
+            for item_id in map(str, trade["their_side_item_ids"]):
+                owned = self.self_duplicates.get(item_id)
+                self.self_duplicates[item_id] = 0 if owned is None else owned + 1
             log(
-                f"[INBOUND] Not accepting {trade_id}: {reason_text(reason)}",
-                dontPrint=True,
+                f"[INBOUND] Accepted trade {trade_id} from {inbound['trader_id']} "
+                f"(overall {self._overall_profit(trade):+})"
             )
+            if self.post_trade_webhook(
+                "Completed_Webhook",
+                trade,
+                "Accepted an inbound trade ({profit} profit)",
+                color=2,
+            ):
+                self.posted_accepts.add(str(trade_id))
+        return leftover
+
+    def _counter_inbound(self, inbound, counter) -> str:
+        """
+        Keeps, counters or declines an inbound that wasn't accepted.
+        Returns "countered", "declined", "kept" or "failed".
+        """
+        trade_id, trader_id = inbound["trade_id"], inbound["trader_id"]
+        trade, reason = inbound["trade"], inbound["reason"]
 
         profit = self._overall_profit(trade)
         receiving_projected = self._projected_items(trade["their_side_item_ids"])
@@ -727,16 +830,16 @@ class RobloxAPI:
 
         for item_id in set(map(str, item_ids)):
             item = self.rolimon.item_data.get(item_id) or {}
-            if item_id in nfr:
-                return f"{item_id} is on the NFR list"
+            if on_item_list(item_id, nfr):
+                return f"{item_id} is on the Never Receive list"
             if item.get("asset_type") == "asset:18" and not trading.get(
                 "TradeForFaces"
             ):
-                return f"{item_id} is a face (Trade For Faces is off)"
+                return f"{item_id} is a face (Receive Faces is off)"
             if item.get("asset_type") == "asset:19" and not trading.get(
                 "TradeForGears"
             ):
-                return f"{item_id} is a gear (Trade For Gears is off)"
+                return f"{item_id} is a gear (Receive Gears is off)"
             demand = item.get("demand")
             if (
                 isinstance(min_demand, int)
@@ -864,7 +967,7 @@ class RobloxAPI:
             return (
                 f"they countered back within {seconds / 60:g} minutes {streak} times "
                 "in a row, "
-                "likely a bot (Instant Replies To Call It A Bot)"
+                "likely a bot (Bot Replies)"
             )
         return None
 
@@ -1069,6 +1172,7 @@ class RobloxAPI:
                 ) from e
             log("[TRADING] Trade sent", dontPrint=True)
             self.note_sent_trade(trade_send)
+            self._remember_sent_config(trade_id)
             return trade_id
 
         raise last_error or TradeRejected(message=f"Couldn't send trade to {trader_id}")
@@ -1379,6 +1483,7 @@ class RobloxAPI:
         )
 
         self.config_changed_at = self._config_changed_at()
+        self._forget_sent_configs(trades, check_started)
 
         with self.outbound_lock:
             # Forget trades that were accepted, declined or expired
@@ -1474,10 +1579,14 @@ class RobloxAPI:
         use_rolimons_flag = self.config.projected_detection[
             "Detect_Rolimons_Projecteds"
         ]
+        check_valued = self.config.projected_detection.get("Check_Valued_Items", False)
         projected_data = self.rolimon.projected_json.read_cached()
         projected = []
         for item_id in map(str, item_ids):
-            rolimons_flag = (self.rolimon.item_data.get(item_id) or {}).get("projected")
+            item = self.rolimon.item_data.get(item_id) or {}
+            if not check_valued and item.get("rolimons_value", item.get("value")):
+                continue  # valued: priced by Rolimons ([Projected] Check Valued Items)
+            rolimons_flag = item.get("projected")
             scanned_flag = (projected_data.get(item_id) or {}).get("is_projected")
             if scanned_flag or (use_rolimons_flag and rolimons_flag):
                 projected.append(item_id)
@@ -1487,6 +1596,7 @@ class RobloxAPI:
         """Hash of every setting the outbound checker or trade generator uses."""
         settings = {
             "trading": self.config.trading,
+            "inbound_gains": (getattr(self.config, "inbounds", None) or {}).get("Gains"),
             "filter_items": self.config.filter_items,
             "projected_detection": self.config.projected_detection,
         }
@@ -1512,10 +1622,53 @@ class RobloxAPI:
             log(f"[OUTBOUND] Config changed for {self.username}", dontPrint=True)
         return entry["changed_at"]
 
-    def _sent_before_config_change(self, created) -> bool:
-        """True if the option is on and this trade predates the current config."""
+    def _remember_sent_config(self, trade_id):
+        """Saves which config a trade was sent under (see _sent_before_config_change)."""
+        try:
+            with _sent_configs_lock:
+                state_file = JsonHandler(SENT_CONFIGS_FILE)
+                state = state_file.read_data()
+                state.setdefault(str(self.account_id), {})[str(trade_id)] = [
+                    self._config_fingerprint(),
+                    time.time(),
+                ]
+                state_file.write_data(state)
+        except (OSError, TradebotError) as e:
+            log(f"[OUTBOUND] Couldn't save the config of trade {trade_id}: {e}", dontPrint=True)
+
+    def _forget_sent_configs(self, open_trades, checked_at):
+        """Drops saved trades that were sent before checked_at and aren't open anymore."""
+        open_ids = {str(trade_id) for trade_id in open_trades}
+        try:
+            with _sent_configs_lock:
+                state_file = JsonHandler(SENT_CONFIGS_FILE)
+                state = state_file.read_data()
+                sent = state.get(str(self.account_id)) or {}
+                kept = {
+                    trade_id: entry
+                    for trade_id, entry in sent.items()
+                    if trade_id in open_ids or entry[1] >= checked_at
+                }
+                if len(kept) != len(sent):
+                    state[str(self.account_id)] = kept
+                    state_file.write_data(state)
+        except (OSError, TradebotError, TypeError, IndexError) as e:
+            log(f"[OUTBOUND] Couldn't clean up {SENT_CONFIGS_FILE}: {e}", dontPrint=True)
+
+    def _sent_before_config_change(self, created, trade_id=None) -> bool:
+        """
+        True if the option is on and this trade was sent under an older config.
+        Trades the bot sent are matched by the config they were sent with, so a
+        trade sent by a bot still running the old config right after a restart
+        counts as old. Other trades (sent by hand) go by when they were sent.
+        """
         if not self.config.outbound["Only_Cancel_Losing_After_Config_Change"]:
             return False
+        if trade_id is not None:
+            sent = JsonHandler(SENT_CONFIGS_FILE).read_cached().get(str(self.account_id)) or {}
+            entry = sent.get(str(trade_id))
+            if entry:
+                return entry[0] != self._config_fingerprint()
         if created is None or self.config_changed_at is None:
             return False
         return created < self.config_changed_at
@@ -1553,16 +1706,24 @@ class RobloxAPI:
         ):
             formatted_trade = self.format_trade_api(trade_json)
 
-        # Projected = price is being manipulated and likely to drop
-        projected = self._projected_items(formatted_trade["their_side_item_ids"])
-        if projected:
-            if self._cancel_outbound(trade_id):
-                log(f"[OUTBOUND] Cancel trade: receiving projected {projected}")
-                return True
-            return False
+        # Projected = price is being pushed up and likely to drop. Off, the
+        # trade is judged on the RAP algorithm value like any other.
+        settings = self.config.outbound
+        for side, key, default, word in (
+            ("their_side_item_ids", "Cancel_Receiving_Projected", True, "receiving"),
+            ("self_side_item_ids", "Cancel_Sending_Projected", False, "sending"),
+        ):
+            if not settings.get(key, default):
+                continue
+            projected = self._projected_items(formatted_trade[side])
+            if projected:
+                if self._cancel_outbound(trade_id):
+                    log(f"[OUTBOUND] Cancelled a trade: {word} projected {projected}")
+                    return True
+                return False
 
         # Sent under an older config: only a real loss is a reason to cancel
-        if self._sent_before_config_change(created):
+        if self._sent_before_config_change(created, trade_id):
             profit = (
                 formatted_trade["their_overall_value"]
                 - formatted_trade["self_overall_value"]
@@ -1732,17 +1893,28 @@ class RobloxAPI:
             )
             return
 
-        # Instantiate and process the analyzer
-        result = SalesVolumeAnalyzer(sales_data, volume_data, item_id).process()
+        # RAP Algorithm, daily sales and sales gaps only use recent sales
+        # ([Items] Sales History Days), so old prices don't skew them
+        history_days = self.config.filter_items.get("Sales_History_Days") or 90
+        cutoff = time.time() - history_days * SECONDS_IN_DAY
+        recent_sales = [p for p in sales_data if p["date"] >= cutoff]
+        recent_volume = [p for p in volume_data if p["date"] >= cutoff]
+
+        result = SalesVolumeAnalyzer(recent_sales, recent_volume, item_id).process()
+        if not result["value"]:
+            # Too few recent sales to find any dips: use the whole history
+            # rather than calling the item worth 0
+            recent_volume = volume_data
+            result = SalesVolumeAnalyzer(sales_data, volume_data, item_id).process()
 
         result_value = result["value"]
         result_volume = result["volume"]
         result_timestamp = result["timestamp"]
 
-        if len(volume_data) > 1:
+        if len(recent_volume) > 1:
             timestamp_gaps = [
-                volume_data[i]["date"] - volume_data[i + 1]["date"]
-                for i in range(len(volume_data) - 1)
+                recent_volume[i]["date"] - recent_volume[i + 1]["date"]
+                for i in range(len(recent_volume) - 1)
             ]
             average_gap = (sum(timestamp_gaps) / len(timestamp_gaps)) / SECONDS_IN_DAY
         else:
@@ -1758,15 +1930,20 @@ class RobloxAPI:
             if self.parse_date(point["date_string"]) > three_months_ago
         ]
 
-        if current_price > 0:
+        typical = typical_price([int(point["value"]) for point in recent_data_points])
+        if current_price > 0 and typical:
             max_rise = config_projected.get("MaximumGraphDifference")
             max_drop = config_projected.get("MinimumGraphDifference")
-            for data in recent_data_points:
-                if price_swing_is_projected(
-                    current_price, int(data["value"]), max_rise, max_drop
-                ):
-                    is_projected = True
-                    break
+            rap = self.rolimon.item_data[item_id].get("rap")
+            # Selling far above its usual price: being pushed up right now
+            pushed_up = price_swing_is_projected(current_price, typical, max_rise, None)
+            # Selling far below its usual price only matters while RAP is still
+            # up there too; once RAP has come down with the price, it's settled
+            crashed = price_swing_is_projected(current_price, typical, None, max_drop) and (
+                not rap or price_swing_is_projected(current_price, rap, None, max_drop)
+            )
+            if pushed_up or crashed:
+                is_projected = True
 
         data = self.rolimon.projected_json.read_data()
         data.update(
@@ -1786,72 +1963,119 @@ class RobloxAPI:
         )
         self.rolimon.projected_json.write_data(data)
 
+    def owner_pages(self) -> OwnerPages:
+        """Where the owner scan of each item got to ([Getting Owners of Items])."""
+        return OwnerPages(self.config.scan_items.get("Remember_Scanned_Owners_Days", 3))
+
+    # bundle id -> its collectible item id (they don't change)
+    _bundle_collectible_ids: dict = {}
+
+    def bundle_collectible_id(self, bundle_id) -> str | None:
+        """The bundle's collectibleItemId (for its resellers), or None."""
+        cached = self._bundle_collectible_ids.get(bundle_id)
+        if cached:
+            return cached
+        try:
+            details = read_json(
+                self.request_handler.requestAPI(
+                    f"https://catalog.roblox.com/v1/bundles/{bundle_id}/details"
+                )
+            )
+        except CookieInvalid:
+            raise
+        except TradebotError as e:
+            log(f"[OWNERS] Couldn't look up bundle {bundle_id}: {e}", severityNum=2)
+            return None
+        collectible_id = (details.get("collectibleItemDetail") or {}).get("collectibleItemId")
+        if not collectible_id:
+            log(f"[OWNERS] Bundle {bundle_id} isn't a limited, skipping it", dontPrint=True)
+            return None
+        self._bundle_collectible_ids[bundle_id] = collectible_id
+        return collectible_id
+
     def get_active_traders(self, item, owners):
         """
-        Scan atleast 3 pages of owners and append new owners
-        If less than 5 owners isn't found it will contintue to the next pages
+        Reads the item's next owner pages ([Getting Owners of Items] Owner
+        Pages Per Scan) and adds every owner on them who got it recently.
+        Bundles: their resellers instead (Roblox doesn't list bundle owners).
+        Carries on from the page the last scan of this item stopped at
+        (owner_pages.OwnerPages), so the same owners aren't read twice.
+        Returns owners, or None if Roblox wouldn't list them.
         """
-        # TODO: Maybe add a date to recently scraped owners in projecteds.json to  avoid scraping the same item
-        next_page_cursor = ""
+        settings = self.config.scan_items
+        pages_per_scan = max(1, settings.get("Owner_Pages_Per_Scan") or 2)
+        recent = timedelta(days=settings.get("Recent_Owner_Days") or 7)
+        memory = self.owner_pages()
+
         item_id = item["original_asset_id"]
+        page_cursor = memory.start(item_id)
+        if page_cursor is None:
+            log(f"[OWNERS] Already read every owner of {item_id}, skipping it", dontPrint=True)
+            return owners
 
-        while len(owners) < 20:
-            if next_page_cursor is None:
-                break
-            inventory_api = f"https://inventory.roblox.com/v2/assets/{
-                item_id
-            }/owners?sortOrder=Asc&cursor={next_page_cursor}&limit=100"
+        bundle = str(item.get("item_id", "")).startswith("2:")
+        if bundle:
+            # Roblox can't list a bundle's owners: use the people reselling it
+            # (like OTB does), found through its collectible id
+            collectible_id = self.bundle_collectible_id(item_id)
+            if not collectible_id:
+                return None
 
+        for _ in range(pages_per_scan):
+            inventory_api = (
+                f"https://apis.roblox.com/marketplace-sales/v1/item/{collectible_id}"
+                f"/resellers?cursor={page_cursor}&limit=100"
+                if bundle
+                else f"https://inventory.roblox.com/v2/assets/{item_id}/owners"
+                f"?sortOrder=Asc&cursor={page_cursor}&limit=100"
+            )
             try:
                 page = read_json(self.request_handler.requestAPI(inventory_api))
-                next_page_cursor = page.get("nextPageCursor")
-                assets = page.get("data") or []
             except CookieInvalid:
                 raise
             except (Forbidden, NotFound):
                 return None
             # TODO: maybe resolve faces because thier ItemID makes this response fail
             except TradebotError as e:
+                if page_cursor:
+                    memory.forget(item_id)  # maybe a stale cursor: start over next time
                 log(f"[OWNERS] Couldn't get owners of {item_id}: {e}", severityNum=2)
                 return None
 
-            for asset in assets:
+            now = datetime.now()
+            if bundle:
+                # Listing it for sale = active right now
+                for listing in page.get("data") or []:
+                    seller = listing.get("seller") or {}
+                    owner_id = seller.get("sellerId")
+                    if (
+                        not owner_id
+                        or seller.get("sellerType", "User") != "User"
+                        or int(owner_id) in self.all_cached_traders
+                        or owner_id in owners
+                    ):
+                        continue
+                    owners.append(owner_id)
+            for asset in [] if bundle else page.get("data") or []:
                 if not asset.get("owner") or not asset.get("updated"):
                     continue
-                # log(asset['owner'])
-                if int(asset["owner"]["id"]) in self.all_cached_traders:
-                    if self.config.debug["show_scanning_users"]:
-                        log("[OWNERS] Already traded with this player, skipping", dontPrint=True)
+                owner_id = asset["owner"]["id"]
+                if int(owner_id) in self.all_cached_traders or owner_id in owners:
                     continue
-                # else:
-                #     log("appending", asset['owner']['id'], "if date is good")
-                owner_since = asset["updated"]
+                # Got the item recently = likely still trading
+                got_it = datetime.fromisoformat(asset["updated"].replace("Z", "+00:00"))
+                if now - got_it.replace(tzinfo=None) < recent:
+                    owners.append(owner_id)
 
-                # Assuming owner_since is a string like "2024-11-15T12:00:00Z"
-                given_date = datetime.fromisoformat(owner_since.replace("Z", "+00:00"))
+            # Next time starts on the next page (None = every owner was read)
+            page_cursor = page.get("nextPageCursor")
+            memory.save(item_id, page_cursor)
+            if page_cursor is None:
+                break
 
-                # Remove timezone from given_date to make it naive
-                given_date_naive = given_date.replace(tzinfo=None)
-
-                # Get today's date and time (naive by default)
-                today = datetime.now()
-
-                # Calculate the difference between today and the given date
-                time_diff = today - given_date_naive
-
-                # If the owner has had the item for less than 7 days and is not already in the owners or all_cached_traders list, add them
-                if (
-                    time_diff < timedelta(days=7)
-                    and asset["owner"]["id"] not in owners
-                    and int(asset["owner"]["id"]) not in self.all_cached_traders
-                ):
-                    # log("Appending Active User")
-                    owners.append(asset["owner"]["id"])
         if self.config.debug["show_scanning_users"]:
             log(f"[OWNERS] Owners: {owners}")
         return owners
-
-
 # while True:
 #    hat = input("enter id > ")
 #    if RobloxAPI().is_projected(hat) == True:

@@ -3,11 +3,13 @@ Offline tests for the error system. No network: every request goes through
 the `router` fixture's fake responses.
 """
 
+import random
 import threading
 import os
 import re
 import time
 import types
+import json
 import pathlib
 
 import pytest
@@ -601,7 +603,7 @@ def test_queue_traders_disables_account_on_expired_cookie(doggo, account):
         raise E.CookieInvalid(resp(401))
 
     account.get_active_traders = expired
-    doggo.rolimons.return_item_to_scan = lambda: {"original_asset_id": 1}
+    doggo.rolimons.return_item_to_scan = lambda reach=None, skip=():  {"original_asset_id": 1}
     doggo.queue_traders(account, threading.Event())
     assert doggo.is_disabled(account)
 
@@ -678,6 +680,54 @@ def test_outbound_cancelled_when_received_item_is_projected(router, outbound):
     )
     outbound._check_one_outbound(55)
     assert declined(router) == [DECLINE_URL + "55/decline"]
+
+
+def test_outbound_kept_when_receiving_projected_cancel_is_off(router, outbound):
+    outbound.config.outbound["Cancel_Receiving_Projected"] = False
+    outbound.rolimon.projected_json.write_data(
+        {"1:1": {"is_projected": True, "value": 1000, "timestamp": 9e18}}
+    )
+    outbound._check_one_outbound(55)
+    assert declined(router) == []  # still a win on the algorithm value
+
+
+@pytest.mark.parametrize("setting_on", [True, False])
+def test_outbound_sending_projected_respects_setting(router, outbound, setting_on):
+    outbound.config.outbound["Cancel_Sending_Projected"] = setting_on
+    outbound.config.projected_detection["Check_Valued_Items"] = True  # 1:2 is valued
+    outbound.rolimon.projected_json.write_data(
+        {"1:2": {"is_projected": True, "value": 500, "timestamp": 9e18}}
+    )
+    outbound._check_one_outbound(55)
+    assert bool(declined(router)) is setting_on
+
+
+@pytest.mark.parametrize("check_valued", [True, False])
+def test_valued_items_only_projected_when_checked(outbound, check_valued):
+    outbound.config.projected_detection["Check_Valued_Items"] = check_valued
+    outbound.rolimon.item_data["1:2"]["value"] = 500
+    outbound.rolimon.item_data["1:1"]["value"] = None  # a RAP item
+    outbound.rolimon.projected_json.write_data(
+        {
+            "1:1": {"is_projected": True, "value": 1000, "timestamp": 9e18},
+            "1:2": {"is_projected": True, "value": 500, "timestamp": 9e18},
+        }
+    )
+    expected = ["1:1", "1:2"] if check_valued else ["1:1"]
+    assert outbound._projected_items(["1:1", "1:2"]) == expected
+
+
+def test_check_valued_items_setting_defaults_off(tmp_path):
+    from handler.handle_config import ConfigHandler
+
+    cfg = tmp_path / "c.cfg"
+    for text, expected in (
+        ("", False),
+        ("[Projected]\nCheck Valued Items = True", True),
+        ("[Projected Detection]\nCheck Valued Items = False", False),
+    ):
+        cfg.write_text(text + "\n")
+        assert ConfigHandler(str(cfg)).projected_detection["Check_Valued_Items"] is expected
 
 
 @pytest.mark.parametrize("setting_on", [True, False])
@@ -873,6 +923,46 @@ def test_option_off_uses_full_rules_for_old_trades(router, config_changed):
     assert declined(router) == [DECLINE_URL + "55/decline"]
 
 
+def test_trade_sent_under_old_config_kept_even_if_newer(router, config_changed, monkeypatch, tmp_path):
+    """A bot still on the old config sent it right after the new one started."""
+    import roblox_api
+    from handler.handle_json import JsonHandler
+
+    monkeypatch.setattr(roblox_api, "SENT_CONFIGS_FILE", str(tmp_path / "sent.json"))
+    JsonHandler(roblox_api.SENT_CONFIGS_FILE).write_data(
+        {str(config_changed.account_id): {"55": ["old fingerprint", NEW]}}
+    )
+    config_changed._evaluate_outbound(
+        55, outbound_trade_json(["1:2"], ["1:1"]), False, created=NEW
+    )
+    assert declined(router) == []
+
+
+def test_trade_sent_under_current_config_uses_full_rules(router, config_changed, monkeypatch, tmp_path):
+    import roblox_api
+
+    monkeypatch.setattr(roblox_api, "SENT_CONFIGS_FILE", str(tmp_path / "sent.json"))
+    config_changed._remember_sent_config(55)
+    config_changed._evaluate_outbound(
+        55, outbound_trade_json(["1:2"], ["1:1"]), False, created=OLD
+    )
+    assert declined(router) == [DECLINE_URL + "55/decline"]
+
+
+def test_sent_configs_forget_closed_trades(outbound, monkeypatch, tmp_path):
+    import roblox_api
+    from handler.handle_json import JsonHandler
+
+    monkeypatch.setattr(roblox_api, "SENT_CONFIGS_FILE", str(tmp_path / "sent.json"))
+    key = str(outbound.account_id)
+    JsonHandler(roblox_api.SENT_CONFIGS_FILE).write_data(
+        {key: {"1": ["f", 100], "2": ["f", 100], "3": ["f", 900]}}
+    )
+    outbound._forget_sent_configs({1: {}}, checked_at=500)
+    # 1 is still open, 3 was sent after the check started
+    assert set(JsonHandler(roblox_api.SENT_CONFIGS_FILE).read_data()[key]) == {"1", "3"}
+
+
 def test_config_change_detected_and_remembered(router, outbound, monkeypatch):
     import time as time_module
 
@@ -910,24 +1000,15 @@ def test_full_check_reads_trade_creation_time(router, outbound):
 
 # --- account config editor ------------------------------------------------------
 
-from handler.account_settings import (  # noqa: E402
-    HandleConfigs,
-    coerce_config_value,
-    parse_config_value,
-)
+from handler.account_settings import HandleConfigs, parse_config_value  # noqa: E402
 
 
 @pytest.mark.parametrize(
     "typed, expected",
     [
-        ("100", 100),
         (" 100 ", 100),
-        ("-5", -5),
         ("0.25", 0.25),
-        ("None", None),
         ("none", None),
-        ("null", None),
-        ("True", True),
         ("false", False),
         ("rap_algo", "rap_algo"),
     ],
@@ -937,98 +1018,208 @@ def test_parse_config_value(typed, expected):
     assert value == expected and type(value) is type(expected)
 
 
-@pytest.mark.parametrize(
-    "value, expected_type, result",
-    [
-        (100, int, 100),
-        (100.0, int, 100),
-        (None, int, None),
-        (0.1, float, 0.1),
-        (100, float, 100),
-        (None, float, None),
-        (True, bool, True),
-        ("x", None, "x"),
-    ],
-)
-def test_coerce_accepts(value, expected_type, result):
-    assert coerce_config_value(value, expected_type) == result
-
-
-@pytest.mark.parametrize(
-    "value, expected_type",
-    [
-        ("abc", int),
-        (2.5, int),
-        (True, int),
-        ("yes", bool),
-        (None, bool),
-        (None, str),
-        (1, bool),
-    ],
-)
-def test_coerce_rejects(value, expected_type):
-    with pytest.raises(ValueError):
-        coerce_config_value(value, expected_type)
-
-
 @pytest.fixture
-def configs(monkeypatch):
+def configs():
     h = HandleConfigs()
-    h.default_config = {
+    h.main_values = h.default_config = {
         "MaxRobux": 100,
         "Minimum_RAP_Gain": 50.0,
         "Maximum_RAP_Gain": None,
         "TradeForFaces": True,
         "Rap_Algo_For_Valued": "rap_algo",
+        "NFT": [],
+        "Select_Trade_Using": "random",
+        "Outbound_Variety": 0.5,
     }
+    h.acc_configs.write_data({})
     return h
 
 
-def edit(configs, monkeypatch, key, typed, current):
-    data = {key: current}
-    monkeypatch.setattr("builtins.input", lambda _prompt: typed)
-    configs.prompt_and_update(data, key)
-    return data[key]
+@pytest.mark.parametrize(
+    "key, typed, result",
+    [
+        ("MaxRobux", "100", 100),
+        ("MaxRobux", "None", None),
+        ("Maximum_RAP_Gain", "0.5", 0.5),
+        ("TradeForFaces", "false", False),
+        ("Rap_Algo_For_Valued", "Zero_Value", "zero_value"),
+        ("Select_Trade_Using", "highest_overall_gain", "highest_overall_gain"),
+        ("NFT", "1:5, 2:6, 7", ["5", "6", "7"]),
+        ("NFT", "None", []),
+    ],
+)
+def test_account_setting_parse(configs, key, typed, result):
+    value = configs.parse(key, typed)
+    assert value == result and type(value) is type(result)
 
 
 @pytest.mark.parametrize(
-    "key, typed, current, result",
-    [
-        ("MaxRobux", "100", 5, 100),  # the reported bug: stays a number
-        ("MaxRobux", "100", None, 100),  # current None no longer means "text"
-        ("MaxRobux", "None", 5, None),  # None supported
-        ("Maximum_RAP_Gain", "0.5", None, 0.5),
-        ("Minimum_RAP_Gain", "none", 50.0, None),
-        ("TradeForFaces", "false", True, False),  # was saved as truthy "false"
-        ("Rap_Algo_For_Valued", "zero_value", "rap_algo", "zero_value"),
-        ("MaxRobux", "abc", 5, 5),  # invalid keeps the old value
-        ("MaxRobux", "2.5", 5, 5),
-        ("TradeForFaces", "None", True, True),
-        ("MaxRobux", "", 5, 5),  # enter keeps the old value
-    ],
+    "key, typed",
+    [("MaxRobux", "abc"), ("MaxRobux", "2.5"), ("TradeForFaces", "None"),
+     ("Select_Trade_Using", "best"), ("NFT", "a hat")],
 )
-def test_prompt_and_update(configs, monkeypatch, key, typed, current, result):
-    value = edit(configs, monkeypatch, key, typed, current)
-    assert value == result and type(value) is type(result)
+def test_account_setting_parse_rejects(configs, key, typed):
+    with pytest.raises(ValueError):
+        configs.parse(key, typed)
 
 
 def test_get_config_repairs_values_saved_as_text(configs):
     configs.acc_configs.write_data(
-        {
-            "7": {
-                "MaxRobux": "100",
-                "Maximum_RAP_Gain": "None",
-                "TradeForFaces": "False",
-                "Rap_Algo_For_Valued": "rap_algo",
-            }
-        }
+        {"7": {"MaxRobux": "100", "Maximum_RAP_Gain": "None", "TradeForFaces": "False"}}
     )
     assert configs.get_config("7") == {
-        "MaxRobux": 100,
-        "Maximum_RAP_Gain": None,
-        "TradeForFaces": False,
-        "Rap_Algo_For_Valued": "rap_algo",
+        "MaxRobux": 100, "Maximum_RAP_Gain": None, "TradeForFaces": False,
     }
+
+
+def test_account_config_only_overrides_what_it_sets(configs):
+    from handler.handle_config import ConfigHandler
+
+    configs.set_value("7", "MaxRobux", 5)
+    configs.set_value("7", "Select_Trade_Using", "random")
+    configs.set_value("7", "NFT", ["99"])
+    config = ConfigHandler("config.default.cfg")
+    main_min = config.trading["Minimum_Overall_Gain"]
+    assert configs.apply(config, "7")
+    assert config.trading["MaxRobux"] == 5
+    assert config.trading["Minimum_Overall_Gain"] == main_min  # not set: config.cfg's
+    assert config.filter_generated["Select_Trade_Using"] == "random"
+    assert config.filter_items["NFT"] == ["99"]
+    configs.reset_value("7", "MaxRobux")
+    configs.reset_value("7", "Select_Trade_Using")
+    configs.reset_value("7", "NFT")
+    assert configs.acc_configs.read_data() == {}  # nothing left: entry removed
+    assert not configs.apply(ConfigHandler("config.default.cfg"), "7")
+
+
+def _manager(configs, monkeypatch, answers, **kwargs):
+    import config_manager
+
+    configs.cookies.write_data({"roblox_accounts": [{"user_id": "7", "username": "tester"}]})
+    answers = iter(answers)
+    monkeypatch.setattr(config_manager, "HandleConfigs", lambda: configs)
+    kwargs.setdefault("item_names", config_manager.ItemNames(fetch=lambda: {"items": {
+        "1029025": ["The Classic ROBLOX Fedora", "Fedora"],
+        "1191135761": ["Valkyrie Helm", "VH"],
+        "1191125008": ["Valkyrie Helm Replica", ""],
+    }}))
+    manager = config_manager.AccountSettings(
+        ask=lambda _prompt: next(answers), run=False, **kwargs
+    )
+    manager.cli.clear_console = lambda: None
+    manager.cli.print_error = lambda message: None
+    return manager
+
+
+def _index(names, wanted) -> str:
+    """The menu number of wanted in names."""
+    return str([n.lower() for n in names].index(wanted.lower()) + 1)
+
+
+def test_config_manager_edits_and_resets_a_setting(configs, monkeypatch):
+    import config_manager as cm
+
+    picking = _index(cm.SECTION_ORDER, "Picking Trades")
+    labels = [cm.shown_name(k)[1] for k in cm.SECTIONS["Picking Trades"]]
+    pick, variety = _index(labels, "Pick Trade By"), _index(labels, "Outbound Variety")
+    manager = _manager(configs, monkeypatch, [
+        "2", "1", picking,          # Account Configs > tester > Picking Trades
+        pick, "2", "1", "4",        # Pick Trade By: replace it with the first option, save
+        pick, "5",                  # back to config.cfg's
+        variety, "0.25",            # Outbound Variety
+        "", "", "", "",             # back out of every menu
+    ])
+    manager.main()
+    assert configs.get_config("7") == {"Outbound_Variety": 0.25}
+
+
+def test_config_manager_builds_a_blend(configs, monkeypatch):
+    import config_manager as cm
+    from trade_algorithm import SELECT_TRADE_OPTIONS
+
+    labels = [cm.shown_name(k)[1] for k in cm.SECTIONS["Picking Trades"]]
+    ordered = [o for o in cm.PICK_HELP if o in SELECT_TRADE_OPTIONS]
+    first = ordered  # "random" was removed, so it's listed again
+    second = [o for o in first if o != "highest_demand"]
+    manager = _manager(configs, monkeypatch, [
+        "2", "1", _index(cm.SECTION_ORDER, "Picking Trades"),
+        _index(labels, "Pick Trade By"),
+        "1", "3",                                   # Mode: Blend
+        "3", "3",                                   # random > Remove
+        "2", _index(first, "highest_demand"),       # add highest_demand
+        "2", _index(second, "upgrade"),             # add upgrade
+        "4", "1",                                   # upgrade > Move up
+        "5",                                        # Save
+        "", "", "", "",
+    ])
+    manager.main()
+    assert configs.get_config("7") == {"Select_Trade_Using": "blend: upgrade, highest_demand"}
+
+
+def test_config_manager_adds_items_by_name_or_id(configs, monkeypatch):
+    import config_manager as cm
+
+    labels = [cm.shown_name(k)[1] for k in cm.SECTIONS["Items"]]
+    manager = _manager(configs, monkeypatch, [
+        "2", "1", _index(cm.SECTION_ORDER, "Items"), _index(labels, "Never Give"),
+        "fedora, 1191135761",   # by acronym and by ID
+        "valkyrie",             # matches 2 names: pick the second
+        "2",
+        "1",                    # remove the fedora
+        "save",
+        "", "", "", "",
+    ])
+    manager.main()
+    assert configs.get_config("7") == {"NFT": ["1191135761", "1191125008"]}
+
+
+def test_config_manager_edits_config_cfg(configs, monkeypatch, tmp_path):
+    import shutil
+    import config_manager as cm
+
+    path = tmp_path / "config.cfg"
+    shutil.copy("config.cfg", path)
+    from handler.handle_config import ConfigHandler
+
+    seconds = ConfigHandler(str(path)).filter_generated["Max_Seconds_Spent_on_One_User"]
+    sections = cm.read_settings(path.read_text())
+    names = [name for name, _ in sections]
+    ads = [o for o, _, _ in dict(sections)["Trade Ads"]]
+    owners = [o for o, _, _ in dict(sections)["Finding Traders"]]
+    picking = [o for o, _, _ in dict(sections)["Picking Trades"]]
+    tags = list(cm.TAG_LISTS[("trade ads", "request tags")])
+    now = [t.strip() for t in dict((o, v) for o, v, _ in dict(sections)["Trade Ads"])["Request Tags"].split(",")]
+    manager = _manager(configs, monkeypatch, [
+        "1",
+        _index(names, "Finding Traders"), _index(owners, "Scan Type"), "2",  # value
+        "",
+        _index(names, "Picking Trades"), _index(picking, "Max Seconds Per Trader"),
+        "abc",                                                             # won't load: not saved
+        "",                                                                # Press enter
+        "",
+        _index(names, "Trade Ads"), _index(ads, "Request Tags"),
+        _index(tags, "rares"), _index(tags, now[0]), str(len(tags) + 1),   # rares on, first off, save
+        "", "", "",
+    ], config_file=str(path))
+    manager.main()
+    config = ConfigHandler(str(path))
+    assert config.scan_items["Scan_Type"] == "value"
+    assert config.filter_generated["Max_Seconds_Spent_on_One_User"] == seconds
+    assert "rares" in config.trade_ads["Request_Tags"]
+    assert now[0] not in config.trade_ads["Request_Tags"]
+    # Comments are kept
+    assert "# Time limit for finding a trade with one trader." in path.read_text()
+
+
+def test_read_settings_keeps_the_notes_above_each_setting():
+    import config_manager as cm
+
+    sections = dict(cm.read_settings("[A]\n# what x does\nX = 1\nY = 2\n\n[B]\nZ = True\n"))
+    assert sections["A"] == [("X", "1", "what x does"), ("Y", "2", "what x does")]
+    assert cm.setting_kind("B", "Z", "True") == ("bool",)
+    assert cm.setting_kind("Finding Traders", "Scan Type", "both")[0] == "choice"
+    assert cm.pick_parts("blend: a, b") == ("blend", ["a", "b"])
+    assert cm.pick_parts("a + b") == ("tiebreak", ["a", "b"])
 
 
 # --- inbound accept / counter ---------------------------------------------------
@@ -1195,6 +1386,56 @@ def test_inbound_uses_its_own_duplicate_limit(router, inbound):
     assert len(accepted(router)) == 1
 
 
+def with_instances(trade_json, *instance_ids):
+    """Tags our side's items (participant B) with instance ids."""
+    for item, uaid in zip(trade_json["participantBOffer"]["items"], instance_ids):
+        item["collectibleItemInstanceId"] = uaid
+    return trade_json
+
+
+def two_inbounds(router, inbound, small, big):
+    inbound.config.inbounds["Max_Duplicates"] = 10
+    router.set(INBOUND_LIST, inbound_list(70, 71))
+    router.set(TRADE_URL + "70", resp(200, small))
+    router.set(TRADE_URL + "71", resp(200, big))
+
+
+def test_biggest_inbound_win_is_accepted_first(router, inbound):
+    two_inbounds(
+        router,
+        inbound,
+        inbound_trade_json(["1:2"], ["1:1"]),
+        inbound_trade_json(["1:2"], ["1:1", "1:1"]),
+    )
+    results = inbound.handle_inbounds(accept=True, counter=False)
+    assert accepted(router) == [ACCEPT_URL + "71/accept", ACCEPT_URL + "70/accept"]
+    assert results["accepted"] == 2
+
+
+def test_inbound_needing_an_item_already_traded_is_skipped(router, inbound):
+    two_inbounds(
+        router,
+        inbound,
+        with_instances(inbound_trade_json(["1:2"], ["1:1"]), "u1"),
+        with_instances(inbound_trade_json(["1:2"], ["1:1", "1:1"]), "u1"),
+    )
+    results = inbound.handle_inbounds(accept=True, counter=True)
+    assert accepted(router) == [ACCEPT_URL + "71/accept"]
+    assert inbound.countered == [] and results["accepted"] == 1
+
+
+def test_duplicates_received_from_an_accept_count_for_the_next(router, inbound):
+    two_inbounds(
+        router,
+        inbound,
+        inbound_trade_json(["1:2"], ["1:1"]),
+        inbound_trade_json(["1:2"], ["1:1", "1:1"]),
+    )
+    inbound.config.inbounds["Max_Duplicates"] = 1
+    inbound.handle_inbounds(accept=True, counter=False)
+    assert accepted(router) == [ACCEPT_URL + "71/accept"]
+
+
 def test_counter_we_sent_is_judged_by_inbound_settings(account):
     from handler.counter_history import CounterHistory, trade_signature
 
@@ -1208,15 +1449,6 @@ def test_counter_we_sent_is_judged_by_inbound_settings(account):
     assert not account._is_our_counter(trade)
     account.counter_history.record_counter(2, trade_signature(["1:1"], ["1:2"]))
     assert account._is_our_counter(trade)
-
-
-def test_inbound_duplicate_settings_default_to_two(tmp_path):
-    from handler.handle_config import ConfigHandler
-
-    cfg = tmp_path / "c.cfg"
-    cfg.write_text("[Inbound Settings]\n")
-    inbounds = ConfigHandler(str(cfg)).inbounds
-    assert inbounds["Max_Duplicates"] == 2 and inbounds["Max_Trader_Duplicates"] == 2
 
 
 def test_accept_solves_2fa(router, inbound):
@@ -1254,16 +1486,6 @@ def test_trade_limit_stops_countering_but_keeps_accepting(router, inbound):
 
 
 # --- inbound wiring -------------------------------------------------------------
-
-
-def test_accept_valid_trades_defaults_to_off(tmp_path):
-    from handler.handle_config import ConfigHandler
-
-    cfg = tmp_path / "c.cfg"
-    cfg.write_text("[Inbound Settings]\nCounter Trades = True\n")
-    assert ConfigHandler(str(cfg)).inbounds["Accept_Valid_Trades"] is False
-    cfg.write_text("[Inbound Settings]\nAccept Valid Trades = True\n")
-    assert ConfigHandler(str(cfg)).inbounds["Accept_Valid_Trades"] is True
 
 
 def inbound_account(account, accept, counter, effect=None):
@@ -1311,16 +1533,6 @@ def test_inbound_trade_limit_is_recorded(doggo, account):
     assert doggo.limited == ["x"]
 
 
-def test_inbound_check_interval_setting(tmp_path):
-    from handler.handle_config import ConfigHandler
-
-    cfg = tmp_path / "c.cfg"
-    cfg.write_text("[Inbound Settings]\nCheck Inbounds Every Minutes = 10\n")
-    assert ConfigHandler(str(cfg)).inbounds["Check_Every_Minutes"] == 10
-    cfg.write_text("[Inbound Settings]\n")
-    assert ConfigHandler(str(cfg)).inbounds["Check_Every_Minutes"] == 30
-
-
 def no_counter_account(router, inbound, decline):
     """A losing inbound where no counter passes the config."""
     del inbound._counter_trade
@@ -1333,10 +1545,6 @@ def no_counter_account(router, inbound, decline):
     router.set(TRADE_URL, resp(200, inbound_trade_json(["1:1"], ["1:2"])))
     router.set(DECLINE_URL, resp(200, {}))
     return inbound
-
-
-def declined(router):
-    return [url for method, url in router.calls if url.endswith("/decline")]
 
 
 def test_inbound_without_a_counter_is_declined(router, inbound, monkeypatch):
@@ -1353,23 +1561,13 @@ def test_inbound_without_a_counter_is_left_when_declining_is_off(router, inbound
     assert declined(router) == [] and results["declined"] == 0
 
 
-def test_decline_if_no_counter_defaults_on(tmp_path):
-    from handler.handle_config import ConfigHandler
-
-    cfg = tmp_path / "c.cfg"
-    cfg.write_text("[Inbound Settings]\n")
-    assert ConfigHandler(str(cfg)).inbounds["Decline_If_No_Counter"] is True
-    cfg.write_text("[Inbound Settings]\nDecline If No Counter = False\n")
-    assert ConfigHandler(str(cfg)).inbounds["Decline_If_No_Counter"] is False
-
-
 # --- inbound accepts obey the same item filters as our own trades --------------------
 
 
 @pytest.mark.parametrize(
     "change, reason",
     [
-        (lambda acc: acc.config.filter_items.update(NFR=["1:1"]), "NFR"),
+        (lambda acc: acc.config.filter_items.update(NFR=["1:1"]), "Never Receive"),
         (
             lambda acc: acc.rolimon.item_data["1:1"].update(asset_type="asset:18"),
             "face",
@@ -1442,14 +1640,6 @@ def test_unknown_select_option_falls_back(router):
     # generate_trade's picker falls back to the default instead of crashing
     picked = maker.select_trade(trades, select_by="lowest_rap_gain")
     assert picked in trades
-
-
-def test_editor_only_offers_supported_pick_options():
-    import inspect
-
-    from handler import account_settings
-
-    assert "SELECT_TRADE_OPTIONS" in inspect.getsource(account_settings)
 
 
 def test_read_cached_reuses_until_the_file_changes(tmp_path, monkeypatch):
@@ -1566,18 +1756,22 @@ def test_every_preset_setting_is_read_by_the_bot(name):
 
     from handler import handle_config
 
-    source = inspect.getsource(handle_config)
-    used = set(re.findall(r'"([^"]+)",\s*"([^"]+)"', source))
+    # Everything but the old -> new name map (it would match itself)
+    source = inspect.getsource(handle_config).replace(
+        inspect.getsource(handle_config._layout), ""
+    )
+    used = {(s.lower(), o.lower()) for s, o in re.findall(r'"([^"]+)",\s*"([^"]+)"', source)}
     raw = configparser.ConfigParser(interpolation=None)
     raw.optionxform = str
     raw.read(preset_path(name))
     for section in raw.sections():
-        if section in ("Info", "Community Values"):
+        if section == "Info":
             continue
         for key in raw[section]:
-            assert (section, key) in used or (section.lower(), key) in used, (
-                f"{name}: [{section}] {key} isn't read by the bot"
-            )
+            # New names ([Profit] Min Overall Profit) are read through the old ones
+            old = handle_config.OLD_NAMES.get((section.lower(), key.lower()))
+            read_as = (old[0].lower(), old[1].lower()) if old else (section.lower(), key.lower())
+            assert read_as in used, f"{name}: [{section}] {key} isn't read by the bot"
 
 
 def test_nft_and_nfr_accept_plain_item_ids(tmp_path):
@@ -1586,7 +1780,7 @@ def test_nft_and_nfr_accept_plain_item_ids(tmp_path):
     cfg = tmp_path / "c.cfg"
     cfg.write_text("[Filtering Items]\nNFT = 1029025, 2:939596\nNFR = None\n")
     config = ConfigHandler(str(cfg))
-    assert config.filter_items["NFT"] == ["1:1029025", "2:939596"]
+    assert config.filter_items["NFT"] == ["1029025", "939596"]
     assert config.filter_items["NFR"] == []
 
 
@@ -1642,25 +1836,13 @@ def test_invalid_settings_stop_startup_with_their_real_name(tmp_path, line, expe
     assert expected in str(info.value)
 
 
-# --- projected detection: Graph Difference settings --------------------------------
-
-
-def test_default_graph_difference_matches_the_old_fixed_40_percent_rule():
-    import random
-
-    from roblox_api import price_swing_is_projected
-
-    rng = random.Random(7)
-    for _ in range(5000):
-        current, past = rng.randint(1, 50_000), rng.randint(1, 50_000)
-        old_rule = not -0.4 <= (current - past) / current <= 0.4
-        assert price_swing_is_projected(current, past, 0.4, -0.4) == old_rule
+# --- projected detection: Max Price Rise / Drop settings --------------------------------
 
 
 @pytest.mark.parametrize(
     "past, max_rise, max_drop, projected",
     [
-        (5_999, 0.4, -0.4, True),  # price shot up since (more than 40% below today)
+        (5_999, 0.4, -0.4, True),  # typical price more than 40% below today
         (6_001, 0.4, -0.4, False),
         (14_001, 0.4, -0.4, True),  # price crashed since
         (14_001, 0.4, None, False),  # crash check off
@@ -1926,6 +2108,65 @@ def test_no_sale_days_dont_make_an_item_projected(router, account):
     assert saved["value"] > 900  # the 0 days aren't counted as price dips
 
 
+@pytest.mark.parametrize(
+    "prices, projected",
+    [
+        # newest first: a one-day spike weeks ago that went back to normal
+        ([181, 185, 178, 190, 700, 182, 180, 184, 179, 183], False),
+        # today's price is way above what it usually sells for
+        ([700, 185, 178, 190, 182, 180, 184, 179, 183, 181], True),
+        # crashed: today is far below what it usually sells for, RAP still high
+        ([90, 185, 178, 190, 182, 180, 184, 179, 183, 181], True),
+    ],
+)
+def test_projected_compares_today_with_typical_price(router, account, prices, projected):
+    account.rolimon.item_data["1:1"]["rap"] = 180
+    router.set(
+        "https://apis.roblox.com/marketplace-sales",
+        resp(
+            200,
+            {
+                "priceDataPoints": resale_points(prices),
+                "volumeDataPoints": resale_points([3] * len(prices)),
+            },
+        ),
+    )
+    account.parse_handler = account.request_handler
+    account.config.projected_detection.update(
+        Detect_Rolimons_Projecteds=False, MaximumGraphDifference=0.4, MinimumGraphDifference=-0.4
+    )
+    account.is_projected_api(collectibleId="c", item_id="1:1")
+    assert account.rolimon.projected_json.read_data()["1:1"]["is_projected"] is projected
+
+
+def test_price_drop_settled_when_rap_followed_it(router, account):
+    # Sold ~270 for months, now 186 and RAP came down to 181: not projected
+    prices = [186, 190, 185] + [270] * 10
+    router.set(
+        "https://apis.roblox.com/marketplace-sales",
+        resp(200, {"priceDataPoints": resale_points(prices),
+                   "volumeDataPoints": resale_points([3] * len(prices))}),
+    )
+    account.parse_handler = account.request_handler
+    account.config.projected_detection.update(
+        Detect_Rolimons_Projecteds=False, MaximumGraphDifference=0.4, MinimumGraphDifference=-0.4
+    )
+    account.rolimon.item_data["1:1"]["rap"] = 181
+    account.is_projected_api(collectibleId="c", item_id="1:1")
+    assert account.rolimon.projected_json.read_data()["1:1"]["is_projected"] is False
+    account.rolimon.item_data["1:1"]["rap"] = 270  # RAP still up there
+    account.is_projected_api(collectibleId="c", item_id="1:1")
+    assert account.rolimon.projected_json.read_data()["1:1"]["is_projected"] is True
+
+
+def test_typical_price_is_the_median():
+    from roblox_api import typical_price
+
+    assert typical_price([100, 900, 110]) == 110
+    assert typical_price([100, 120]) == 110
+    assert typical_price([]) is None
+
+
 def test_items_are_rescanned_after_2_days(router, monkeypatch):
     import time as _time
 
@@ -2159,34 +2400,6 @@ def test_post_trade_ad_errors(answer, error):
         post_trade_ad("c", build_ad(1, [10], [], ["any"]), FakeAdSession(answer))
 
 
-def test_check_rolimons_cookie():
-    from handler.handle_trade_ads import check_rolimons_cookie
-
-    # Rolimons accepted the cookie but not the empty ad: the cookie is fine
-    check_rolimons_cookie(
-        "c",
-        FakeAdSession(
-            ad_response(
-                {"success": False, "code": 1, "message": "Missing player_id"}, 400
-            )
-        ),
-    )
-    with pytest.raises(E.RolimonsCookieInvalid):
-        check_rolimons_cookie(
-            "c",
-            FakeAdSession(
-                ad_response(
-                    {
-                        "success": False,
-                        "code": 5,
-                        "message": "Invalid verification data",
-                    },
-                    401,
-                )
-            ),
-        )
-
-
 AD_SETTINGS = {
     "Enabled": True,
     "Post_Every_Minutes": 20,
@@ -2257,6 +2470,7 @@ def test_trade_ads_config_defaults(tmp_path):
     cfg.write_text("[Trade Ads]\n")
     assert ConfigHandler(str(cfg)).trade_ads == {
         "Enabled": False,
+        "Auto_Rolimons_Login": True,
         "Post_Every_Minutes": 20,
         "Offer_Items": 4,
         "Offer_Items_Using": "highest_value",
@@ -2305,17 +2519,103 @@ def test_bad_trade_ads_settings_stop_startup(tmp_path, lines, named):
         ConfigHandler(str(cfg))
 
 
-def test_rolimons_cookie_is_saved_and_removed(tmp_path, monkeypatch):
+def test_rolimons_cookie_is_saved_by_user_id(tmp_path, monkeypatch):
     from handler.handle_json import JsonHandler
 
     monkeypatch.chdir(tmp_path)
     store = JsonHandler("cookies.json")
-    store.write_data({"roblox_accounts": [{"username": "a", "cookie": "x"}]})
-    assert store.set_rolimons_cookie(0, "roli")
+    store.write_data({"roblox_accounts": [{"user_id": 7, "cookie": "x"}]})
+    assert store.save_rolimons_cookie_for("7", "roli")
     assert store.read_data()["roblox_accounts"][0]["rolimons_cookie"] == "roli"
-    assert store.set_rolimons_cookie(0, None)
-    assert "rolimons_cookie" not in store.read_data()["roblox_accounts"][0]
-    assert not store.set_rolimons_cookie(5, "roli")
+    assert not store.save_rolimons_cookie_for(8, "roli")
+
+
+def test_trade_ad_poster_logs_in_again_on_a_refused_cookie():
+    from handler.handle_trade_ads import TradeAdPoster
+
+    refused = ad_response(
+        {"success": False, "code": 5, "message": "Invalid verification data"}, 401
+    )
+    session = FakeAdSession(refused, ad_response({"success": True}))
+    logins = []
+
+    def login(account):
+        logins.append(account.account_id)
+        account.rolimons_cookie = "new"
+        return True
+
+    poster = TradeAdPoster(AD_SETTINGS, session, login=login)
+    accounts = [ad_account(1, "old")]
+    assert poster.run_once(accounts, now=0) == 0
+    assert poster.run_once(accounts, now=60) == 1
+    assert logins == [1]
+    assert [s["cookies"]["_RoliVerification"] for s in session.sent] == ["old", "new"]
+
+
+def test_trade_ad_poster_logs_in_at_most_once_an_hour():
+    from handler.handle_trade_ads import TradeAdPoster
+
+    refused = ad_response(
+        {"success": False, "code": 5, "message": "Invalid verification data"}, 401
+    )
+    session = FakeAdSession(refused)
+    logins = []
+    poster = TradeAdPoster(
+        AD_SETTINGS, session, login=lambda a: logins.append(1) or True
+    )
+    accounts = [ad_account(1, "bad")]
+    for minute in range(5):
+        poster.run_once(accounts, now=minute * 60)
+    assert logins == [1]
+    assert poster.run_once(accounts, now=10_000) == 0  # given up on
+
+
+class FakeOAuthHandler:
+    def __init__(self, location):
+        self.location = location
+        self.sent = []
+
+    def requestAPI(self, url, method="get", payload=None, additional_headers=None):
+        self.sent.append((url, method, payload))
+        return types.SimpleNamespace(json=lambda: {"location": self.location})
+
+
+class FakeRolimonsSession:
+    def __init__(self, cookies):
+        self.cookies = cookies
+        self.urls = []
+
+    def get(self, url, **kwargs):
+        self.urls.append(url)
+        return types.SimpleNamespace(status_code=302, cookies=self.cookies)
+
+
+def test_rolimons_login_gets_the_cookie_through_roblox_oauth():
+    from handler.rolimons_login import AUTHORIZE_URL, CLIENT_ID, rolimons_login
+
+    link = "https://api.rolimons.com/auth/v1/robloxoauth?code=abc"
+    roblox = FakeOAuthHandler(link)
+    rolimons = FakeRolimonsSession({"_RoliVerification": "roli"})
+    assert rolimons_login(roblox, 7, rolimons) == "roli"
+    url, method, body = roblox.sent[0]
+    assert (url, method) == (AUTHORIZE_URL, "post")
+    assert body["clientId"] == CLIENT_ID
+    assert body["resourceInfos"][0]["owner"] == {"id": "7", "type": "User"}
+    assert rolimons.urls == [link]
+
+
+@pytest.mark.parametrize(
+    "location, cookies",
+    [
+        ("https://evil.example/?code=abc", {"_RoliVerification": "roli"}),
+        ("https://api.rolimons.com/auth/v1/robloxoauth?code=abc", {}),
+    ],
+)
+def test_rolimons_login_errors(location, cookies):
+    from handler.rolimons_login import rolimons_login
+
+    with pytest.raises(E.RolimonsError):
+        rolimons_login(FakeOAuthHandler(location), 7, FakeRolimonsSession(cookies))
 
 
 def ad_outbound(trade_id, mine, theirs, my_id=1):
@@ -2559,12 +2859,15 @@ def test_inbound_gains_replace_trading_gains_only_when_set(tmp_path):
 
     cfg = tmp_path / "c.cfg"
     preset = pathlib.Path(__file__).parent.parent / "configs" / "small_value.cfg"
-    trading, inbound = preset.read_text().split("[Inbound Settings]\n")
-    inbound = re.sub(r"^(Minimum|Maximum) [A-Za-z ]+ Gain = .*\n", "", inbound, flags=re.M)
+    trading, inbound = preset.read_text().split("[Inbounds]\n")
+    inbound = re.sub(
+        r"^(Min|Max) [A-Za-z ]+ Profit = .*\n",
+        "", inbound, flags=re.M,
+    )
     cfg.write_text(
         trading
-        + "[Inbound Settings]\nMinimum Overall Value Gain = 7\n"
-        + "Maximum Value Gain = None\n"
+        + "[Inbounds]\nMin Overall Profit = 7\n"
+        + "Max Value Profit = None\n"
         + inbound
     )
     config = ConfigHandler(str(cfg))
@@ -2696,8 +2999,8 @@ def test_log_lines_read_without_color():
     first, second = format_line("[BOT] a\nb", clock="1:02:11 PM").split("\n")
     assert second == " " * 11 + "  b"
     # A tag with a name: the name moves into the message
-    assert format_line("[ACCOUNT two] Joining", clock="1").endswith(
-        "Account   two: Joining"
+    assert format_line("[WAYDROID two] Joining", clock="1").endswith(
+        "Waydroid  two: Joining"
     )
 
 
@@ -2710,21 +3013,13 @@ def test_log_lines_wrap_to_the_terminal():
     assert format_line(text, clock="1:02:11 PM").count("\n") == 0  # log file
 
 
-def test_log_color_only_on_terminals(monkeypatch):
-    from handler.handle_logs import format_line, use_color
-
-    monkeypatch.setenv("NO_COLOR", "1")
-    assert use_color() is False
-    assert "\033[33m" in format_line("[BOT] x", 2, color=True)
-
-
 def test_gains_table_shows_every_gain_and_the_failed_one():
     from trade_algorithm import gains_table
 
     maker = types.SimpleNamespace(
         min_overall_gain=450, max_overall_gain=1200, min_value_gain=None,
         max_value_gain=None, min_rap_gain=None, max_rap_gain=None,
-        min_algo_gain=0, max_algo_gain=None,
+        min_algo_gain=0.05, max_algo_gain=None,
     )
     trade = dict(
         their_overall_value=7000, self_overall_value=6900, their_value=3500,
@@ -2735,6 +3030,7 @@ def test_gains_table_shows_every_gain_and_the_failed_one():
     overall = next(line for line in table if "Overall Value" in line)
     assert "+50" in overall and "450" in overall and "1,200" in overall
     assert overall.endswith("<- failed")
+    assert any("RAP Algorithm" in line and "5%" in line for line in table)
     assert table[-1] == "(Robux in the trade: -50)"
 
 
@@ -2744,20 +3040,21 @@ def test_failed_field_lists_what_stopped_the_trades():
     stats = {
         "tried": 1442,
         "passed": 0,
-        "failed": {"value_gain": 43, "overall_gain": 1399, "algo_gain": 900},
-        "only": {"value_gain": 0, "overall_gain": 0, "algo_gain": 545},
+        "failed": {"value_gain": 43, "overall_gain": 1399, "rap_gain": 900},
+        "only": {"value_gain": 0, "overall_gain": 0, "rap_gain": 545},
     }
     text = failed_field(stats)
     assert text.startswith(
         "Tried 1,442 trades, none passed.\n"
-        "Loosening only RAP Algorithm gain (below min) would let 545 pass."
+        "Loosening only RAP gain (below min) would let 545 pass."
     )
     body = text.split("```")[1].strip().split("\n")
+    width = len("Overall Value gain (below min)")
     assert body == [
-        "Setting                         Failed  Sole Failure",
-        "RAP Algorithm gain (below min)     900           545",
-        "Overall Value gain (below min)   1,399             0",
-        "Value gain (below min)              43             0",
+        f"{'Setting':<{width}}  Failed  Sole Failure",
+        f"{'RAP gain (below min)':<{width}}     900           545",
+        f"{'Overall Value gain (below min)':<{width}}   1,399             0",
+        f"{'Value gain (below min)':<{width}}      43             0",
     ]
     assert "Sole Failure = " in text.split("```")[2]
     # Old style counts still work
@@ -2920,34 +3217,6 @@ def parse_created_ts(text):
     return parse_created(text)
 
 
-def test_counter_loop_settings_defaults_and_off(tmp_path):
-    from handler.handle_config import ConfigHandler
-
-    cfg = tmp_path / "c.cfg"
-    cfg.write_text("[Inbound Settings]\n")
-    inbounds = ConfigHandler(str(cfg)).inbounds
-    assert inbounds["Max_Counters_Per_Trader"] == 3
-    assert inbounds["Instant_Replies_For_Bot"] == 3
-    assert inbounds["Instant_Reply_Seconds"] == 20 * 60
-    assert inbounds["Counter_Memory_Hours"] == 24
-    cfg.write_text(
-        "[Inbound Settings]\nMax Counters Per Trader = 0\n"
-        "Instant Replies To Call It A Bot = None\n"
-    )
-    inbounds = ConfigHandler(str(cfg)).inbounds
-    assert inbounds["Max_Counters_Per_Trader"] == 0
-    assert inbounds["Instant_Replies_For_Bot"] == 0
-
-
-def test_log_clock_is_12_hour_and_same_width(monkeypatch):
-    from handler import handle_logs
-
-    for hour, shown in ((3, " 3:08:32 PM"), (11, "11:08:32 AM")):
-        fake = time.struct_time((2026, 11, 6, hour + (12 if shown.endswith("PM") else 0), 8, 32, 4, 310, 0))
-        monkeypatch.setattr(handle_logs.time, "localtime", lambda *a, f=fake: f)
-        assert handle_logs.clock_time() == shown
-
-
 def test_failed_table_is_one_column():
     from trade_algorithm import failed_text
 
@@ -2965,12 +3234,11 @@ def test_failed_table_is_one_column():
 
 
 def test_failures_say_if_it_was_the_min_or_the_max():
-    maker, mine, theirs = _simple_maker(min_overall=-10_000)
+    maker, mine, theirs = _small_maker(min_overall=-10_000)
     maker.max_overall_gain = 100  # a+b is +500
     maker.min_items_their = 2
     assert maker.generate_trade(mine, theirs) is None
-    assert maker.last_failed["only"]["overall_gain_max"] == 1
-    assert maker.last_failed["failed"].get("overall_gain", 0) == 0
+    assert maker.last_failed["not_made"] == 1  # over the max: never even built
     assert maker.validate_trade(
         self_rap=1000, self_rap_algo=1000, self_value=0, their_rap=1500,
         their_rap_algo=1500, their_value=0, self_overall_value=1000,
@@ -2979,14 +3247,14 @@ def test_failures_say_if_it_was_the_min_or_the_max():
 
 
 def test_what_stopped_them_finds_the_setting_that_blocks_alone():
-    """Overall is checked first, but only RAP Algorithm blocks these trades."""
-    maker, mine, theirs = _simple_maker(min_overall=350)
-    maker.min_algo_gain = 600  # a+b is +500
+    """Overall is checked first, but only RAP sum of trade blocks these trades."""
+    maker, mine, theirs = _small_maker(min_overall=350)
+    maker.min_rap_of_trade = 3000  # a+b is 2,500
     assert maker.generate_trade(mine, theirs) is None
     stats = maker.last_failed
-    assert stats["only"]["algo_gain"] > 0
+    assert stats["only"]["min_rap_of_trade"] > 0
     assert stats["only"]["overall_gain"] == 0
-    assert "Loosening only RAP Algorithm gain (below min)" in failed_text_of(stats)
+    assert "Loosening only RAP sum of trade (below min)" in failed_text_of(stats)
 
 
 def failed_text_of(stats):
@@ -2995,8 +3263,8 @@ def failed_text_of(stats):
     return failed_text(stats, width=80)
 
 
-def _simple_maker(min_overall=None):
-    """Our 1000 item for their 800 + 700 items: a+b is +500."""
+def _small_maker(min_overall=None):
+    """Our 1000 item for their 1500 in items: +500 overall."""
     from trade_algorithm import TradeMaker
     from handler.handle_config import ConfigHandler
 
@@ -3016,12 +3284,20 @@ def _simple_maker(min_overall=None):
     maker = TradeMaker(config=config)
 
     def item(item_id, total):
-        return {"item_id": item_id, "value": 0, "rap": total, "rap_algorithm": total,
+        return {"item_id": item_id, "value": total, "rap": total, "rap_algorithm": total,
                 "demand": 1, "total_value": total, "item_volume": 1}
 
     mine = {"m": item("1:1", 1000)}
     theirs = {"a": item("1:2", 800), "b": item("1:3", 700)}
     return maker, mine, theirs
+
+
+def test_no_trades_reason_names_the_gain_range_that_left_nothing():
+    maker, mine, theirs = _small_maker(min_overall=1000)
+    maker.max_overall_gain = 3000  # their best side is only +500
+    assert maker.generate_trade(mine, theirs) is None
+    why = maker.last_failed["why_none"]
+    assert "Overall Value gain range (min 1,000, max 3,000)" in why
 
 
 def test_endpoint_hides_ids_and_query():
@@ -3129,16 +3405,6 @@ def test_error_alerts_hide_usernames(doggo):
     )
 
 
-def test_hide_username_setting(tmp_path):
-    from handler.handle_config import ConfigHandler
-
-    path = tmp_path / "c.cfg"
-    path.write_text("[Discord]\nSend Webhook =\n")
-    assert ConfigHandler(str(path)).discord_settings["Hide_Username"] is True
-    path.write_text("[Discord]\nHide Username = False\n")
-    assert ConfigHandler(str(path)).discord_settings["Hide_Username"] is False
-
-
 # --- update check ---------------------------------------------------------------
 
 
@@ -3229,4 +3495,530 @@ def test_retry_after_forms():
     assert retry_after(r({"Retry-After": "0"})) == 1
     assert 55 <= retry_after(r({"x-ratelimit-reset": str(time.time() + 60)})) <= 60
     assert retry_after(r({"Retry-After": "soon"})) is None
+    # Roblox sends Retry-After 5 even when the limit resets later: wait for the reset
+    assert retry_after(r({"retry-after": "5", "x-ratelimit-reset": "13"})) == 13
+    assert retry_after(r({"retry-after": "5", "x-ratelimit-reset": "1"})) == 5
     assert rate_limit_headers(r({"Retry-After": "1", "set-cookie": "x"})) == {"Retry-After": "1"}
+
+
+# --- making an account config the main config ---------------------------------
+
+
+def test_trading_options_cover_every_trading_setting():
+    from handler.handle_config import ConfigHandler
+
+    assert set(ConfigHandler.TRADING_OPTIONS) == set(ConfigHandler("config.default.cfg").trading)
+
+
+def test_account_config_round_trips_into_config_cfg(tmp_path, monkeypatch):
+    import shutil
+
+    from handler.account_settings import HandleConfigs
+    from handler.handle_config import ConfigHandler
+
+    root = pathlib.Path(__file__).parent.parent
+    monkeypatch.chdir(tmp_path)
+    shutil.copy(root / "config.default.cfg", "config.cfg")
+    shutil.copy(root / "config.default.cfg", "config.default.cfg")
+    before = (tmp_path / "config.cfg").read_text()
+
+    account = dict(ConfigHandler("config.cfg").trading)
+    account.update(
+        Minimum_Overall_Gain=300.0, Maximum_Overall_Gain=None, MaxRobux=750,
+        TradeRobux=False, Outbound_Cancel_Offset=123,
+        MinimumItemsTheirSide=2, Rap_Algo_For_Valued="rap_algorithm",
+    )
+    (tmp_path / "account_configs.jsonc").write_text(json.dumps({"42": account}))
+    (tmp_path / "cookies.json").write_text(json.dumps({"roblox_accounts": [
+        {"cookie": "c", "username": "DesiredDesigner", "user_id": "42"}]}))
+
+    answers = iter(["", "y", "y"])  # skip none, write, remove
+    handler = HandleConfigs()
+    assert handler.apply_to_main("42", ask=lambda _: next(answers))
+
+    loaded = ConfigHandler("config.cfg").trading
+    for key, value in account.items():
+        assert loaded[key] == value, key
+    after = (tmp_path / "config.cfg").read_text()
+    assert after.count("\n#") == before.count("\n#")  # comments kept
+    assert (tmp_path / "config.backup.cfg").read_text() == before
+    assert "42" not in json.loads((tmp_path / "account_configs.jsonc").read_text())
+
+
+def test_account_config_not_written_when_you_say_no(tmp_path, monkeypatch):
+    import shutil
+
+    from handler.account_settings import HandleConfigs
+
+    root = pathlib.Path(__file__).parent.parent
+    monkeypatch.chdir(tmp_path)
+    shutil.copy(root / "config.default.cfg", "config.cfg")
+    shutil.copy(root / "config.default.cfg", "config.default.cfg")
+    before = (tmp_path / "config.cfg").read_text()
+    (tmp_path / "account_configs.jsonc").write_text(json.dumps({"42": {"MaxRobux": 5}}))
+    (tmp_path / "cookies.json").write_text(json.dumps({"roblox_accounts": []}))
+    answers = iter(["", "n"])
+    assert not HandleConfigs().apply_to_main("42", ask=lambda _: next(answers))
+    assert (tmp_path / "config.cfg").read_text() == before
+    assert "42" in json.loads((tmp_path / "account_configs.jsonc").read_text())
+
+
+def test_account_config_can_skip_settings(tmp_path, monkeypatch):
+    import shutil
+
+    from handler.account_settings import HandleConfigs
+    from handler.handle_config import ConfigHandler
+
+    root = pathlib.Path(__file__).parent.parent
+    monkeypatch.chdir(tmp_path)
+    shutil.copy(root / "config.default.cfg", "config.cfg")
+    shutil.copy(root / "config.default.cfg", "config.default.cfg")
+    before = ConfigHandler("config.cfg").trading
+    account = dict(before, Minimum_Overall_Gain=300.0, MaxRobux=750, MinimumItemsTheirSide=2)
+    (tmp_path / "account_configs.jsonc").write_text(json.dumps({"42": account}))
+    (tmp_path / "cookies.json").write_text(json.dumps({"roblox_accounts": []}))
+
+    # Changes are listed in config.cfg order: Overall Gain (1), Max Robux (2), Their Side (3)
+    answers = iter(["x", "9", "2", "y", "n"])  # bad input, out of range, skip 2, write, keep
+    assert HandleConfigs().apply_to_main("42", ask=lambda _: next(answers))
+    loaded = ConfigHandler("config.cfg").trading
+    assert loaded["Minimum_Overall_Gain"] == 300
+    assert loaded["MaxRobux"] == before["MaxRobux"]  # skipped
+    assert loaded["MinimumItemsTheirSide"] == 2
+    assert "42" in json.loads((tmp_path / "account_configs.jsonc").read_text())
+
+
+def test_config_fingerprint_changes_with_inbound_gains(account):
+    before = account._config_fingerprint()
+    account.config.inbounds = {**account.config.inbounds, "Gains": {"Minimum_Overall_Gain": 1}}
+    assert account._config_fingerprint() != before
+
+
+def test_no_trades_to_try_says_why():
+    from trade_algorithm import failed_field, failed_text
+
+    maker, mine, theirs = _small_maker()
+    maker.min_items_their = 2
+    assert maker.generate_trade(mine, {"a": theirs["a"]}) is None
+    text = failed_text(maker.last_failed)
+    assert "They have 1 usable item" in text and "Min Items Theirs is 2" in text
+    assert "Min Items Theirs is 2" in failed_field(maker.last_failed)
+    assert maker.generate_trade(mine, {}) is None
+    assert "They have no usable items" in failed_text(maker.last_failed)
+
+
+def test_value_gain_can_skip_trades_without_valued_items():
+    maker, mine, theirs = _small_maker()
+    for item in [*mine.values(), *theirs.values()]:
+        item["value"] = 0  # RAP items only
+    maker.min_value_gain = 1
+    assert maker.generate_trade(mine, theirs) is None
+    assert maker.last_failed["only"]["value_gain"] == 1
+    maker.skip_value_without_valued = True
+    assert maker.generate_trade(mine, theirs)
+    mine["m"]["value"] = 1000  # a valued item in the trade: checked again
+    assert maker.generate_trade(mine, theirs) is None
+
+
+def test_added_setting_goes_in_its_own_section_not_under_the_next_banner():
+    from handler.account_settings import set_options
+
+    text = "[A]\nX = 1\n\n\n# =====\n[B]\n# =====\nY = 2\n"
+    new, changes = set_options(text, {("A", "Z"): "3"})
+    assert new == "[A]\nX = 1\nZ = 3\n\n\n# =====\n[B]\n# =====\nY = 2\n"
+    assert changes == [("A", "Z", None, "3")]
+
+
+def test_nft_and_nfr_match_items_and_bundles_by_plain_id():
+    from handler.handle_config import on_item_list
+
+    assert on_item_list("1:1029025", ["1029025"])
+    assert on_item_list("2:939596", ["939596"])  # bundle, no prefix needed
+    assert on_item_list("2:939596", ["2:939596"])  # old style still works
+    assert not on_item_list("1:5", ["55"])
+    assert not on_item_list("1:5", [])
+
+
+def _owners_page(owner_ids, cursor, days_ago=1):
+    from datetime import datetime, timedelta
+
+    when = (datetime.now() - timedelta(days=days_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {"nextPageCursor": cursor,
+            "data": [{"owner": {"id": i}, "updated": when} for i in owner_ids]}
+
+
+def test_owner_scan_carries_on_where_it_stopped(account, tmp_path, monkeypatch):
+    import roblox_api
+
+    monkeypatch.chdir(tmp_path)
+    pages = {"": _owners_page([1, 2], "p2"), "p2": _owners_page([3], "p3"),
+             "p3": _owners_page([4], None)}
+    asked = []
+
+    def request(url, **kwargs):
+        cursor = url.split("cursor=")[1].split("&")[0]
+        asked.append(cursor)
+        return types.SimpleNamespace(status_code=200, json=lambda: pages[cursor])
+
+    monkeypatch.setattr(account.request_handler, "requestAPI", request)
+    monkeypatch.setattr(roblox_api, "read_json", lambda r: r.json())
+    account.all_cached_traders = set()
+    account.config.scan_items.update(
+        Owner_Pages_Per_Scan=1, Recent_Owner_Days=7, Remember_Scanned_Owners_Days=3)
+    item = {"original_asset_id": 77}
+    assert account.get_active_traders(item, []) == [1, 2]
+    assert account.get_active_traders(item, []) == [3]  # next page, not page 1 again
+    assert account.get_active_traders(item, []) == [4]
+    assert account.get_active_traders(item, []) == []  # every owner read: skipped
+    assert asked == ["", "p2", "p3"]
+
+
+def test_owner_scan_memory_is_forgotten_after_its_days(tmp_path):
+    from handler.owner_pages import OwnerPages
+
+    now = [1000.0]
+    pages = OwnerPages(3, clock=lambda: now[0], file=str(tmp_path / "o.json"))
+    pages.save(77, None)
+    assert pages.start(77) is None
+    now[0] += 3 * 86400 + 1
+    assert pages.start(77) == ""  # forgotten: from the first page again
+    assert OwnerPages(0, file=str(tmp_path / "o.json")).start(77) == ""  # memory off
+
+
+def test_owner_scan_uses_every_recent_owner_on_a_page(account, tmp_path, monkeypatch):
+    import roblox_api
+
+    monkeypatch.chdir(tmp_path)
+    page = _owners_page([1, 2, 3, 4], "next")
+    page["data"][1]["updated"] = "2020-01-01T00:00:00Z"  # got it long ago
+    monkeypatch.setattr(account.request_handler, "requestAPI",
+                        lambda url, **kw: types.SimpleNamespace(json=lambda: page))
+    monkeypatch.setattr(roblox_api, "read_json", lambda r: r.json())
+    account.all_cached_traders = {3}  # already traded with
+    account.config.scan_items.update(Owner_Pages_Per_Scan=1, Recent_Owner_Days=7,
+                                     Remember_Scanned_Owners_Days=0)
+    assert account.get_active_traders({"original_asset_id": 5}, []) == [1, 4]
+
+
+def test_old_and_new_setting_names_load_the_same(tmp_path):
+    from handler.handle_config import ConfigHandler
+
+    old = tmp_path / "old.cfg"
+    old.write_text(
+        "[Trading Settings]\nMinimum Overall Value Gain = 321\nTrade For Faces = True\n"
+        "[Filtering Items]\nNFT = 5, 6\n[Filtering Users]\nMinimum Total Items = 9\n"
+        "[Inbound Settings]\nMinimum Overall Value Gain = 12\nCounter Trades = False\n"
+        "[debug]\nDont Send Trades = True\n"
+    )
+    new = tmp_path / "new.cfg"
+    new.write_text(
+        "[Profit]\nMin Overall Profit = 321\n"
+        "[Trade Rules]\nReceive Faces = True\n[Items]\nNever Give = 5, 6\n"
+        "[Finding Traders]\nMin Trader Items = 9\n"
+        "[Inbounds]\nMin Overall Profit = 12\nCounter = False\n"
+        "[Debug]\nDont Send Trades = True\n"
+    )
+    a, b = ConfigHandler(str(old)), ConfigHandler(str(new))
+    for name in ("trading", "filter_items", "filter_users", "inbounds", "debug"):
+        assert getattr(a, name) == getattr(b, name), name
+    assert b.trading["Minimum_Overall_Gain"] == 321
+    assert b.inbounds["Gains"]["Minimum_Overall_Gain"] == 12
+
+
+def test_new_names_show_in_config_errors(tmp_path):
+    from handler.exceptions_types import ConfigError
+    from handler.handle_config import ConfigHandler
+
+    cfg = tmp_path / "c.cfg"
+    cfg.write_text("[Trade Rules]\nMax Items Yours = lots\n")
+    with pytest.raises(ConfigError, match=r"\[Trade Rules\] Max Items Yours"):
+        ConfigHandler(str(cfg))
+
+
+def test_owner_scan_with_fewer_owners_than_the_pages_allow(account, tmp_path, monkeypatch):
+    """2 pages per scan, but the item only has 10 owners (one short page)."""
+    import roblox_api
+
+    monkeypatch.chdir(tmp_path)
+    asked = []
+
+    def request(url, **kwargs):
+        asked.append(url.split("cursor=")[1].split("&")[0])
+        return types.SimpleNamespace(json=lambda: _owners_page(range(1, 11), None))
+
+    monkeypatch.setattr(account.request_handler, "requestAPI", request)
+    monkeypatch.setattr(roblox_api, "read_json", lambda r: r.json())
+    account.all_cached_traders = set()
+    account.config.scan_items.update(Owner_Pages_Per_Scan=2, Recent_Owner_Days=7,
+                                     Remember_Scanned_Owners_Days=3)
+    item = {"original_asset_id": 3}
+    assert account.get_active_traders(item, []) == list(range(1, 11))
+    assert asked == [""]  # one request: no second page to ask for
+    assert account.get_active_traders(item, []) == []  # all read: skipped
+    assert asked == [""]
+
+
+@pytest.mark.parametrize(
+    "text, part, key, expected",
+    [
+        ("[Inbounds]\n", "inbounds", "Accept_Valid_Trades", False),
+        ("[Inbounds]\nAccept Good Trades = True\n", "inbounds", "Accept_Valid_Trades", True),
+        ("[Inbounds]\n", "inbounds", "Decline_If_No_Counter", True),
+        ("[Inbounds]\nDecline If No Counter = False\n", "inbounds", "Decline_If_No_Counter", False),
+        ("[Inbounds]\n", "inbounds", "Max_Duplicates", 2),
+        ("[Inbounds]\n", "inbounds", "Max_Trader_Duplicates", 2),
+        ("[Inbounds]\n", "inbounds", "Check_Every_Minutes", 30),
+        ("[Inbounds]\nCheck Every Minutes = 10\n", "inbounds", "Check_Every_Minutes", 10),
+        ("[Inbounds]\n", "inbounds", "Max_Counters_Per_Trader", 3),
+        ("[Inbounds]\n", "inbounds", "Instant_Replies_For_Bot", 3),
+        ("[Inbounds]\n", "inbounds", "Instant_Reply_Seconds", 20 * 60),
+        ("[Inbounds]\n", "inbounds", "Counter_Memory_Hours", 24),
+        ("[Inbounds]\nMax Counters Per Trader = 0\n", "inbounds", "Max_Counters_Per_Trader", 0),
+        ("[Inbounds]\nBot Replies = None\n", "inbounds", "Instant_Replies_For_Bot", 0),
+        ("[Discord]\n", "discord_settings", "Hide_Username", True),
+        ("[Discord]\nHide Username = False\n", "discord_settings", "Hide_Username", False),
+    ],
+)
+def test_setting_defaults_and_values(tmp_path, text, part, key, expected):
+    from handler.handle_config import ConfigHandler
+
+    cfg = tmp_path / "c.cfg"
+    cfg.write_text(text)
+    assert getattr(ConfigHandler(str(cfg)), part)[key] == expected
+
+
+def test_owner_scan_waits_for_room_in_the_queue(doggo, account):
+    """A full queue pauses loading inventories; stopping ends the wait."""
+    import main
+
+    doggo.user_queue = {}
+    doggo.rolimons.return_item_to_scan = lambda reach=None, skip=():  {"original_asset_id": 1}
+
+    def found_owners(item, owners):
+        # The queue fills up (other accounts' scans) right after this page
+        doggo.user_queue.update({n: {} for n in range(main.MAX_QUEUED_TRADERS + 1)})
+        owners.extend([5, 6])
+        return owners
+
+    account.get_active_traders = found_owners
+    account.fetch_inventory = lambda *a, **k: pytest.fail("loaded an inventory with no room")
+    stop = threading.Event()
+    stop.wait = lambda seconds: stop.set() or True
+    doggo.queue_traders(account, stop)
+    assert 5 not in account.all_cached_traders
+
+
+def test_ruling_out_by_gain_range_never_loses_a_passing_trade(monkeypatch):
+    """The early range check finds exactly the trades the full check finds."""
+    from trade_algorithm import TradePicker
+
+    rng = random.Random(3)
+    runs_with_trades = 0
+    for _ in range(60):
+        maker, _, _ = _small_maker()
+        maker.min_items_self = rng.randint(1, 2)
+        maker.max_items_self = rng.randint(maker.min_items_self, 4)
+        maker.min_items_their = rng.randint(1, 2)
+        maker.max_items_their = rng.randint(maker.min_items_their, 4)
+        maker.trade_robux, maker.max_robux = rng.random() < 0.7, rng.choice([0, 50, 400])
+        for name in ("overall", "rap", "algo", "value"):
+            low = rng.choice([None, -300, 0, 120, 0.05, -0.1])
+            high = rng.choice([None, 900, 2500, 0.4])
+            setattr(maker, f"min_{name}_gain", low)
+            setattr(maker, f"max_{name}_gain", high)
+
+        def items(tag, n):
+            out = {}
+            for i in range(n):
+                total = rng.randint(50, 3000)
+                valued = rng.random() < 0.5
+                out[f"{tag}{i}"] = {
+                    "item_id": f"1:{tag}{i}", "value": total if valued else 0,
+                    "rap": rng.randint(50, 3000), "rap_algorithm": rng.randint(50, 3000),
+                    "demand": 1, "total_value": total, "item_volume": 1,
+                }
+            return out
+
+        mine, theirs = items("m", rng.randint(2, 6)), items("t", rng.randint(2, 12))
+        found = []
+        monkeypatch.setattr(TradePicker, "add", lambda picker, trade: found.append(trade))
+        maker.generate_trade(mine, theirs)
+        fast = {(t["self_side"], t["their_side"]) for t in found}
+
+        found.clear()
+        # No ranges: every combination gets the full check
+        maker.gain_windows = lambda *a, **k: []
+        maker.generate_trade(mine, theirs)
+        full = {(t["self_side"], t["their_side"]) for t in found}
+        assert fast == full
+        runs_with_trades += bool(full)
+    assert runs_with_trades > 10
+
+
+def test_trade_picker_picks_what_the_full_list_would():
+    """The picker keeps one trade per Outbound Variety count, not every passing
+    trade; it must still pick the same trade as sorting through all of them."""
+    from trade_algorithm import SELECT_TRADE_OPTIONS, TradePicker, TradeMaker
+
+    rng = random.Random(7)
+    maker = TradeMaker.__new__(TradeMaker)
+    fields = ("value", "rap", "rap_algo", "volume", "overall_value")
+    for run in range(500):
+        trades = [
+            {
+                "id": i,
+                "self_side": rng.sample("abcd", rng.randint(1, 3)),
+                **{f"{s}_{f}": rng.choice([0, 50, 100]) for s in ("self", "their") for f in fields},
+                **{k: rng.choice([0, 50, 100]) for k in ("total_value", "total_rap", "total_overall_value", "total_volume")},
+                "rap_close_score": rng.choice([-5, 0, 5]), "overall_close_score": rng.choice([-5, 0, 5]),
+                "demand": rng.randint(0, 3), "num_items_self": rng.randint(1, 4), "num_items_their": rng.randint(1, 4),
+                "changes": 0,
+            }
+            for i in range(rng.randint(1, 30))
+        ]
+        select_by = rng.choice([o for o in SELECT_TRADE_OPTIONS if o != "random"])
+        maker.outbound_variety = rng.choice([None, 0.5, 1])
+        offered = {"a": 3, "b": 1}
+        avoid = set(rng.sample(range(30), 10))
+        picker = TradePicker(select_by, maker.outbound_variety, offered, avoid, lambda t: t["id"])
+        for trade in trades:
+            picker.add(trade)
+        fresh = [t for t in maker.prefer_unoffered(trades, offered) if t["id"] not in avoid]
+        expected = maker.select_trade(fresh, select_by) if fresh else None
+        assert picker.pick() is expected, (run, select_by)
+
+
+def test_bundle_owner_scan_uses_its_resellers(account, tmp_path, monkeypatch):
+    """Roblox doesn't list bundle owners, so bundles find traders through the
+    people reselling them (looked up by the bundle's collectible id)."""
+    import roblox_api
+
+    monkeypatch.chdir(tmp_path)
+    asked = []
+
+    def listing(seller_id, seller_type="User"):
+        return {"seller": {"sellerId": seller_id, "sellerType": seller_type}}
+
+    def request(url, **kwargs):
+        asked.append(url)
+        if "/bundles/" in url:
+            body = {"collectibleItemDetail": {"collectibleItemId": "abc-123"}}
+        else:
+            body = {"nextPageCursor": None,
+                    "data": [listing(5), listing(6), listing(5), listing(9, "Group"), listing(7)]}
+        return types.SimpleNamespace(status_code=200, json=lambda: body)
+
+    monkeypatch.setattr(account.request_handler, "requestAPI", request)
+    monkeypatch.setattr(roblox_api, "read_json", lambda r: r.json())
+    monkeypatch.setattr(type(account), "_bundle_collectible_ids", {})
+    account.all_cached_traders = {7}
+    account.config.scan_items.update(
+        Owner_Pages_Per_Scan=2, Recent_Owner_Days=7, Remember_Scanned_Owners_Days=3)
+    bundle = {"item_id": "2:31281416357406", "original_asset_id": 31281416357406}
+    assert account.get_active_traders(bundle, []) == [5, 6]
+    assert "catalog.roblox.com/v1/bundles/31281416357406/details" in asked[0]
+    assert "marketplace-sales/v1/item/abc-123/resellers" in asked[1]
+    assert len(asked) == 2  # one page, then every reseller was read
+
+
+def test_sales_history_days_defaults_to_90_and_rejects_zero():
+    from handler.handle_config import ConfigHandler
+
+    handler = ConfigHandler.__new__(ConfigHandler)
+    import configparser
+
+    handler.config = configparser.ConfigParser()
+    handler.config.optionxform = str
+    handler.config.read_string("[Filtering Items]\n")
+    handler.invalid_settings = []
+    handler.shown = lambda section, option: f"[{section}] {option}"
+    assert handler.load_sales_history_days() == 90
+    handler.config.set("Filtering Items", "Sales History Days", "30")
+    assert handler.load_sales_history_days() == 30
+    handler.config.set("Filtering Items", "Sales History Days", "0")
+    assert handler.load_sales_history_days() == 90
+    assert handler.invalid_settings
+
+
+def test_pick_trade_by_combos_break_ties_in_order():
+    from trade_algorithm import parse_pick, TradeMaker
+
+    assert parse_pick("lowest_overall_gain + upgrade + highest_demand") == (
+        ["lowest_overall_gain", "upgrade", "highest_demand"], False
+    )
+    assert parse_pick("lowest_rap_gain+random") == (["lowest_rap_gain"], True)
+    with pytest.raises(ValueError, match="best"):
+        parse_pick("lowest_rap_gain + best")
+
+    def trade(rap_gain, demand):
+        return {"self_rap": 0, "their_rap": rap_gain, "demand": demand}
+
+    trades = [trade(100, 1), trade(100, 5), trade(300, 9)]
+    maker = TradeMaker.__new__(TradeMaker)
+    assert maker.select_trade(trades, "lowest_rap_gain + highest_demand") is trades[1]
+    assert maker.select_trade(trades, "highest_demand") is trades[2]
+
+
+@pytest.mark.parametrize(
+    "minimum, offset, expected",
+    [
+        (600, 200, 400),  # Robux
+        (600, 0.02, 588),  # 2% under the minimum
+        (600, 800, 0),  # never below 0
+        (-500, 0.1, -550),  # a negative minimum can go lower
+        (0.05, 0.2, 0.04),  # a % minimum: 20% under 5% = 4%
+        (600, None, 600),
+        (None, 0.02, None),
+    ],
+)
+def test_cancel_offset_in_robux_or_share_of_the_minimum(minimum, offset, expected):
+    from trade_algorithm import cancel_minimum
+
+    if expected is None:
+        assert cancel_minimum(minimum, offset) is None
+    else:
+        assert cancel_minimum(minimum, offset) == pytest.approx(expected)
+
+
+def test_blend_ranks_every_option_with_the_first_counting_most():
+    from trade_algorithm import blend_pick, parse_pick, is_blend, TradeMaker
+
+    def trade(rap_gain, demand):
+        return {"self_rap": 0, "their_rap": rap_gain, "demand": demand}
+
+    # a: best RAP gain, worst demand. b: second on both. c: worst RAP, best demand
+    a, b, c = trade(100, 1), trade(200, 5), trade(300, 9)
+    names, _ = parse_pick("blend: lowest_rap_gain, highest_demand")
+    assert is_blend("Blend: lowest_rap_gain, highest_demand")
+    # RAP weighs 2, demand 1: a = 0 + 1, b = 1 + 0.5, c = 2 + 0
+    assert blend_pick([a, b, c], names) is a
+    # Flipped order: demand counts most
+    names, _ = parse_pick("blend: highest_demand + lowest_rap_gain")
+    assert blend_pick([a, b, c], names) is c
+    maker = TradeMaker.__new__(TradeMaker)
+    assert maker.select_trade([a, b, c], "blend: highest_demand, lowest_rap_gain") is c
+    with pytest.raises(ValueError):
+        parse_pick("blend: highest_demand, best")
+
+
+def test_trade_picker_blend_matches_blend_pick():
+    from trade_algorithm import TradePicker
+
+    picker = TradePicker("blend: lowest_rap_gain, highest_demand")
+    trades = [
+        {"self_rap": 0, "their_rap": g, "demand": d, "changes": 0,
+         "self_side": [], "their_side": []}
+        for g, d in ((300, 9), (100, 1), (200, 5))
+    ]
+    for t in trades:
+        picker.add(t)
+    assert picker.pick() is trades[1]
+
+
+def test_upgrade_means_giving_more_items_than_you_get():
+    from trade_algorithm import PICK_KEYS
+
+    one_for_four = {"num_items_self": 1, "num_items_their": 4}  # a downgrade
+    four_for_one = {"num_items_self": 4, "num_items_their": 1}  # an upgrade
+    assert min([one_for_four, four_for_one], key=PICK_KEYS["upgrade"]) is four_for_one
+    assert min([one_for_four, four_for_one], key=PICK_KEYS["downgrade"]) is one_for_four

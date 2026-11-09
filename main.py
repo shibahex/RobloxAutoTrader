@@ -16,6 +16,7 @@ from handler.handle_cli import Terminal
 from handler.handle_discord import DiscordHandler
 from handler import exceptions_types
 from handler.handle_trade_ads import TradeAdPoster
+from handler.rolimons_login import rolimons_login
 from version import full_version
 from handler import update_check
 
@@ -28,6 +29,9 @@ from handler import update_check
     - don't keep countering trades from the same person
 """
 
+
+# Traders waiting with their inventory loaded; owner scans pause above this
+MAX_QUEUED_TRADERS = 20
 
 class Doggo:
     def __init__(self):
@@ -180,13 +184,21 @@ class Doggo:
         It uses the roblox account to scrape Roblox Owner API and checks if they arent in the cache
         It also checks if you can trade  with them and adds them into self.user_queue
         """
+        def wait_for_room() -> bool:
+            """Waits while the queue is full. False = the bot is stopping."""
+            while len(self.user_queue) > MAX_QUEUED_TRADERS:
+                if stop_event.wait(5):
+                    return False
+            return not stop_event.is_set()
+
         while not stop_event.is_set() and not self.is_disabled(roblox_account):
-            if len(self.user_queue) > 20:
-                time.sleep(40)
-                continue
+            if not wait_for_room():
+                return
 
             try:
-                random_item = self.rolimons.return_item_to_scan()
+                random_item = self.rolimons.return_item_to_scan(
+                    skip=roblox_account.owner_pages().done_items(),
+                )
             except exceptions_types.NoItemsToScan as e:
                 log(f"[OWNERS] {e}", severityNum=3)
                 time.sleep(60)
@@ -211,7 +223,9 @@ class Doggo:
                 log(f"[OWNERS] Found {len(owners)} new owners: {owners}")
 
             for owner in owners:
-                if stop_event.is_set():
+                # A page can hold many owners: load their inventories only as
+                # the queue has room, so they're fresh when traded with
+                if not wait_for_room():
                     return
                 if int(owner) in roblox_account.all_cached_traders:
                     if roblox_account.config.debug["show_scanning_users"]:
@@ -374,16 +388,41 @@ class Doggo:
         if config.debug["dont_send_trade"]:
             log("[TRADE ADS] Not posting ads: Dont Send Trades is on (test mode)")
             return
+        auto_login = config.trade_ads["Auto_Rolimons_Login"]
+        if auto_login:
+            for account in roblox_accounts:
+                if not account.rolimons_cookie:
+                    self.rolimons_login(account)
         with_cookie = [a for a in roblox_accounts if a.rolimons_cookie]
         if not with_cookie:
             log(
-                "[TRADE ADS] No account has a Rolimons cookie. "
-                "Add one in Account Manager > Rolimons Cookies.",
+                "[TRADE ADS] No account is logged into Rolimons"
+                + ("" if auto_login else ": turn on [Trade Ads] Auto Rolimons Login"),
                 severityNum=2,
             )
             return
-        poster = TradeAdPoster(config.trade_ads)
+        poster = TradeAdPoster(
+            config.trade_ads, login=self.rolimons_login if auto_login else None
+        )
         self.start_thread("Trade ads", self.trade_ad_thread, poster, with_cookie)
+
+    def rolimons_login(self, account) -> bool:
+        """Logs the account into Rolimons with its Roblox cookie and saves the cookie."""
+        try:
+            cookie = rolimons_login(account.request_handler, account.account_id)
+        except exceptions_types.TradebotError as e:
+            log(
+                f"[TRADE ADS] Couldn't log {account.username} into Rolimons: {e}",
+                severityNum=2,
+            )
+            return False
+        account.rolimons_cookie = cookie
+        try:
+            self.json.save_rolimons_cookie_for(account.account_id, cookie)
+        except exceptions_types.TradebotError as e:
+            log(f"[TRADE ADS] Couldn't save the Rolimons cookie: {e}", severityNum=2)
+        log(f"[TRADE ADS] Logged {account.username} into Rolimons")
+        return True
 
     def trade_ad_thread(self, poster, accounts):
         while True:
@@ -761,7 +800,7 @@ class Doggo:
             try:
                 roblox_cookie = {".ROBLOSECURITY": account["cookie"]}
                 auth_secret = account["auth_secret"]
-                user_id = account["user_id"]
+                account["user_id"]
             except KeyError as e:
                 log(
                     f"[BOT] {name} in cookies.json is missing {e}, skipping it", severityNum=3
@@ -785,9 +824,6 @@ class Doggo:
             # Optional, for [Trade Ads]
             roblox_account.rolimons_cookie = account.get("rolimons_cookie")
 
-            user_config = self.account_configs.get_config(user_id)
-            if user_config:
-                roblox_account.config.trading = user_config
             roblox_accounts.append(roblox_account)
         return roblox_accounts
 

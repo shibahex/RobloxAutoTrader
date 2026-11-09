@@ -1,6 +1,6 @@
 [← Config guide](README.md)
 
-# [debug]
+# [Debug]
 
 | Setting | What it does |
 |---|---|

@@ -32,17 +32,23 @@ def _positive_number(value, default):
     return default
 
 
+def item_number(item_id) -> str:
+    """The plain ID of an item: "1:1029025" (item) and "2:939596" (bundle) -> the number."""
+    return str(item_id).strip().split(":")[-1]
+
+
 def _item_ids(values):
-    """NFT/NFR entries as Rolimons IDs: "1029025" becomes "1:1029025" (bundles
-    need the "2:" prefix written out)."""
-    ids = []
-    for value in values or []:
-        value = str(value).strip()
-        if value.isdigit():
-            value = f"1:{value}"
-        if value:
-            ids.append(value)
-    return ids
+    """
+    NFT/NFR entries as plain IDs. Items and bundles are told apart by the
+    inventory, so no "2:" is needed (old "1:"/"2:" entries still work).
+    """
+    return [item_number(value) for value in values or [] if str(value).strip()]
+
+
+def on_item_list(item_id, ids) -> bool:
+    """True when the item (an item or a bundle) is in an NFT/NFR list."""
+    number = item_number(item_id)
+    return any(item_number(entry) == number for entry in ids or [])
 
 
 # [Inbound Settings] gain -> the [Trading Settings] key it replaces for inbounds
@@ -72,12 +78,135 @@ def create_config(filename="config.cfg", default=DEFAULT_CONFIG) -> bool:
     return True
 
 
+def _layout():
+    """
+    (old section, old option) -> (new section, new option). config.cfg uses
+    the new names; the code reads the old ones, so a config with either works
+    (see ConfigHandler.use_new_names).
+    """
+    gains = {
+        "Minimum Overall Value Gain": "Min Overall Profit",
+        "Maximum Overall Value Gain": "Max Overall Profit",
+        "Minimum Value Gain": "Min Value Profit",
+        "Maximum Value Gain": "Max Value Profit",
+        "Minimum RAP Gain": "Min RAP Profit",
+        "Maximum RAP Gain": "Max RAP Profit",
+        "Minimum Rap Algorithm Gain": "Min Algorithm Profit",
+        "Maximum Rap Algorithm Gain": "Max Algorithm Profit",
+    }
+    sections = {
+        ("Trading Settings", "Profit"): {
+            **gains,
+            "Skip Value Gain When No Valued Items": "Skip Value Profit If No Valued Items",
+            "RAP Algorithm for Valued Items": "Algorithm For Valued Items",
+        },
+        ("Trading Settings", "Trade Rules"): {
+            "Minimum Items on Your Side": "Min Items Yours",
+            "Maximum Items on Your Side": "Max Items Yours",
+            "Minimum Items on Their Side": "Min Items Theirs",
+            "Maximum Items on Their Side": "Max Items Theirs",
+            "Trade Robux": "Add Robux",
+            "Max Robux": "Max Robux",
+            "Robux Divide Percentage": "Robux Divide Percentage",
+            "Min Overall Value Score Percentage": "Min Overall Score",
+            "Max Overall Value Score Percentage": "Max Overall Score",
+            "Min RAP Score Percentage": "Min RAP Score",
+            "Max RAP Score Percentage": "Max RAP Score",
+            "Minimum Value Sum Of Trade": "Min Trade Value",
+            "Minimum Rap Sum Of Trade": "Min Trade RAP",
+            "Trade For Faces": "Receive Faces",
+            "Trade For Gears": "Receive Gears",
+        },
+        ("Filtering Generated Trades", "Picking Trades"): {
+            "Max Seconds Spent on One User": "Max Seconds Per Account",
+            "Max Seconds Spent on Generating Trades": "Max Seconds Per Trader",
+            "Max Valid Trades": "Stop After Passing Trades",
+            "Select Trade Using": "Pick Trade By",
+            "Outbound Variety": "Outbound Variety",
+        },
+        ("Filtering Items", "Items"): {
+            "NFT": "Never Give",
+            "NFR": "Never Receive",
+            "Maximum Amount of Duplicate Items": "Max Duplicates Owned",
+            "Maximum Amount of Trader Duplicate Items": "Max Duplicates From Trader",
+            "Minimum Valued Item Demand": "Min Demand",
+            "Minimum Daily Sales of Item": "Min Daily Sales",
+            "Maximum Average Gaps in Sales": "Max Days Between Sales",
+            "Sales History Days": "Sales History Days",
+        },
+        ("Getting Owners of Items", "Finding Traders"): {
+            "Minimum Value of Item": "Min Item Value",
+            "Minimum Rap of Item": "Min Item RAP",
+            "Minimum Owners of Item": "Min Item Owners",
+            "Minimum Demand of Item": "Min Item Demand",
+            "Minimum Trend of Item": "Min Item Trend",
+            "Scan Type": "Scan Type",
+            "Scan Rares": "Scan Rares",
+            "Scrape Rolimon Ads": "Scrape Rolimon Ads",
+            "Owner Pages Per Scan": "Owner Pages Per Scan",
+            "Recent Owner Days": "Recent Owner Days",
+            "Remember Scanned Owners Days": "Remember Scanned Owners Days",
+        },
+        ("Filtering Users", "Finding Traders"): {
+            "Minimum Total Items": "Min Trader Items",
+        },
+        ("Projected Detection", "Projected"): {
+            "Detect Rolimons Projecteds": "Use Rolimons Projected Flag",
+            "Check Valued Items": "Check Valued Items",
+            "Maximum Graph Difference": "Max Price Rise",
+            "Minimum Graph Difference": "Max Price Drop",
+        },
+        ("Inbound Settings", "Inbounds"): {
+            **gains,
+            "Accept Valid Trades": "Accept Good Trades",
+            "Counter Trades": "Counter",
+            "Dont Counter Wins": "Skip Countering Wins",
+            "Decline If No Counter": "Decline If No Counter",
+            "Maximum Amount of Duplicate Items": "Max Duplicates Owned",
+            "Maximum Amount of Trader Duplicate Items": "Max Duplicates From Trader",
+            "Max Counters Per Trader": "Max Counters Per Trader",
+            "Instant Reply Minutes": "Bot Reply Minutes",
+            "Instant Replies To Call It A Bot": "Bot Replies",
+            "Counter Memory Hours": "Counter Memory Hours",
+            "Check Inbounds Every Minutes": "Check Every Minutes",
+        },
+        ("Outbound Settings", "Outbounds"): {
+            "Outbound Minimum Gain Offset to Cancel": "Overall And RAP Cancel Offset",
+            "RAP Algorithm Gain Offset to Cancel": "Algorithm Cancel Offset",
+            "Keep Trades Sent Before Config Change": "Keep Trades On Config Change",
+            "Cancel If Receiving Item Becomes Projected": "Cancel If Receiving Projected",
+            "Cancel If Sending Item Becomes Projected": "Cancel If Sending Projected",
+        },
+        ("debug", "Debug"): {
+            name: name
+            for name in (
+                "Dont Send Trades", "Dont Check Outbounds", "Ignore trade limit",
+                "Show Trade Debug", "Show Scanning Users", "Show Scanning Inventory",
+            )
+        },
+    }
+    return {
+        (old_section, old): (new_section, new)
+        for (old_section, new_section), names in sections.items()
+        for old, new in names.items()
+    }
+
+
+LAYOUT = _layout()
+# (new section, new option) -> (old section, old option), lowercased
+OLD_NAMES = {
+    (s.lower(), o.lower()): old for old, (s, o) in LAYOUT.items()
+}
+NEW_NAMES = {(s.lower(), o.lower()): new for (s, o), new in LAYOUT.items()}
+
+
 class ConfigHandler:
     def __init__(self, filename="config.cfg"):
         if os.path.basename(filename) == "config.cfg":
             create_config(filename, os.path.join(os.path.dirname(filename), DEFAULT_CONFIG))
         self.config = configparser.ConfigParser()
         self.config.read(filename)
+        self.use_new_names()
         # "[Section] Option" of every setting that couldn't be read
         self.invalid_settings = []
 
@@ -166,9 +295,10 @@ class ConfigHandler:
         section = "Trade Ads"
 
         def invalid(option, why):
-            self.invalid_settings.append(f"[{section}] {option} ({why})")
+            self.invalid_settings.append(f"{self.shown(section, option)} ({why})")
 
         enabled = self.get_boolean("Trade Ads", "Enabled")
+        auto_login = self.get_boolean("Trade Ads", "Auto Rolimons Login")
 
         minutes = self.get_float_default("Trade Ads", "Post Every Minutes", 20)
         if minutes == "Not Set":
@@ -197,7 +327,7 @@ class ConfigHandler:
         def item_ids(values, option):
             ids = []
             for raw in values:
-                raw = raw.strip().removeprefix("1:")
+                raw = item_number(raw)
                 if not raw or raw.lower() == "none":
                     continue
                 if not raw.isdigit():
@@ -246,6 +376,8 @@ class ConfigHandler:
 
         return {
             "Enabled": bool(enabled) and enabled != "Not Set",
+            # On unless set to False
+            "Auto_Rolimons_Login": auto_login is not False,
             "Post_Every_Minutes": minutes,
             "Offer_Items": offer_count,
             "Offer_Items_Using": pick,
@@ -270,6 +402,16 @@ class ConfigHandler:
                     "Outbound Settings", "Only Cancel Losing Trades After Config Change"
                 )
             ),
+            # Missing in older configs = True (how it always worked)
+            "Cancel_Receiving_Projected": self.get_boolean(
+                "Outbound Settings", "Cancel If Receiving Item Becomes Projected"
+            )
+            is not False,
+            # Missing = False
+            "Cancel_Sending_Projected": self.get_boolean(
+                "Outbound Settings", "Cancel If Sending Item Becomes Projected"
+            )
+            is True,
         }
 
     def load_discord(self):
@@ -301,6 +443,16 @@ class ConfigHandler:
             ),
             "Scan_Rares": self.get_boolean("Getting Owners of Items", "Scan Rares"),
             "Scan_Type": self.get_string("Getting Owners of Items", "Scan Type"),
+            # Missing in older configs = these defaults
+            "Owner_Pages_Per_Scan": self.get_int_default(
+                "Getting Owners of Items", "Owner Pages Per Scan", 2
+            ),
+            "Recent_Owner_Days": self.get_float_default(
+                "Getting Owners of Items", "Recent Owner Days", 7
+            ),
+            "Remember_Scanned_Owners_Days": self.get_float_default(
+                "Getting Owners of Items", "Remember Scanned Owners Days", 3
+            ),
             "Scrape_Rolimon_Ads": self.get_boolean(
                 "Getting Owners of Items", "Scrape Rolimon Ads"
             ),
@@ -353,15 +505,29 @@ class ConfigHandler:
             "MaxSalesGap": self.get_float(
                 "Filtering Items", "Maximum Average Gaps in Sales"
             ),
+            # How many days of sales history RAP Algorithm, daily sales and
+            # sales gaps use (older sales would drag them toward old prices)
+            "Sales_History_Days": self.load_sales_history_days(),
         }
+
+    def load_sales_history_days(self):
+        days = self.get_int_default("Filtering Items", "Sales History Days", 90)
+        if days == "Not Set":
+            return 90
+        if days is None or days < 1:
+            self.invalid_settings.append(
+                f"{self.shown('Filtering Items', 'Sales History Days')} (must be a whole number above 0)"
+            )
+            return 90
+        return days
 
     def load_filter_generated(self):
         return {
             "Max_Seconds_Spent_on_One_User": self.get_float(
                 "Filtering Generated Trades", "Max Seconds Spent on One User"
             ),
-            "Max_Seconds_Spent_on_Generating_Trades": self.get_float(
-                "Filtering Generated Trades", "Max Seconds Spent on Generating Trades"
+            "Max_Seconds_Spent_on_Generating_Trades": self.get_float_default(
+                "Filtering Generated Trades", "Max Seconds Spent on Generating Trades", 600
             ),
             "Max_Valid_Trades": self.get_float(
                 "Filtering Generated Trades", "Max Valid Trades"
@@ -380,17 +546,65 @@ class ConfigHandler:
             return 0.0
         if not 0 <= value <= 1:
             self.invalid_settings.append(
-                f"[{section}] {option} (must be between 0 and 1)"
+                f"{self.shown(section, option)} (must be between 0 and 1)"
             )
             return 0.0
         return value
 
+    # Where each load_trading setting lives in config.cfg (for writing an
+    # account's config back into config.cfg)
+    TRADING_OPTIONS = {
+        "Outbound_Cancel_Offset": ("Outbound Settings", "Outbound Minimum Gain Offset to Cancel"),
+        "Algo_Cancel_Offset": ("Outbound Settings", "RAP Algorithm Gain Offset to Cancel"),
+        "Minimum_RAP_Gain": ("Trading Settings", "Minimum RAP Gain"),
+        "Maximum_RAP_Gain": ("Trading Settings", "Maximum RAP Gain"),
+        "Minimum_Value_Gain": ("Trading Settings", "Minimum Value Gain"),
+        "Maximum_Value_Gain": ("Trading Settings", "Maximum Value Gain"),
+        "Skip_Value_Gain_Without_Valued": ("Trading Settings", "Skip Value Gain When No Valued Items"),
+        "Minimum_Overall_Gain": ("Trading Settings", "Minimum Overall Value Gain"),
+        "Maximum_Overall_Gain": ("Trading Settings", "Maximum Overall Value Gain"),
+        "Rap_Algo_For_Valued": ("Trading Settings", "RAP Algorithm for Valued Items"),
+        "Minimum_Algo_Gain": ("Trading Settings", "Minimum Rap Algorithm Gain"),
+        "Maximum_Algo_Gain": ("Trading Settings", "Maximum Rap Algorithm Gain"),
+        "TradeRobux": ("Trading Settings", "Trade Robux"),
+        "RobuxDividePercentage": ("Trading Settings", "Robux Divide Percentage"),
+        "MaxRobux": ("Trading Settings", "Max Robux"),
+        "MinOverallValueScorePercentage": ("Trading Settings", "Min Overall Value Score Percentage"),
+        "MaxOverallValueScorePercentage": ("Trading Settings", "Max Overall Value Score Percentage"),
+        "MinRAPScorePercentage": ("Trading Settings", "Min RAP Score Percentage"),
+        "MaxRAPScorePercentage": ("Trading Settings", "Max RAP Score Percentage"),
+        "MinimumItemsYourSide": ("Trading Settings", "Minimum Items on Your Side"),
+        "MaximumItemsYourSide": ("Trading Settings", "Maximum Items on Your Side"),
+        "MinimumItemsTheirSide": ("Trading Settings", "Minimum Items on Their Side"),
+        "MaximumItemsTheirSide": ("Trading Settings", "Maximum Items on Their Side"),
+        "MinimumValueOfTrade": ("Trading Settings", "Minimum Value Sum Of Trade"),
+        "MinimumRapOfTrade": ("Trading Settings", "Minimum Rap Sum Of Trade"),
+        "TradeForFaces": ("Trading Settings", "Trade For Faces"),
+        "TradeForGears": ("Trading Settings", "Trade For Gears"),
+    }
+    ITEMS_OPTIONS = {
+        "NFT": ("Filtering Items", "NFT"),
+        "NFR": ("Filtering Items", "NFR"),
+        "Maximum_Amount_of_Duplicate_Items": ("Filtering Items", "Maximum Amount of Duplicate Items"),
+        "Maximum_Amount_of_Trader_Duplicate_Items": ("Filtering Items", "Maximum Amount of Trader Duplicate Items"),
+        "MinDemand": ("Filtering Items", "Minimum Valued Item Demand"),
+        "MinDailySales": ("Filtering Items", "Minimum Daily Sales of Item"),
+        "MaxSalesGap": ("Filtering Items", "Maximum Average Gaps in Sales"),
+    }
+    PICKING_OPTIONS = {
+        "Max_Seconds_Spent_on_One_User": ("Filtering Generated Trades", "Max Seconds Spent on One User"),
+        "Max_Seconds_Spent_on_Generating_Trades": ("Filtering Generated Trades", "Max Seconds Spent on Generating Trades"),
+        "Max_Valid_Trades": ("Filtering Generated Trades", "Max Valid Trades"),
+        "Select_Trade_Using": ("Filtering Generated Trades", "Select Trade Using"),
+        "Outbound_Variety": ("Filtering Generated Trades", "Outbound Variety"),
+    }
     def load_trading(self):
         return {
-            "Outbound_Cancel_Offset": self.get_int(
+            # Between 0 and 1 = a share of the minimum, otherwise Robux
+            "Outbound_Cancel_Offset": self.get_float(
                 "Outbound Settings", "Outbound Minimum Gain Offset to Cancel"
             ),
-            "Algo_Cancel_Offset": self.get_int(
+            "Algo_Cancel_Offset": self.get_float(
                 "Outbound Settings", "RAP Algorithm Gain Offset to Cancel"
             ),
             "Minimum_RAP_Gain": self.get_float("Trading Settings", "Minimum RAP Gain"),
@@ -400,6 +614,10 @@ class ConfigHandler:
             ),
             "Maximum_Value_Gain": self.get_float(
                 "Trading Settings", "Maximum Value Gain"
+            ),
+            # Missing in older configs = off
+            "Skip_Value_Gain_Without_Valued": bool(
+                self.get_boolean("Trading Settings", "Skip Value Gain When No Valued Items")
             ),
             "Minimum_Overall_Gain": self.get_float(
                 "Trading Settings", "Minimum Overall Value Gain"
@@ -513,11 +731,12 @@ class ConfigHandler:
         [Inbound Settings] gains, for accepting and countering. Only the ones
         that are set: the rest use [Trading Settings] (or the account's config).
         """
-        return {
+        gains = {
             key: self.get_float(section, option)
             for (section, option), key in INBOUND_GAINS.items()
             if self.config.has_option(section, option)
         }
+        return gains
 
     def load_projected_detection(self):
         return {
@@ -534,6 +753,11 @@ class ConfigHandler:
             "MinPriceDifference": self.get_float(
                 "Projected Detection", "MinPriceDifference"
             ),
+            # Valued items are priced by Rolimons, not sales: off (and missing)
+            # = they're never treated as projected
+            "Check_Valued_Items": self.get_boolean(
+                "Projected Detection", "Check Valued Items"
+            ) is True,
         }
 
     def load_mass_sender(self):
@@ -553,9 +777,9 @@ class ConfigHandler:
                 else None
             )
         except (ValueError, TypeError) as e:
-            log(f"[CONFIG] [{section}] {option} must be a whole number: {e}")
+            log(f"[CONFIG] {self.shown(section, option)} must be a whole number: {e}")
             self.invalid_settings.append(
-                f"[{section}] {option} (must be a whole number)"
+                f"{self.shown(section, option)} (must be a whole number)"
             )
             return "Not Set"
 
@@ -575,9 +799,15 @@ class ConfigHandler:
             except (AttributeError, ValueError, TypeError):
                 pass
             self.invalid_settings.append(
-                f"[{section}] {option} (must be a number or None)"
+                f"{self.shown(section, option)} (must be a number or None)"
             )
             return "Not Set"
+
+    def get_int_default(self, section, option, default):
+        """Like get_int, but a missing setting gets `default`."""
+        if not self.config.has_option(section, option):
+            return default
+        return self.get_int(section, option)
 
     def get_float_default(self, section, option, default):
         """Like get_float, but a missing setting gets `default` (None still means off)."""
@@ -593,8 +823,8 @@ class ConfigHandler:
                 else None
             )
         except (ValueError, TypeError) as e:
-            log(f"[CONFIG] Couldn't read [{section}] {option}: {e}")
-            self.invalid_settings.append(f"[{section}] {option}")
+            log(f"[CONFIG] Couldn't read {self.shown(section, option)}: {e}")
+            self.invalid_settings.append(f"{self.shown(section, option)}")
             return "Not Set"
 
     def get_boolean(self, section, option):
@@ -605,9 +835,9 @@ class ConfigHandler:
                 else None
             )
         except (ValueError, TypeError) as e:
-            log(f"[CONFIG] [{section}] {option} must be True or False: {e}")
+            log(f"[CONFIG] {self.shown(section, option)} must be True or False: {e}")
             self.invalid_settings.append(
-                f"[{section}] {option} (must be True or False)"
+                f"{self.shown(section, option)} (must be True or False)"
             )
             return "Not Set"
 
@@ -622,8 +852,46 @@ class ConfigHandler:
                 return valid_values
             return []
         except (ValueError, TypeError) as e:
-            log(f"[CONFIG] [{section}] {option} must be a list of whole numbers: {e}")
+            log(f"[CONFIG] {self.shown(section, option)} must be a list of whole numbers: {e}")
             return []
+
+    def use_new_names(self):
+        """
+        Copies settings written with the new names ([Profit] Min Overall
+        Profit...) to the old names the code reads. A config with the old
+        names works as before. If both are there, the new one wins.
+        """
+        self.new_names = False
+        # Old name -> how the file writes it, for messages
+        self.written_names = {}
+        for (new_section, new_option), (old_section, old_option) in OLD_NAMES.items():
+            section = next(
+                (s for s in self.config.sections() if s.lower() == new_section), None
+            )
+            if section is None or not self.config.has_option(section, new_option):
+                continue
+            self.new_names = True
+            written = NEW_NAMES[(old_section.lower(), old_option.lower())][1]
+            self.written_names[(old_section.lower(), old_option.lower())] = (
+                f"[{section}] {written}"
+            )
+            if not self.config.has_section(old_section):
+                self.config.add_section(old_section)
+            self.config.set(
+                old_section, old_option, self.config.get(section, new_option, raw=True)
+            )
+
+    def shown(self, section, option) -> str:
+        """A setting's name the way the config file writes it, for messages."""
+        written = getattr(self, "written_names", {}).get((section.lower(), option.lower()))
+        if written:
+            return written
+        if getattr(self, "new_names", False):
+            # Not in the file at all: name it the new way
+            new = NEW_NAMES.get((section.lower(), option.lower()))
+            if new:
+                return f"[{new[0]}] {new[1]}"
+        return f"[{section}] {option}"
 
     def validate_config(self):
         # Any setting that couldn't be read, named the way it's written in the file

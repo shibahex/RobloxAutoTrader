@@ -276,19 +276,15 @@ class JsonHandler:
             print("Cookie already exists.")
             time.sleep(1)
 
-    def set_rolimons_cookie(self, index: int, rolimons_cookie) -> bool:
-        """Saves (or with None, removes) an account's Rolimons cookie."""
+    def save_rolimons_cookie_for(self, user_id, rolimons_cookie) -> bool:
+        """Saves the Rolimons cookie of the account with this user id."""
         data = self.read_data()
-        accounts = data["roblox_accounts"]
-        if not 0 <= index < len(accounts):
-            self.cli.print_error("Invalid number.")
-            return False
-        if rolimons_cookie:
-            accounts[index]["rolimons_cookie"] = rolimons_cookie
-        else:
-            accounts[index].pop("rolimons_cookie", None)
-        self.write_data(data)
-        return True
+        for account in data.get("roblox_accounts", []):
+            if str(account.get("user_id")) == str(user_id):
+                account["rolimons_cookie"] = rolimons_cookie
+                self.write_data(data)
+                return True
+        return False
 
     def delete_cookie(self, index: int) -> None:
         data = self.read_data()
