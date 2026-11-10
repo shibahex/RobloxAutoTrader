@@ -1193,9 +1193,10 @@ class RobloxAPI:
     def send_generated_trade(self, trader_id, generated_trade, regenerate, counter_id=None):
         """
         Sends a trade from generate_trade. If the trader's trade quality filter
-        refuses it ("Trade value ratio is not sufficient"), sends the lowest
-        RAP gain trade that still passes the config instead, as long as it's
-        closer than the refused one (if it isn't, no trade would get through).
+        refuses it ("Trade value ratio is not sufficient"), sends the trade
+        with the closest RAP ratio that still passes the config instead, as
+        long as it's closer than the refused one (if it isn't, no trade that
+        passes would get through).
         regenerate(select_by): generates the trade again with that Pick Trade By.
         Returns the trade that was sent. Raises like send_trade.
         """
@@ -1210,23 +1211,29 @@ class RobloxAPI:
             )
             return trade
 
+        def ratio(trade):
+            """RAP we get per RAP we give, e.g. "x1.25 (+747 RAP)"."""
+            gain = trade["their_rap"] - trade["self_rap"]
+            if not trade["self_rap"]:
+                return f"{gain:+,} RAP"
+            return f"x{trade['their_rap'] / trade['self_rap']:.2f} ({gain:+,} RAP)"
+
         try:
             return send(generated_trade)
         except RatioTooLow:
-            rap_gain = PICK_KEYS["lowest_rap_gain"]
-            refused = rap_gain(generated_trade)
-            closer = regenerate("lowest_rap_gain")
-            if not closer or rap_gain(closer) >= refused:
+            closeness = PICK_KEYS["closest_score_based_on_rap"]
+            closer = regenerate("closest_score_based_on_rap")
+            if not closer or closeness(closer) >= closeness(generated_trade):
                 log(
                     f"[TRADING] {trader_id}'s trade ratio filter refused the trade "
-                    f"(RAP gain {refused:+,}) and no closer trade passes your config",
+                    f"({ratio(generated_trade)}) and no closer trade passes your config",
                     dontPrint=True,
                 )
                 raise
         log(
-            f"[TRADING] {trader_id}'s trade ratio filter refused the trade (RAP gain "
-            f"{refused:+,}), sending the lowest RAP gain one that passes your config "
-            f"({rap_gain(closer):+,})"
+            f"[TRADING] {trader_id}'s trade ratio filter refused the trade "
+            f"({ratio(generated_trade)}), sending the closest one that passes your "
+            f"config ({ratio(closer)})"
         )
         return send(closer)
 

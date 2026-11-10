@@ -4094,13 +4094,13 @@ def test_send_trade_ratio_rejection(router, account):
         account.send_trade(2, ["a"], ["b"])
 
 
-def test_select_by_override_picks_lowest_rap_gain():
+def test_select_by_override_picks_closest_rap_ratio():
     """A ratio retry wants the closest trade, even over a counter's fewest changes."""
     from handler.counter_history import trade_signature
     from trade_algorithm import PICK_KEYS
 
     maker, mine, theirs = counter_maker()
-    rap_gain = PICK_KEYS["lowest_rap_gain"]
+    rap_gain = PICK_KEYS["closest_score_based_on_rap"]
     gains, sent = [], set()
     while trade := maker.generate_trade(mine, theirs, counter_trade=True, avoid=sent):
         gains.append(rap_gain(trade))
@@ -4114,15 +4114,17 @@ def test_select_by_override_picks_lowest_rap_gain():
     trade = maker.generate_trade(
         mine, theirs, counter_trade=True,
         original={"self": ["1:3"], "their": ["1:23"]},
-        select_by="lowest_rap_gain",
+        select_by="closest_score_based_on_rap",
     )
     assert rap_gain(trade) == lowest
 
 
-def ratio_trade(rap_gain):
+def ratio_trade(rap_gain, self_rap=100):
+    their_rap = self_rap + rap_gain
     return {
         "self_side": ["a"], "their_side": ["b"], "self_robux": 0,
-        "self_rap": 100, "their_rap": 100 + rap_gain,
+        "self_rap": self_rap, "their_rap": their_rap,
+        "rap_close_score": rap_gain / (self_rap + their_rap) * 100,
     }
 
 
@@ -4137,12 +4139,13 @@ def test_ratio_rejection_resends_lowest_rap_gain_trade(account):
 
     account.send_trade = send_trade
     asked = []
-    closer = ratio_trade(5)
+    # A bigger RAP gain, but a much closer ratio: that's what the filter checks
+    closer = ratio_trade(100, self_rap=5000)
     result = account.send_generated_trade(
         2, ratio_trade(50), lambda select_by: asked.append(select_by) or closer,
         counter_id=9,
     )
-    assert result is closer and asked == ["lowest_rap_gain"]
+    assert result is closer and asked == ["closest_score_based_on_rap"]
     assert len(sent) == 2 and sent[1]["counter_id"] == 9
 
 
