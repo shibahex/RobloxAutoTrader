@@ -581,7 +581,7 @@ class RobloxAPI:
                 raise
             except TradebotError as e:
                 log(
-                    f"[INBOUND] Skipping trade {trade_id}: {short_error(e)}",
+                    f"[INBOUND] {self.username}: skipping trade {trade_id}: {short_error(e)}",
                     severityNum=2,
                 )
 
@@ -607,9 +607,11 @@ class RobloxAPI:
                 continue
             except CookieInvalid:
                 raise
+            except RatioTooLow:
+                continue  # send_generated_trade already logged it
             except TradebotError as e:
                 log(
-                    f"[INBOUND] Skipping trade {inbound['trade_id']}: {short_error(e)}",
+                    f"[INBOUND] {self.username}: skipping trade {inbound['trade_id']}: {short_error(e)}",
                     severityNum=2,
                 )
                 continue
@@ -706,7 +708,7 @@ class RobloxAPI:
                 raise
             except TradebotError as e:
                 log(
-                    f"[INBOUND] Skipping trade {trade_id}: {short_error(e)}",
+                    f"[INBOUND] {self.username}: skipping trade {trade_id}: {short_error(e)}",
                     severityNum=2,
                 )
                 continue
@@ -1218,6 +1220,7 @@ class RobloxAPI:
                 return f"{gain:+,} RAP"
             return f"x{trade['their_rap'] / trade['self_rap']:.2f} ({gain:+,} RAP)"
 
+        who = f"[TRADING] {self.username} -> {trader_id}:"
         try:
             return send(generated_trade)
         except RatioTooLow:
@@ -1225,25 +1228,25 @@ class RobloxAPI:
             closer = regenerate("closest_score_based_on_rap")
             if not closer or closeness(closer) >= closeness(generated_trade):
                 log(
-                    f"[TRADING] {trader_id}'s trade ratio filter refused the trade "
-                    f"({ratio(generated_trade)}) and no closer trade passes your config",
-                    dontPrint=True,
+                    f"{who} ratio filter refused {ratio(generated_trade)}, skipping "
+                    "(nothing closer passes your config)",
+                    severityNum=2,
                 )
                 raise
         log(
-            f"[TRADING] {trader_id}'s trade ratio filter refused the trade "
-            f"({ratio(generated_trade)}), trying the closest one that passes your "
-            f"config ({ratio(closer)})"
+            f"{who} ratio filter refused {ratio(generated_trade)}, "
+            f"retrying with {ratio(closer)}"
         )
         try:
             send(closer)
         except RatioTooLow:
             log(
-                f"[TRADING] {trader_id}'s filter refused the closest trade too "
-                f"({ratio(closer)}): nothing that passes your config gets through it"
+                f"{who} retry refused too at {ratio(closer)}, skipping "
+                "(nothing closer passes your config)",
+                severityNum=2,
             )
             raise
-        log(f"[TRADING] The closer trade to {trader_id} went through ({ratio(closer)})")
+        log(f"{who} retry went through at {ratio(closer)}")
         return closer
 
     def _capped_robux(self, self_robux) -> int:

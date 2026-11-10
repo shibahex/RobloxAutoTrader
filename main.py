@@ -718,8 +718,10 @@ class Doggo:
                 return "skipped"
             except exceptions_types.CookieInvalid:
                 raise
+            except exceptions_types.RatioTooLow:
+                return "skipped"  # send_generated_trade already logged it
             except exceptions_types.TradebotError as e:
-                log(f"[TRADING] Couldn't send a trade to {trader}: {exceptions_types.short_error(e)}", severityNum=2)
+                log(f"[TRADING] {account.username} couldn't send a trade to {trader}: {exceptions_types.short_error(e)}", severityNum=2)
                 return "skipped"
 
         account.last_sent_trade = time.time()
