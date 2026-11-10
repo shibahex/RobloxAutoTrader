@@ -1232,10 +1232,19 @@ class RobloxAPI:
                 raise
         log(
             f"[TRADING] {trader_id}'s trade ratio filter refused the trade "
-            f"({ratio(generated_trade)}), sending the closest one that passes your "
+            f"({ratio(generated_trade)}), trying the closest one that passes your "
             f"config ({ratio(closer)})"
         )
-        return send(closer)
+        try:
+            send(closer)
+        except RatioTooLow:
+            log(
+                f"[TRADING] {trader_id}'s filter refused the closest trade too "
+                f"({ratio(closer)}): nothing that passes your config gets through it"
+            )
+            raise
+        log(f"[TRADING] The closer trade to {trader_id} went through ({ratio(closer)})")
+        return closer
 
     def _capped_robux(self, self_robux) -> int:
         """Never offer more robux than the account has."""
