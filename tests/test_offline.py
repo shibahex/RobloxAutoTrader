@@ -4083,3 +4083,77 @@ def test_generated_trade_gives_away_projected_item():
     assert trade["self_side"] == ("proj",)
     maker.prioritize_projected = False
     assert maker.generate_trade(mine, theirs)["self_side"] == ("plain",)
+
+
+def test_send_trade_ratio_rejection(router, account):
+    router.set(
+        SEND,
+        resp(400, {"errors": [{"code": 0, "message": "Trade value ratio is not sufficient."}]}),
+    )
+    with pytest.raises(E.RatioTooLow):
+        account.send_trade(2, ["a"], ["b"])
+
+
+def test_select_by_override_picks_lowest_rap_gain():
+    """A ratio retry wants the closest trade, even over a counter's fewest changes."""
+    from handler.counter_history import trade_signature
+    from trade_algorithm import PICK_KEYS
+
+    maker, mine, theirs = counter_maker()
+    rap_gain = PICK_KEYS["lowest_rap_gain"]
+    gains, sent = [], set()
+    while trade := maker.generate_trade(mine, theirs, counter_trade=True, avoid=sent):
+        gains.append(rap_gain(trade))
+        sent.add(trade_signature(
+            [mine[k]["item_id"] for k in trade["self_side"]],
+            [theirs[k]["item_id"] for k in trade["their_side"]],
+            trade["self_robux"],
+        ))
+    lowest = min(gains)
+    assert max(gains) > lowest
+    trade = maker.generate_trade(
+        mine, theirs, counter_trade=True,
+        original={"self": ["1:3"], "their": ["1:23"]},
+        select_by="lowest_rap_gain",
+    )
+    assert rap_gain(trade) == lowest
+
+
+def ratio_trade(rap_gain):
+    return {
+        "self_side": ["a"], "their_side": ["b"], "self_robux": 0,
+        "self_rap": 100, "their_rap": 100 + rap_gain,
+    }
+
+
+def test_ratio_rejection_resends_lowest_rap_gain_trade(account):
+    sent = []
+
+    def send_trade(trader, mine, theirs, **kwargs):
+        sent.append(kwargs)
+        if len(sent) == 1:
+            raise E.RatioTooLow(message="ratio")
+        return 1
+
+    account.send_trade = send_trade
+    asked = []
+    closer = ratio_trade(5)
+    result = account.send_generated_trade(
+        2, ratio_trade(50), lambda select_by: asked.append(select_by) or closer,
+        counter_id=9,
+    )
+    assert result is closer and asked == ["lowest_rap_gain"]
+    assert len(sent) == 2 and sent[1]["counter_id"] == 9
+
+
+def test_ratio_rejection_gives_up_without_a_closer_trade(account):
+    sent = []
+
+    def send_trade(*args, **kwargs):
+        sent.append(1)
+        raise E.RatioTooLow(message="ratio")
+
+    account.send_trade = send_trade
+    with pytest.raises(E.RatioTooLow):
+        account.send_generated_trade(2, ratio_trade(5), lambda s: ratio_trade(5))
+    assert len(sent) == 1

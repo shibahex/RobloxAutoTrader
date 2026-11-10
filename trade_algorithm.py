@@ -461,10 +461,12 @@ class TradePicker:
     list would. Order of preference: Outbound Variety, the most of our
     projected items given away, not already sent, the
     fewest changed items (counters), then Pick Trade By (or random).
+    key_first: Pick Trade By decides before all of those (a retry that needs
+    the closest trade, whatever else the trade has).
     """
 
     def __init__(self, select_by, variety=None, offered=None, avoid=None,
-                 signature=None):
+                 signature=None, key_first=False):
         names, self.random_ties = parse_pick(select_by)
         # blend: options ranked together at the end (blend_pick)
         self.blend = names if is_blend(select_by) else None
@@ -474,6 +476,7 @@ class TradePicker:
         self.offered = offered
         self.avoid = avoid
         self.signature = signature
+        self.key_first = key_first
         self.passed = 0
         self.already_sent = 0
         self.low = self.high = None
@@ -500,6 +503,8 @@ class TradePicker:
             trade["changes"],
             self.key(trade) if self.key else 0,
         )
+        if self.key_first and self.key:
+            rank = (rank[-1],) + rank[:-1]
         best = self.best.get(reuse)
         if self.blend:
             # Keep every trade tied on the rest; blend_pick ranks them
@@ -687,6 +692,7 @@ class TradeMaker:
         original=None,
         avoid=None,
         about="",
+        select_by=None,
     ):
         """
         Algorithm responsible for generating combinations and validating them..
@@ -699,6 +705,10 @@ class TradeMaker:
         counters this trader already got.
         about: who the trade is for, in the "no trade passed" message. Counters
         don't log it (the inbound handler explains the decline instead).
+        select_by: a Pick Trade By that overrides the config's (and a counter's
+        random pick) and decides before everything else, e.g.
+        "closest_score_based_on_rap"
+        to retry a trade the trader's ratio filter refused.
         """
         self.last_failed = {}
 
@@ -709,7 +719,10 @@ class TradeMaker:
                 trade["self_robux"],
             )
 
-        if counter_trade:
+        key_first = select_by is not None
+        if key_first:
+            select_by = select_by.lower()
+        elif counter_trade:
             # Random, so the same counter isn't sent every time
             select_by = "random"
         else:
@@ -730,6 +743,7 @@ class TradeMaker:
             offered=offered,
             avoid=avoid,
             signature=signature,
+            key_first=key_first,
         )
 
         def pick_trade():

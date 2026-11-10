@@ -676,13 +676,19 @@ class Doggo:
         if account.config.debug["trading_debug"]:
             log(f"Generated trade: {generated_trade} {account.username}", severityNum=5)
 
-        self_side = generated_trade["self_side"]
-        their_side = generated_trade["their_side"]
-        self_robux = generated_trade["self_robux"]
-
         if not account.config.debug["dont_send_trade"]:
             try:
-                account.send_trade(trader, self_side, their_side, self_robux=self_robux)
+                generated_trade = account.send_generated_trade(
+                    trader,
+                    generated_trade,
+                    lambda select_by: account.trade_maker.generate_trade(
+                        account_inventory,
+                        trader_inventory,
+                        offered=account.offered_item_counts(),
+                        about=f"{account.username} -> {trader}: ",
+                        select_by=select_by,
+                    ),
+                )
             except exceptions_types.TradeLimit:
                 if account.config.debug["ignore_limit"]:
                     log(f"[TRADING] {account.username} hit its daily trade limit (Ignore trade limit is on, continuing)")

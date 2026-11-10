@@ -12,6 +12,7 @@ TradebotError
 │   │   └── TradeRejected        trade send/counter refused
 │   │       ├── InsufficientRobux
 │   │       ├── ItemsUnavailable
+│   │       ├── RatioTooLow      their Trade Quality filter refused it
 │   │       └── UserCannotTrade
 │   ├── AuthError                401/403 that isn't fixable by retrying
 │   │   └── CookieInvalid        cookie expired or logged out
@@ -104,6 +105,13 @@ class InsufficientRobux(TradeRejected):
 
 class ItemsUnavailable(TradeRejected):
     """One or more items are no longer owned or tradeable (Roblox code 12)."""
+
+
+class RatioTooLow(TradeRejected):
+    """
+    "Trade value ratio is not sufficient": the other user's trade quality
+    filter only lets through trades close in value.
+    """
 
 
 class UserCannotTrade(TradeRejected):

@@ -15,6 +15,7 @@ from handler.owner_pages import OwnerPages
 from handler.handle_json import JsonHandler
 from handler.handle_2fa import AuthHandler
 from trade_algorithm import (
+    PICK_KEYS,
     TradeMaker,
     failed_field,
     failed_text,
@@ -39,6 +40,7 @@ from handler.exceptions_types import (
     InsufficientRobux,
     ItemsUnavailable,
     RateLimited,
+    RatioTooLow,
     TradeRejected,
     TwoFactorError,
     UnknownItem,
@@ -996,22 +998,26 @@ class RobloxAPI:
         if not trader_inventory:
             return "failed"
 
-        generated_trade = self.counter_maker.generate_trade(
-            self.account_inventory,
-            trader_inventory,
-            counter_trade=True,
-            offered=self.offered_item_counts(),
-            original=(
-                {
-                    "self": trade["self_side_item_ids"],
-                    "their": trade["their_side_item_ids"],
-                }
-                if trade
-                else None
-            ),
-            # Never the same counter twice
-            avoid=self.counter_history.sent(trader_id),
-        )
+        def generate(select_by=None):
+            return self.counter_maker.generate_trade(
+                self.account_inventory,
+                trader_inventory,
+                counter_trade=True,
+                offered=self.offered_item_counts(),
+                original=(
+                    {
+                        "self": trade["self_side_item_ids"],
+                        "their": trade["their_side_item_ids"],
+                    }
+                    if trade
+                    else None
+                ),
+                # Never the same counter twice
+                avoid=self.counter_history.sent(trader_id),
+                select_by=select_by,
+            )
+
+        generated_trade = generate()
         if not generated_trade:
             if not self.config.inbounds["Decline_If_No_Counter"]:
                 log(
@@ -1023,13 +1029,11 @@ class RobloxAPI:
                 return "declined"
             return "failed"
 
-        self.send_trade(
+        generated_trade = self.send_generated_trade(
             trader_id,
-            generated_trade["self_side"],
-            generated_trade["their_side"],
-            counter_trade=True,
+            generated_trade,
+            generate,
             counter_id=trade_id,
-            self_robux=generated_trade["self_robux"],
         )
         self.counter_history.record_counter(
             trader_id,
@@ -1186,6 +1190,46 @@ class RobloxAPI:
 
         raise last_error or TradeRejected(message=f"Couldn't send trade to {trader_id}")
 
+    def send_generated_trade(self, trader_id, generated_trade, regenerate, counter_id=None):
+        """
+        Sends a trade from generate_trade. If the trader's trade quality filter
+        refuses it ("Trade value ratio is not sufficient"), sends the lowest
+        RAP gain trade that still passes the config instead, as long as it's
+        closer than the refused one (if it isn't, no trade would get through).
+        regenerate(select_by): generates the trade again with that Pick Trade By.
+        Returns the trade that was sent. Raises like send_trade.
+        """
+        def send(trade):
+            self.send_trade(
+                trader_id,
+                trade["self_side"],
+                trade["their_side"],
+                self_robux=trade["self_robux"],
+                counter_trade=counter_id is not None,
+                counter_id=counter_id,
+            )
+            return trade
+
+        try:
+            return send(generated_trade)
+        except RatioTooLow:
+            rap_gain = PICK_KEYS["lowest_rap_gain"]
+            refused = rap_gain(generated_trade)
+            closer = regenerate("lowest_rap_gain")
+            if not closer or rap_gain(closer) >= refused:
+                log(
+                    f"[TRADING] {trader_id}'s trade ratio filter refused the trade "
+                    f"(RAP gain {refused:+,}) and no closer trade passes your config",
+                    dontPrint=True,
+                )
+                raise
+        log(
+            f"[TRADING] {trader_id}'s trade ratio filter refused the trade (RAP gain "
+            f"{refused:+,}), sending the lowest RAP gain one that passes your config "
+            f"({rap_gain(closer):+,})"
+        )
+        return send(closer)
+
     def _capped_robux(self, self_robux) -> int:
         """Never offer more robux than the account has."""
         if not self_robux:
@@ -1207,6 +1251,8 @@ class RobloxAPI:
             error.has_message("privacy") or error.has_message("cannot trade")
         ):
             cls = UserCannotTrade
+        elif error.has_message("ratio"):
+            cls = RatioTooLow
         else:
             cls = TradeRejected
         return cls(error.response)
